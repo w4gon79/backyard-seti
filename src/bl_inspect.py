@@ -33,7 +33,13 @@ def inspect_file(filepath, show_waterfall=False, save_plot=False, header_only=Fa
     print(f"  N channels: {wf.header.get('nchans', 'N/A')}")
     print(f"  N ints:     {wf.n_ints_in_file}")
     print(f"  Data shape: {wf.data.shape}")
-    print(f"  Freq range: {wf.container.f_min:.4f} - {wf.container.f_max:.4f} MHz")
+    # Compute freq range from header (more compatible across blimpy versions)
+    f_ch1 = wf.header.get('fch1', 0)
+    f_off = wf.header.get('foff', 0)
+    n_chans = wf.header.get('nchans', 0)
+    f_high = f_ch1
+    f_low = f_ch1 + f_off * n_chans  # foff is negative for descending freq
+    print(f"  Freq range: {min(f_high, f_low):.4f} - {max(f_high, f_low):.4f} MHz")
 
     if header_only:
         return
