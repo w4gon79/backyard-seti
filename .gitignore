@@ -1,0 +1,47 @@
+# Data files (large, downloadable from BL portal)
+data/
+*.fil
+*.h5
+*.hdf5
+*.raw
+*.fits
+
+# Results (generated, not source)
+results/*.png
+results/*.pdf
+results/*.csv
+results/*.dat
+
+# Cloned upstream repos (referenced, not ours)
+blimpy/
+turbo_seti/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Logs
+*.log
