@@ -205,16 +205,22 @@ function formatDec(decDeg) {
 }
 
 // ─── Target Search (BL API) ───────────────────────────────────────────
+var blResults = [];
+var blPage = 0;
+var blPageSize = 50;
+var blFilterRes = 'all';
+var blFilterType = 'all';
+
 async function searchBL() {
-    const target = document.getElementById('target-input').value.trim();
+    var target = document.getElementById('target-input').value.trim();
     if (!target) return;
 
-    const resultsDiv = document.getElementById('bl-search-results');
+    var resultsDiv = document.getElementById('bl-search-results');
     resultsDiv.innerHTML = '<p style="color:#8ab4f8;">Searching BL API...</p>';
 
     try {
-        const resp = await fetch('/api/blsearch?target=' + encodeURIComponent(target));
-        const data = await resp.json();
+        var resp = await fetch('/api/blsearch?target=' + encodeURIComponent(target));
+        var data = await resp.json();
 
         if (data.error) {
             resultsDiv.innerHTML = '<p style="color:#ef5350;">Error: ' + data.error + '</p>';
@@ -222,54 +228,117 @@ async function searchBL() {
         }
 
         if (data.data && data.data.length > 0) {
-            const first = data.data[0];
-            // BL API uses 'ra' (degrees) and 'decl' (degrees) - convert RA to hours
+            blResults = data.data;
+            blPage = 0;
+            blFilterRes = 'all';
+            blFilterType = 'all';
+
+            var first = data.data[0];
             var raVal = first.ra || first.ra_hours;
             var decVal = first.decl || first.dec;
             if (raVal && decVal) {
-                // BL API returns RA in degrees; convert to hours for plotTargetOnMap
                 var raHours = typeof raVal === 'number' ? raVal / 15.0 : parseRA(raVal);
                 var decDeg = typeof decVal === 'number' ? decVal : parseDec(decVal);
                 if (raHours !== null && decDeg !== null) {
                     plotTargetOnMap(target.toUpperCase(), raHours, decDeg);
                 }
             }
-
-            var html = '<p style="color:#66bb6a;margin-bottom:8px;">Found ' + data.data.length + ' observations</p>';
-            html += '<table><thead><tr><th>Date</th><th>Target</th><th>RA</th><th>Dec</th><th>Type</th><th>Res</th><th>Size</th><th>DL</th></tr></thead><tbody>';
-            for (var i = 0; i < Math.min(data.data.length, 50); i++) {
-                var obs = data.data[i];
-                var raVal = obs.ra || obs.ra_hours || '?';
-                var decVal = obs.decl || obs.dec || '?';
-                // BL API returns RA in degrees; display as-is
-                var raHoursVal = typeof raVal === 'number' ? raVal / 15.0 : parseRA(raVal);
-                var decDegVal = typeof decVal === 'number' ? decVal : parseDec(decVal);
-                var safeName = (obs.target || obs.source_name || target).replace(/'/g, "");
-                html += '<tr onclick="onBLRowClick(\'' + safeName + '\', ' + (raHoursVal || 0) + ', ' + (decDegVal || 0) + ')">';
-                html += '<td>' + (obs.mjd || obs.tstart || '?') + '</td>';
-                html += '<td>' + (obs.target || obs.source_name || target) + '</td>';
-                html += '<td>' + raVal + '</td>';
-                html += '<td>' + decVal + '</td>';
-                html += '<td>' + (obs.file_type || '') + '</td>';
-                html += '<td>' + (obs.resolution || '?') + '</td>';
-                var obsSize = obs.size || obs.file_size;
-                html += '<td>' + (obsSize ? (obsSize / 1e9).toFixed(1) + ' GB' : '?') + '</td>';
-                var dlUrl = obs.url || '';
-                if (dlUrl) {
-                    html += '<td><a href="' + dlUrl + '" target="_blank" class="dl-link" onclick="event.stopPropagation()" title="Download">⬇</a></td>';
-                } else {
-                    html += '<td>—</td>';
-                }
-                html += '</tr>';
-            }
-            html += '</tbody></table>';
-            resultsDiv.innerHTML = html;
+            renderBLResults();
         } else {
             resultsDiv.innerHTML = '<p style="color:#546e7a;">No observations found.</p>';
         }
     } catch(e) {
         resultsDiv.innerHTML = '<p style="color:#ef5350;">Error: ' + e.message + '</p>';
     }
+}
+
+function getFilteredBL() {
+    return blResults.filter(function(obs) {
+        var res = (obs.resolution || '').toLowerCase();
+        var fileType = obs.file_type || '';
+        var targetName = obs.target || obs.source_name || '';
+        var isOn = fileType.indexOf('S') !== -1 || targetName.indexOf('_S_') !== -1;
+        var isOff = fileType.indexOf('R') !== -1 || targetName.indexOf('_R_') !== -1;
+        if (blFilterRes !== 'all' && res.indexOf(blFilterRes) === -1) return false;
+        if (blFilterType === 'on' && !isOn) return false;
+        if (blFilterType === 'off' && !isOff) return false;
+        return true;
+    });
+}
+
+function renderBLResults() {
+    var resultsDiv = document.getElementById('bl-search-results');
+    var filtered = getFilteredBL();
+    var totalPages = Math.max(1, Math.ceil(filtered.length / blPageSize));
+    if (blPage >= totalPages) blPage = totalPages - 1;
+    if (blPage < 0) blPage = 0;
+    var startIdx = blPage * blPageSize;
+    var endIdx = Math.min(startIdx + blPageSize, filtered.length);
+    var pageData = filtered.slice(startIdx, endIdx);
+
+    var html = '';
+    html += '<div class="bl-summary">';
+    html += '<span style="color:#66bb6a;font-weight:600;">' + blResults.length + ' observations found</span>';
+    if (filtered.length !== blResults.length) {
+        html += '<span style="color:#8ab4f8;"> (' + filtered.length + ' after filter)</span>';
+    }
+    html += '</div>';
+
+    html += '<div class="bl-filters">';
+    html += '<label>Res:</label><select onchange="blFilterRes=this.value;blPage=0;renderBLResults()">';
+    ['all','fine','mid','time'].forEach(function(r) {
+        html += '<option value="' + r + '"' + (blFilterRes === r ? ' selected' : '') + '>' + (r === 'all' ? 'All' : r.charAt(0).toUpperCase() + r.slice(1)) + '</option>';
+    });
+    html += '</select>';
+    html += '<label>Type:</label><select onchange="blFilterType=this.value;blPage=0;renderBLResults()">';
+    [['all','All'],['on','ON only'],['off','OFF only']].forEach(function(t) {
+        html += '<option value="' + t[0] + '"' + (blFilterType === t[0] ? ' selected' : '') + '>' + t[1] + '</option>';
+    });
+    html += '</select>';
+    html += '</div>';
+
+    html += '<table class="bl-table"><thead><tr>';
+    html += '<th>MJD</th><th>Target</th><th>RA</th><th>Dec</th><th>Type</th><th>Res</th><th>Size</th><th>DL</th>';
+    html += '</tr></thead><tbody>';
+
+    for (var i = 0; i < pageData.length; i++) {
+        var obs = pageData[i];
+        var rv = obs.ra || obs.ra_hours || '?';
+        var dv = obs.decl || obs.dec || '?';
+        var rH = typeof rv === 'number' ? rv / 15.0 : (parseRA(rv) || 0);
+        var dD = typeof dv === 'number' ? dv : (parseDec(dv) || 0);
+        var sn = (obs.target || obs.source_name || 'target').replace(/'/g, '');
+        var sz = obs.size || obs.file_size;
+
+        html += '<tr onclick="onBLRowClick(\'' + sn + '\',' + rH + ',' + dD + ')">';
+        html += '<td>' + (obs.mjd || obs.tstart || '?') + '</td>';
+        html += '<td>' + (obs.target || obs.source_name || '?') + '</td>';
+        html += '<td>' + (typeof rv === 'number' ? rv.toFixed(3) : rv) + '</td>';
+        html += '<td>' + (typeof dv === 'number' ? dv.toFixed(3) : dv) + '</td>';
+        html += '<td>' + (obs.file_type || '') + '</td>';
+        html += '<td>' + (obs.resolution || '?') + '</td>';
+        html += '<td>' + (sz ? (sz / 1e9).toFixed(1) + ' GB' : '?') + '</td>';
+        var u = obs.url || '';
+        if (u) {
+            html += '<td><a href="' + u + '" target="_blank" class="dl-link" onclick="event.stopPropagation()" title="Download">\u2b07</a></td>';
+        } else {
+            html += '<td>\u2014</td>';
+        }
+        html += '</tr>';
+    }
+    html += '</tbody></table>';
+
+    if (totalPages > 1) {
+        html += '<div class="bl-pagination">';
+        html += '<button onclick="blPage=0;renderBLResults()"' + (blPage === 0 ? ' disabled' : '') + '>\u00ab First</button>';
+        html += '<button onclick="blPage=Math.max(0,blPage-1);renderBLResults()"' + (blPage === 0 ? ' disabled' : '') + '>\u2039 Prev</button>';
+        html += '<span class="bl-page-info">Page ' + (blPage + 1) + ' of ' + totalPages + ' (' + (startIdx + 1) + '-' + endIdx + ' of ' + filtered.length + ')</span>';
+        html += '<button onclick="blPage=Math.min(' + (totalPages - 1) + ',blPage+1);renderBLResults()"' + (blPage >= totalPages - 1 ? ' disabled' : '') + '>Next \u203a</button>';
+        html += '<button onclick="blPage=' + (totalPages - 1) + ';renderBLResults()"' + (blPage >= totalPages - 1 ? ' disabled' : '') + '>Last \u00bb</button>';
+        html += '</div>';
+    }
+
+    resultsDiv.innerHTML = html;
 }
 
 function onBLRowClick(name, ra, dec) {

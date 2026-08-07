@@ -285,6 +285,24 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 .on-badge.on { background: #1b5e20; color: #a5d6a7; }
 .on-badge.off { background: #b71c1c; color: #ef9a9a; }
 
+/* BL API Results */
+.bl-summary { margin-bottom: 6px; font-size: 0.9em; }
+.bl-filters { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; font-size: 0.8em; }
+.bl-filters label { color: #8ab4f8; }
+.bl-filters select { padding: 2px 6px; background: #0a0a1a; border: 1px solid #1e3a5f; border-radius: 3px; color: #c8c8e0; font-size: 0.9em; }
+.bl-table { width: 100%; border-collapse: collapse; font-size: 0.8em; }
+.bl-table th { position: sticky; top: 0; background: #162447; padding: 4px 6px; text-align: left; color: #64b5f6; border-bottom: 1px solid #1e3a5f; }
+.bl-table td { padding: 3px 6px; border-bottom: 1px solid #1a2332; }
+.bl-table tr { cursor: pointer; }
+.bl-table tr:hover { background: #162447; }
+.dl-link { color: #4fc3f7; text-decoration: none; font-size: 1.1em; }
+.dl-link:hover { color: #81d4fa; }
+.bl-pagination { display: flex; gap: 6px; align-items: center; justify-content: center; margin-top: 8px; font-size: 0.8em; }
+.bl-pagination button { padding: 3px 10px; background: #37474f; color: #b0bec5; border: none; border-radius: 3px; cursor: pointer; font-size: 0.9em; }
+.bl-pagination button:disabled { opacity: 0.3; cursor: not-allowed; }
+.bl-pagination button:hover:not(:disabled) { background: #455a64; }
+.bl-page-info { color: #8ab4f8; padding: 0 8px; }
+
 /* Rejection Panel */
 .rejection-panel {
     background: #0d1b2a;
