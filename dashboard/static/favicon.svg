@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <circle cx="50" cy="50" r="48" fill="#0a0a1a" stroke="#4fc3f7" stroke-width="2"/>
+  <!-- Satellite dish -->
+  <path d="M 50 20 L 25 55 L 50 50 L 50 20 Z" fill="none" stroke="#4fc3f7" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M 50 20 L 75 55 L 50 50 L 50 20 Z" fill="#1e3a5f" stroke="#4fc3f7" stroke-width="3" stroke-linejoin="round"/>
+  <!-- Signal waves -->
+  <path d="M 30 28 Q 20 18 15 12" fill="none" stroke="#66bb6a" stroke-width="2" stroke-linecap="round" opacity="0.7"/>
+  <path d="M 38 22 Q 28 10 18 4" fill="none" stroke="#66bb6a" stroke-width="2" stroke-linecap="round" opacity="0.5"/>
+  <!-- Base -->
+  <line x1="50" y1="50" x2="50" y2="72" stroke="#4fc3f7" stroke-width="3" stroke-linecap="round"/>
+  <line x1="40" y1="78" x2="60" y2="78" stroke="#4fc3f7" stroke-width="3" stroke-linecap="round"/>
+  <line x1="50" y1="72" x2="50" y2="78" stroke="#4fc3f7" stroke-width="3"/>
+  <!-- Tip -->
+  <circle cx="50" cy="20" r="3" fill="#66bb6a"/>
+</svg>

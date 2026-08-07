@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>📡 Backyard SETI Dashboard</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=8">
+    <link rel="stylesheet" href="/static/css/style.css?v=9">
+    <link rel="stylesheet" href="/static/css/celestial.css?v=1">
+    <!-- Plotly for charts -->
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+    <!-- d3-celestial (self-hosted) -->
+    <script src="/static/js/d3-v3.min.js?v=8"></script>
+    <script src="/static/js/d3.geo.projection.min.js?v=8"></script>
+    <script src="/static/js/celestial.min.js?v=8"></script>
+</head>
+<body>
+<div id="app">
+    <!-- Header -->
+    <header class="dashboard-header">
+        <h1>📡 Backyard SETI</h1>
+        <div class="header-stats">
+            <span id="stat-total" class="stat-badge">Total Hits: --</span>
+            <span id="stat-on" class="stat-badge on">ON: --</span>
+            <span id="stat-off" class="stat-badge off">OFF: --</span>
+            <span id="stat-top" class="stat-badge">Top SNR: --</span>
+        </div>
+    </header>
+
+    <!-- Top Row: Sky Map + Target Search -->
+    <div class="row">
+        <div class="panel panel-half">
+            <div class="panel-header">🌌 Sky Map</div>
+            <div id="sky-map-container">
+                <div id="celestial-map"></div>
+                <div id="sky-map-info">
+                    <p style="color:#546e7a;">Loading sky map...</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="panel panel-half">
+            <div class="panel-header">🎯 Target Search</div>
+            <div class="target-search-content">
+                <div class="search-box">
+                    <input type="text" id="target-input" placeholder="Enter target name (e.g. PROXCEN, KIC8462852)...">
+                    <button id="btn-search-bl">Search BL API</button>
+                    <button id="btn-search-local" class="btn-secondary">Show Local</button>
+                </div>
+                <div id="bl-search-results" class="search-results"></div>
+                <div id="local-data-list" class="data-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Middle Row: Scan Controls + Progress -->
+    <div class="row">
+        <div class="panel panel-half">
+            <div class="panel-header">⚙️ Scan Controls</div>
+            <div class="controls-content">
+                <div class="control-grid">
+                    <label>Sub-band Width (channels)</label>
+                    <select id="ctrl-subband-width">
+                        <option value="8192">8,192 (23 kHz) - Highest Resolution</option>
+                        <option value="32768">32,768 (92 kHz)</option>
+                        <option value="65536">65,536 (183 kHz)</option>
+                        <option value="131072">131,072 (366 kHz)</option>
+                        <option value="262144" selected>262,144 (732 kHz) - Fastest</option>
+                    </select>
+
+                    <label>Overlap (channels)</label>
+                    <input type="number" id="ctrl-overlap" value="512" min="64" max="4096" step="64">
+
+                    <label>Max Drift Rate (Hz/s)</label>
+                    <input type="number" id="ctrl-max-drift" value="5.0" min="0.1" max="100" step="0.1">
+
+                    <label>SNR Threshold</label>
+                    <input type="number" id="ctrl-snr" value="5.0" min="1" max="50" step="0.5">
+
+                    <label>Frequency Window (MHz)</label>
+                    <div class="freq-range">
+                        <input type="number" id="ctrl-f-start" placeholder="Start (e.g. 2744)" step="0.1">
+                        <span>to</span>
+                        <input type="number" id="ctrl-f-stop" placeholder="Stop (e.g. 3324)" step="0.1">
+                        <button id="btn-full-band" class="btn-small">Full Band</button>
+                    </div>
+                </div>
+                <div class="scan-buttons">
+                    <button id="btn-start-scan" class="btn-primary">▶ Start Scan</button>
+                    <button id="btn-stop-scan" class="btn-danger" disabled>⏹ Stop</button>
+                    <button id="btn-refresh" class="btn-secondary">↻ Refresh Results</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="panel panel-half">
+            <div class="panel-header">📊 Progress</div>
+            <div class="progress-content">
+                <div id="scan-status">
+                    <p class="status-idle">No scan running.</p>
+                </div>
+                <div id="progress-bar-container" style="display:none;">
+                    <div class="progress-bar">
+                        <div id="progress-fill" class="progress-fill"></div>
+                    </div>
+                    <span id="progress-text"></span>
+                </div>
+                <div id="scan-log" class="scan-log"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bottom Row: ON/OFF Rejection + Results -->
+    <div class="row">
+        <div class="panel panel-full">
+            <div class="panel-header">
+                📋 Results
+                <div class="results-controls">
+                    <select id="results-filter">
+                        <option value="all">All Hits</option>
+                        <option value="on">ON Only</option>
+                        <option value="off">OFF Only</option>
+                        <option value="candidates">Candidates (ON-only after rejection)</option>
+                    </select>
+                    <input type="text" id="results-search" placeholder="Filter by frequency...">
+                </div>
+            </div>
+            <div class="results-content">
+                <!-- Rejection Controls -->
+                <div class="rejection-panel">
+                    <div class="rejection-controls">
+                        <label>Freq Tolerance (MHz)</label>
+                        <input type="number" id="reject-freq-tol" value="0.003" min="0.0001" max="0.1" step="0.0001">
+                        <label>Drift Tolerance (Hz/s)</label>
+                        <input type="number" id="reject-drift-tol" value="100" min="0.01" max="1000" step="1">
+                        <span class="tol-hint">(100 = effectively frequency-only match)</span>
+                        <button id="btn-run-rejection" class="btn-primary">Run ON/OFF Rejection</button>
+                    </div>
+                    <div id="rejection-summary" class="rejection-summary">
+                        <p style="color:#546e7a;">No rejection run yet. Click "Run ON/OFF Rejection" to filter RFI.</p>
+                    </div>
+                </div>
+                <div id="hit-chart"></div>
+                <div id="hit-table-container">
+                    <table id="hit-table">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>SNR</th>
+                                <th>Frequency (MHz)</th>
+                                <th>Drift (Hz/s)</th>
+                                <th>Channel</th>
+                                <th>ON/OFF</th>
+                                <th>Status</th>
+                                <th>File</th>
+                            </tr>
+                        </thead>
+                        <tbody id="hit-table-body">
+                            <tr><td colspan="8" class="empty">No results yet. Run a scan or refresh.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="/static/js/dashboard.js?v=22"></script>
+</body>
+</html>

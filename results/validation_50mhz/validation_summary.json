@@ -1,0 +1,324 @@
+{
+  "window_mhz": [
+    2800.0,
+    2850.0
+  ],
+  "sub_band_chans": 262144,
+  "overlap_chans": 512,
+  "files": {
+    "Parkes_57791_72989_PROXCEN_S_fine.h5": {
+      "hits": 5949,
+      "on_off": "ON",
+      "time_s": 1092.838169336319,
+      "top_hits": [
+        {
+          "drift_rate": 0.004938,
+          "snr": 68321.554688,
+          "freq": 2812.804688,
+          "channel": 65,
+          "sub_band": 17,
+          "on_off": "ON",
+          "file": "Parkes_57791_72989_PROXCEN_S_fine"
+        },
+        {
+          "drift_rate": -0.004938,
+          "snr": 67724.828125,
+          "freq": 2806.945312,
+          "channel": 65,
+          "sub_band": 9,
+          "on_off": "ON",
+          "file": "Parkes_57791_72989_PROXCEN_S_fine"
+        },
+        {
+          "drift_rate": 0.004938,
+          "snr": 67484.015625,
+          "freq": 2821.59375,
+          "channel": 2113,
+          "sub_band": 29,
+          "on_off": "ON",
+          "file": "Parkes_57791_72989_PROXCEN_S_fine"
+        },
+        {
+          "drift_rate": -0.004938,
+          "snr": 66676.867188,
+          "freq": 2818.664062,
+          "channel": 65,
+          "sub_band": 25,
+          "on_off": "ON",
+          "file": "Parkes_57791_72989_PROXCEN_S_fine"
+        },
+        {
+          "drift_rate": -0.004938,
+          "snr": 66038.289062,
+          "freq": 2815.734375,
+          "channel": 2113,
+          "sub_band": 21,
+          "on_off": "ON",
+          "file": "Parkes_57791_72989_PROXCEN_S_fine"
+        }
+      ]
+    },
+    "Parkes_57791_73331_PROXCEN_R_fine.h5": {
+      "hits": 5945,
+      "on_off": "OFF",
+      "time_s": 1107.8618896007538,
+      "top_hits": [
+        {
+          "drift_rate": 0.004938,
+          "snr": 68211.398438,
+          "freq": 2806.945312,
+          "channel": 65,
+          "sub_band": 9,
+          "on_off": "OFF",
+          "file": "Parkes_57791_73331_PROXCEN_R_fine"
+        },
+        {
+          "drift_rate": 0.004938,
+          "snr": 67942.382812,
+          "freq": 2821.59375,
+          "channel": 2113,
+          "sub_band": 29,
+          "on_off": "OFF",
+          "file": "Parkes_57791_73331_PROXCEN_R_fine"
+        },
+        {
+          "drift_rate": -0.004938,
+          "snr": 67782.671875,
+          "freq": 2801.085938,
+          "channel": 65,
+          "sub_band": 1,
+          "on_off": "OFF",
+          "file": "Parkes_57791_73331_PROXCEN_R_fine"
+        },
+        {
+          "drift_rate": 0.004938,
+          "snr": 67626.234375,
+          "freq": 2815.734375,
+          "channel": 2113,
+          "sub_band": 21,
+          "on_off": "OFF",
+          "file": "Parkes_57791_73331_PROXCEN_R_fine"
+        },
+        {
+          "drift_rate": -0.004938,
+          "snr": 67323.070312,
+          "freq": 2818.664062,
+          "channel": 65,
+          "sub_band": 25,
+          "on_off": "OFF",
+          "file": "Parkes_57791_73331_PROXCEN_R_fine"
+        }
+      ]
+    },
+    "Parkes_57791_73670_PROXCEN_S_fine.h5": {
+      "hits": 5957,
+      "on_off": "ON",
+      "time_s": 1117.0597622394562,
+      "top_hits": [
+        {
+          "drift_rate": -0.004938,
+          "snr": 68368.546875,
+          "freq": 2812.804688,
+          "channel": 65,
+          "sub_band": 17,
+          "on_off": "ON",
+          "file": "Parkes_57791_73670_PROXCEN_S_fine"
+        },
+        {
+          "drift_rate": -0.004938,
+          "snr": 67243.265625,
+          "freq": 2818.664062,
+          "channel": 65,
+          "sub_band": 25,
+          "on_off": "ON",
+          "file": "Parkes_57791_73670_PROXCEN_S_fine"
+        },
+        {
+          "drift_rate": -0.004938,
+          "snr": 66974.140625,
+          "freq": 2821.59375,
+          "channel": 2113,
+          "sub_band": 29,
+          "on_off": "ON",
+          "file": "Parkes_57791_73670_PROXCEN_S_fine"
+        },
+        {
+          "drift_rate": -0.004938,
+          "snr": 66959.34375,
+          "freq": 2815.734375,
+          "channel": 2113,
+          "sub_band": 21,
+          "on_off": "ON",
+          "file": "Parkes_57791_73670_PROXCEN_S_fine"
+        },
+        {
+          "drift_rate": -0.004938,
+          "snr": 66934.289062,
+          "freq": 2801.085938,
+          "channel": 65,
+          "sub_band": 1,
+          "on_off": "ON",
+          "file": "Parkes_57791_73670_PROXCEN_S_fine"
+        }
+      ]
+    },
+    "Parkes_57791_74011_PROXCEN_R_fine.h5": {
+      "hits": 5908,
+      "on_off": "OFF",
+      "time_s": 1133.4343075752258,
+      "top_hits": [
+        {
+          "drift_rate": -0.004938,
+          "snr": 68370.289062,
+          "freq": 2804.015625,
+          "channel": 2113,
+          "sub_band": 5,
+          "on_off": "OFF",
+          "file": "Parkes_57791_74011_PROXCEN_R_fine"
+        },
+        {
+          "drift_rate": 0.004938,
+          "snr": 67477.679688,
+          "freq": 2815.734375,
+          "channel": 2113,
+          "sub_band": 21,
+          "on_off": "OFF",
+          "file": "Parkes_57791_74011_PROXCEN_R_fine"
+        },
+        {
+          "drift_rate": 0.004938,
+          "snr": 67352.398438,
+          "freq": 2812.804688,
+          "channel": 65,
+          "sub_band": 17,
+          "on_off": "OFF",
+          "file": "Parkes_57791_74011_PROXCEN_R_fine"
+        },
+        {
+          "drift_rate": 0.004938,
+          "snr": 67078.257812,
+          "freq": 2806.945312,
+          "channel": 65,
+          "sub_band": 9,
+          "on_off": "OFF",
+          "file": "Parkes_57791_74011_PROXCEN_R_fine"
+        },
+        {
+          "drift_rate": 0.004938,
+          "snr": 66538.65625,
+          "freq": 2821.59375,
+          "channel": 2113,
+          "sub_band": 29,
+          "on_off": "OFF",
+          "file": "Parkes_57791_74011_PROXCEN_R_fine"
+        }
+      ]
+    },
+    "Parkes_57791_74349_PROXCEN_S_fine.h5": {
+      "hits": 5956,
+      "on_off": "ON",
+      "time_s": 1300.1227343082428,
+      "top_hits": [
+        {
+          "drift_rate": 0.004938,
+          "snr": 69063.984375,
+          "freq": 2812.804688,
+          "channel": 65,
+          "sub_band": 17,
+          "on_off": "ON",
+          "file": "Parkes_57791_74349_PROXCEN_S_fine"
+        },
+        {
+          "drift_rate": -0.004938,
+          "snr": 69021.554688,
+          "freq": 2818.664062,
+          "channel": 65,
+          "sub_band": 25,
+          "on_off": "ON",
+          "file": "Parkes_57791_74349_PROXCEN_S_fine"
+        },
+        {
+          "drift_rate": 0.004938,
+          "snr": 68135.765625,
+          "freq": 2806.945312,
+          "channel": 65,
+          "sub_band": 9,
+          "on_off": "ON",
+          "file": "Parkes_57791_74349_PROXCEN_S_fine"
+        },
+        {
+          "drift_rate": -0.004938,
+          "snr": 67209.773438,
+          "freq": 2801.085938,
+          "channel": 65,
+          "sub_band": 1,
+          "on_off": "ON",
+          "file": "Parkes_57791_74349_PROXCEN_S_fine"
+        },
+        {
+          "drift_rate": -0.004938,
+          "snr": 66894.507812,
+          "freq": 2821.59375,
+          "channel": 2113,
+          "sub_band": 29,
+          "on_off": "ON",
+          "file": "Parkes_57791_74349_PROXCEN_S_fine"
+        }
+      ]
+    },
+    "Parkes_57791_74689_PROXCEN_R_fine.h5": {
+      "hits": 5939,
+      "on_off": "OFF",
+      "time_s": 1574.7256100177765,
+      "top_hits": [
+        {
+          "drift_rate": 0.004938,
+          "snr": 67909.796875,
+          "freq": 2804.015625,
+          "channel": 2113,
+          "sub_band": 5,
+          "on_off": "OFF",
+          "file": "Parkes_57791_74689_PROXCEN_R_fine"
+        },
+        {
+          "drift_rate": 0.004938,
+          "snr": 67682.304688,
+          "freq": 2818.664062,
+          "channel": 65,
+          "sub_band": 25,
+          "on_off": "OFF",
+          "file": "Parkes_57791_74689_PROXCEN_R_fine"
+        },
+        {
+          "drift_rate": -0.004938,
+          "snr": 67554.570312,
+          "freq": 2821.59375,
+          "channel": 2113,
+          "sub_band": 29,
+          "on_off": "OFF",
+          "file": "Parkes_57791_74689_PROXCEN_R_fine"
+        },
+        {
+          "drift_rate": -0.004938,
+          "snr": 67334.601562,
+          "freq": 2815.734375,
+          "channel": 2113,
+          "sub_band": 21,
+          "on_off": "OFF",
+          "file": "Parkes_57791_74689_PROXCEN_R_fine"
+        },
+        {
+          "drift_rate": -0.004938,
+          "snr": 67267.328125,
+          "freq": 2806.945312,
+          "channel": 65,
+          "sub_band": 9,
+          "on_off": "OFF",
+          "file": "Parkes_57791_74689_PROXCEN_R_fine"
+        }
+      ]
+    }
+  },
+  "total_on_hits": 17862,
+  "total_off_hits": 17792
+}
