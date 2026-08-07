@@ -1,0 +1,9 @@
+# -------------------------- o --------------------------
+# File ID: test_zerodrift_s25.h5 
+# -------------------------- o --------------------------
+# Source:ProxCen_S
+# MJD: 57790.719259259262	RA: 14h29m43s	DEC: -61d19m14s
+# DELTAT:   1.073742	DELTAF(Hz): 2861.022949	max_drift_rate:   5.000000	obs_length: 299.573969
+# --------------------------
+# Top_Hit_# 	Drift_Rate 	SNR 	Uncorrected_Frequency 	Corrected_Frequency 	Index 	freq_start 	freq_end 	SEFD 	SEFD_freq 	Coarse_Channel_Number 	Full_number_of_hits 	
+# --------------------------
