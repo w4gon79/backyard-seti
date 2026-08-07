@@ -242,16 +242,32 @@ def process_file(filepath, out_dir, sub_band_chans=8192, overlap_chans=512,
             if verbose:
                 print(f" ERROR: {e}")
 
-        # Clean up sub-band file to save disk
-        # Use try/except for Windows file locks (h5py may hold handle)
+        # Clean up sub-band file AND turbo_seti intermediate files
+        # to keep results directory tidy
+        import gc
+        gc.collect()
+        # Remove sub-band HDF5
         if os.path.exists(sub_path):
             try:
-                # Force garbage collection to release any h5py handles
-                import gc
-                gc.collect()
                 os.remove(sub_path)
-            except PermissionError:
-                pass  # Leave it, will be cleaned up later
+            except (PermissionError, OSError):
+                pass
+        # Remove turbo_seti .dat and .log files for this sub-band
+        stem = os.path.splitext(os.path.basename(sub_path))[0]
+        for ext in ['.dat', '.log']:
+            ts_file = os.path.join(subdir, 'turbo_seti', stem + ext)
+            if os.path.exists(ts_file):
+                try:
+                    os.remove(ts_file)
+                except (PermissionError, OSError):
+                    pass
+        # Remove empty subbands directory
+        sb_dir = os.path.join(subdir, 'subbands')
+        if os.path.isdir(sb_dir) and not os.listdir(sb_dir):
+            try:
+                os.rmdir(sb_dir)
+            except (PermissionError, OSError):
+                pass
 
     elapsed = time.time() - t0
 

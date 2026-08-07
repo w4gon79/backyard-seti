@@ -1,28 +1,28 @@
-﻿{
-    "scan_id":  "validation_50mhz",
-    "target":  "PROXCEN",
-    "timestamp":  "2026-08-06T20:00:00",
-    "status":  "complete",
-    "parameters":  {
-                       "sub_band_chans":  262144,
-                       "overlap":  512,
-                       "max_drift":  5.0,
-                       "snr":  5.0,
-                       "f_start":  2800.0,
-                       "f_stop":  2850.0,
-                       "files":  [
-                                     "fine/Parkes_57791_72989_PROXCEN_S_fine.h5",
-                                     "fine/Parkes_57791_73331_PROXCEN_R_fine.h5",
-                                     "fine/Parkes_57791_73670_PROXCEN_S_fine.h5",
-                                     "fine/Parkes_57791_74011_PROXCEN_R_fine.h5",
-                                     "fine/Parkes_57791_74349_PROXCEN_S_fine.h5",
-                                     "fine/Parkes_57791_74689_PROXCEN_R_fine.h5"
-                                 ]
-                   },
-    "stats":  {
-                  "total_hits":  35654,
-                  "on_hits":  17862,
-                  "off_hits":  17792,
-                  "duration_s":  0
-              }
+{
+  "scan_id": "validation_50mhz",
+  "target": "PROXCEN",
+  "timestamp": "2026-08-06T20:00:00",
+  "status": "complete",
+  "parameters": {
+    "sub_band_chans": 262144,
+    "overlap": 512,
+    "max_drift": 5.0,
+    "snr": 5.0,
+    "f_start": 2800.0,
+    "f_stop": 2850.0,
+    "files": [
+      "fine/Parkes_57791_72989_PROXCEN_S_fine.h5",
+      "fine/Parkes_57791_73331_PROXCEN_R_fine.h5",
+      "fine/Parkes_57791_73670_PROXCEN_S_fine.h5",
+      "fine/Parkes_57791_74011_PROXCEN_R_fine.h5",
+      "fine/Parkes_57791_74349_PROXCEN_S_fine.h5",
+      "fine/Parkes_57791_74689_PROXCEN_R_fine.h5"
+    ]
+  },
+  "stats": {
+    "total_hits": 35654,
+    "on_hits": 17862,
+    "off_hits": 17792,
+    "duration_s": 0
+  }
 }

@@ -214,7 +214,8 @@ def _load_scan_meta(scan_dir):
     meta_path = os.path.join(scan_dir, 'scan_meta.json')
     if os.path.isfile(meta_path):
         try:
-            with open(meta_path) as f:
+            # Use utf-8-sig to handle BOM that PowerShell may have added
+            with open(meta_path, encoding='utf-8-sig') as f:
                 return json.load(f)
         except:
             pass

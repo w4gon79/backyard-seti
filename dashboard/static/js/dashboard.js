@@ -742,8 +742,9 @@ async function loadScansList() {
         // Auto-select the most recent scan if none selected
         if (!currentScanId && scansList.length > 0) {
             currentScanId = scansList[0].scan_id;
-            document.getElementById('scan-selector').value = currentScanId;
-            onScanSelected();
+            renderScanSelector();
+            loadScanResults(currentScanId);
+            loadScanStats(currentScanId);
         } else if (scansList.length === 0) {
             // No scans at all, load legacy results
             loadResults();
