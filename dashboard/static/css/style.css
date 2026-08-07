@@ -356,6 +356,65 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
     color: #c8c8e0;
 }
 
+/* Format sections in local files */
+.target-header { margin: 10px 0 4px 0; padding: 4px 0; border-bottom: 1px solid #1a2332; }
+.format-section { margin-bottom: 8px; }
+.format-label { font-size: 0.75em; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; padding: 3px 8px; border-radius: 3px; display: inline-block; margin-bottom: 4px; }
+.fine-label { background: #1b5e20; color: #a5d6a7; }
+.mid-label { background: #e65100; color: #ffcc80; }
+.fb-label { background: #4527a0; color: #b39ddb; }
+.h5-label { background: #37474f; color: #b0bec5; }
+.file-type.mid { background: #e65100; color: #ffcc80; }
+.file-type.fb { background: #4527a0; color: #b39ddb; }
+.file-type.h5 { background: #37474f; color: #b0bec5; }
+
+/* Delete button */
+.btn-del {
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    line-height: 18px;
+    text-align: center;
+    background: transparent;
+    color: #546e7a;
+    border: 1px solid #1e3a5f;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 0.7em;
+    padding: 0;
+    margin-left: 4px;
+    vertical-align: middle;
+}
+.btn-del:hover {
+    background: #c62828;
+    color: #ffffff;
+    border-color: #c62828;
+}
+
+/* File name click target */
+.file-name-click {
+    cursor: pointer;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Download Panel */
+#download-panel { margin-bottom: 12px; padding: 0; }
+.download-list { padding: 8px 12px; max-height: 300px; overflow-y: auto; }
+.download-item { margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid #1a2332; }
+.download-item:last-child { border-bottom: none; }
+.dl-item-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+.dl-item-name { font-size: 0.85em; color: #c8c8e0; word-break: break-all; }
+.dl-item-status { font-size: 0.8em; font-weight: 600; text-transform: uppercase; }
+.dl-progress-bar { width: 100%; height: 14px; background: #0a0a1a; border: 1px solid #1e3a5f; border-radius: 7px; overflow: hidden; margin: 4px 0; }
+.dl-progress-fill { height: 100%; background: linear-gradient(90deg, #1565c0, #42a5f5); transition: width 0.5s; }
+.dl-item-stats { font-size: 0.78em; color: #8ab4f8; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.dl-cancel-btn { margin-left: 8px; }
+.dl-btn { padding: 4px 8px; background: #37474f; color: #b0bec5; border: 1px solid #1e3a5f; border-radius: 4px; cursor: pointer; font-size: 0.85em; }
+.dl-btn:hover { background: #455a64; }
+
 /* Scrollbar styling */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: #0a0a1a; }

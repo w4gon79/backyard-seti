@@ -45,7 +45,35 @@ def add_utf8_headers(response):
 DATA_DIR = os.path.join(SETI_ROOT, 'data')
 RESULTS_DIR = os.path.join(SETI_ROOT, 'results')
 FINE_DIR = os.path.join(DATA_DIR, 'fine')
-MID_DIR = os.path.join(DATA_DIR, 'PROXCEN')
+MID_DIR = os.path.join(DATA_DIR, 'mid')
+FILT_DIR = os.path.join(DATA_DIR, 'filterbank')
+H5_DIR = os.path.join(DATA_DIR, 'h5')
+PROXCEN_DIR = os.path.join(DATA_DIR, 'PROXCEN')
+
+
+def extract_target_name(filename):
+    """Extract target name from any BL filename format.
+    
+    Parkes: Parkes_57791_72989_PROXCEN_S_fine.h5  -> PROXCEN (parts[3])
+    GBT: spliced_blc00..._guppi_57544_50437_HIP113357_0030.gpuspec.0002.h5 -> HIP113357
+    """
+    parts = filename.split('_')
+    # Parkes format: Telescope_MJD_Seq_TARGET_S/R_res.h5
+    if len(parts) >= 4 and parts[0] in ('Parkes', 'GBT', 'FAST', 'MeerKAT', 'Effelsberg'):
+        return parts[3]
+    # GBT/blc format: look for a part that looks like a target name (uppercase letters/digits)
+    for p in parts:
+        upper = p.upper()
+        if upper.startswith(('HIP', 'HD', 'HR', 'KIC', 'TIC', 'TOI', 'KEPLER', 'WO', 'GJ', 'GLIESE', 'NGC', 'M', 'PROXIMA', 'PROXCEN', 'TABBY')):
+            # Strip any trailing file extension artifacts
+            clean = p.split('.')[0]
+            return clean
+    # Fallback: parts[3] if it doesn't look like a number
+    if len(parts) > 3:
+        p3 = parts[3]
+        if not p3.replace('.', '').isdigit():
+            return p3
+    return 'unknown'
 
 # Track running scans
 scan_state = {
@@ -53,6 +81,12 @@ scan_state = {
     'pid': None,
     'progress': {},
     'log_lines': [],
+}
+
+# Track downloads
+download_state = {
+    'queue': [],  # List of {url, filename, target_dir, status, progress, speed, eta, size_total, size_done}
+    'active': None,  # Currently downloading item
 }
 
 
@@ -76,9 +110,9 @@ def api_targets():
             if f.endswith('.h5'):
                 parts = f.split('_')
                 if len(parts) >= 4:
-                    target = parts[3]  # e.g. PROXCEN
+                    target = parts[3]
                     if target not in targets:
-                        targets[target] = {'fine': [], 'mid': []}
+                        targets[target] = {'fine': [], 'mid': [], 'filterbank': [], 'h5': []}
                     targets[target]['fine'].append({
                         'name': f,
                         'size_gb': round(os.path.getsize(os.path.join(FINE_DIR, f)) / 1e9, 2),
@@ -93,11 +127,55 @@ def api_targets():
                 if len(parts) >= 4:
                     target = parts[3]
                     if target not in targets:
-                        targets[target] = {'fine': [], 'mid': []}
+                        targets[target] = {'fine': [], 'mid': [], 'filterbank': [], 'h5': []}
                     if target in targets:
                         targets[target]['mid'].append({
                             'name': f,
                             'size_gb': round(os.path.getsize(os.path.join(MID_DIR, f)) / 1e6, 1),
+                            'path': f'mid/{f}',
+                        })
+    
+    # Scan filterbank
+    if os.path.isdir(FILT_DIR):
+        for f in os.listdir(FILT_DIR):
+            if f.endswith('.fil'):
+                parts = f.split('_')
+                target = parts[3] if len(parts) >= 4 else 'unknown'
+                if target not in targets:
+                    targets[target] = {'fine': [], 'mid': [], 'filterbank': [], 'h5': []}
+                targets[target]['filterbank'].append({
+                    'name': f,
+                    'size_gb': round(os.path.getsize(os.path.join(FILT_DIR, f)) / 1e9, 2),
+                    'path': f'filterbank/{f}',
+                })
+    
+    # Scan generic h5 files (no resolution marker)
+    if os.path.isdir(H5_DIR):
+        for f in os.listdir(H5_DIR):
+            if f.endswith('.h5'):
+                target = extract_target_name(f)
+                if target:
+                    if target not in targets:
+                        targets[target] = {'fine': [], 'mid': [], 'filterbank': [], 'h5': []}
+                    targets[target]['h5'].append({
+                        'name': f,
+                        'size_gb': round(os.path.getsize(os.path.join(H5_DIR, f)) / 1e9, 2),
+                        'path': f'h5/{f}',
+                    })
+    
+    # Also scan old PROXCEN dir for backwards compat
+    if os.path.isdir(PROXCEN_DIR):
+        for f in os.listdir(PROXCEN_DIR):
+            if f.endswith('.h5'):
+                parts = f.split('_')
+                if len(parts) >= 4:
+                    target = parts[3]
+                    if target not in targets:
+                        targets[target] = {'fine': [], 'mid': [], 'filterbank': [], 'h5': []}
+                    if target in targets and len(targets[target]['mid']) == 0:
+                        targets[target]['mid'].append({
+                            'name': f,
+                            'size_gb': round(os.path.getsize(os.path.join(PROXCEN_DIR, f)) / 1e6, 1),
                             'path': f'PROXCEN/{f}',
                         })
     
@@ -331,6 +409,235 @@ def api_scan_stop():
         except Exception as e:
             return jsonify({'error': str(e)}), 500
     return jsonify({'status': 'not running'})
+
+
+# ─── API: Delete File ─────────────────────────────────────────────────
+
+@app.route('/api/delete', methods=['POST'])
+def api_delete():
+    """Delete a local data file."""
+    params = request.json or {}
+    filepath = params.get('path', '')
+    if not filepath:
+        return jsonify({'error': 'No path specified'}), 400
+    
+    # Resolve path safely
+    candidates = [
+        os.path.join(SETI_ROOT, filepath),
+        os.path.join(SETI_ROOT, 'data', filepath),
+        os.path.join(DATA_DIR, filepath),
+    ]
+    full_path = None
+    for c in candidates:
+        # Make sure resolved path is under DATA_DIR for safety
+        real_c = os.path.realpath(c)
+        real_data = os.path.realpath(DATA_DIR)
+        if os.path.isfile(real_c) and real_c.startswith(real_data):
+            full_path = real_c
+            break
+    
+    if not full_path:
+        return jsonify({'error': 'File not found or outside data directory'}), 404
+    
+    try:
+        import shutil
+        # Move to trash instead of permanent delete
+        trash_dir = os.path.join(DATA_DIR, '.trash')
+        os.makedirs(trash_dir, exist_ok=True)
+        filename = os.path.basename(full_path)
+        trash_path = os.path.join(trash_dir, filename)
+        # Handle name collisions in trash
+        if os.path.exists(trash_path):
+            import time as _t
+            trash_path = os.path.join(trash_dir, filename + '.' + str(int(_t.time())))
+        shutil.move(full_path, trash_path)
+        return jsonify({'status': 'deleted', 'filename': filename})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# ─── API: File Download ───────────────────────────────────────────────
+
+@app.route('/api/download', methods=['POST'])
+def api_download():
+    """Download a file from BL servers to local data directory.
+    
+    Streams the download in a background thread with progress tracking.
+    Downloads to data/fine/ for fine-res files, data/ for others.
+    """
+    params = request.json or {}
+    url = params.get('url', '')
+    filename = params.get('filename', '')
+    
+    if not url or not filename:
+        return jsonify({'error': 'Missing url or filename'}), 400
+    
+    # Determine target directory based on resolution and format in filename
+    if '_fine.' in filename:
+        target_dir = FINE_DIR
+    elif '_mid.' in filename:
+        target_dir = MID_DIR
+    elif filename.endswith('.fil'):
+        target_dir = FILT_DIR
+    elif filename.endswith('.h5'):
+        # HDF5 without resolution marker: route to fine if large, mid if small
+        # BL fine-res files are ~15GB, mid-res are ~233MB
+        # We can't know size yet, so put in a general h5 dir
+        target_dir = os.path.join(DATA_DIR, 'h5')
+    else:
+        target_dir = DATA_DIR
+    
+    os.makedirs(target_dir, exist_ok=True)
+    target_path = os.path.join(target_dir, filename)
+    
+    # Check if already downloading
+    for item in download_state['queue']:
+        if item['filename'] == filename and item['status'] == 'downloading':
+            return jsonify({'error': 'Already downloading'}), 409
+    
+    # Check if file already exists
+    if os.path.isfile(target_path):
+        size = os.path.getsize(target_path)
+        return jsonify({'status': 'exists', 'filename': filename, 'size_bytes': size,
+                       'path': os.path.relpath(target_path, SETI_ROOT)})
+    
+    # Create download tracker
+    item = {
+        'url': url,
+        'filename': filename,
+        'target_path': target_path,
+        'target_dir': target_dir,
+        'status': 'queued',
+        'progress': 0.0,
+        'speed_mbs': 0.0,
+        'eta_s': 0,
+        'size_total': 0,
+        'size_done': 0,
+        'error': None,
+    }
+    download_state['queue'].append(item)
+    
+    # Start download in background thread
+    def do_download(dl_item):
+        import urllib.request
+        import time as _time
+        
+        # Wait if another download is active (serialize downloads)
+        while download_state['active'] is not None and download_state['active'] is not dl_item:
+            _time.sleep(1)
+            if dl_item not in download_state['queue']:
+                return  # Cancelled
+        
+        download_state['active'] = dl_item
+        dl_item['status'] = 'downloading'
+        
+        try:
+            req = urllib.request.Request(dl_item['url'], 
+                                         headers={'User-Agent': 'BackyardSETI/1.0'})
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                dl_item['size_total'] = int(resp.headers.get('Content-Length', 0))
+                
+                with open(dl_item['target_path'], 'wb') as f:
+                    done = 0
+                    chunk_size = 1024 * 1024  # 1 MB chunks
+                    last_time = _time.time()
+                    last_done = 0
+                    
+                    while True:
+                        chunk = resp.read(chunk_size)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        done += len(chunk)
+                        dl_item['size_done'] = done
+                        
+                        if dl_item['size_total'] > 0:
+                            dl_item['progress'] = round(done / dl_item['size_total'] * 100, 2)
+                        
+                        # Calculate speed every 2 seconds
+                        now = _time.time()
+                        if now - last_time >= 2:
+                            elapsed = now - last_time
+                            bytes_diff = done - last_done
+                            dl_item['speed_mbs'] = round(bytes_diff / elapsed / 1e6, 2)
+                            if dl_item['speed_mbs'] > 0:
+                                remaining = dl_item['size_total'] - done
+                                dl_item['eta_s'] = int(remaining / (bytes_diff / elapsed))
+                            last_time = now
+                            last_done = done
+            
+            dl_item['status'] = 'complete'
+            dl_item['progress'] = 100.0
+            
+        except Exception as e:
+            dl_item['status'] = 'error'
+            dl_item['error'] = str(e)
+            # Clean up partial file
+            if os.path.isfile(dl_item['target_path']):
+                try:
+                    os.remove(dl_item['target_path'])
+                except:
+                    pass
+        finally:
+            if download_state['active'] is dl_item:
+                download_state['active'] = None
+    
+    thread = threading.Thread(target=do_download, args=(item,), daemon=True)
+    thread.start()
+    
+    return jsonify({'status': 'queued', 'filename': filename})
+
+
+@app.route('/api/download/status')
+def api_download_status():
+    """Get status of all downloads."""
+    # Clean up old completed downloads (keep last 10)
+    completed = [i for i, q in enumerate(download_state['queue']) 
+                 if q['status'] in ('complete', 'error')]
+    if len(completed) > 10:
+        for idx in reversed(completed[10:]):
+            download_state['queue'].pop(idx)
+    
+    return jsonify({
+        'active': download_state['active'] is not None,
+        'queue': [{
+            'filename': q['filename'],
+            'status': q['status'],
+            'progress': q['progress'],
+            'speed_mbs': q['speed_mbs'],
+            'eta_s': q['eta_s'],
+            'size_total': q['size_total'],
+            'size_done': q['size_done'],
+            'error': q['error'],
+        } for q in download_state['queue']],
+    })
+
+
+@app.route('/api/download/cancel', methods=['POST'])
+def api_download_cancel():
+    """Cancel a queued or active download."""
+    params = request.json or {}
+    filename = params.get('filename', '')
+    
+    for item in download_state['queue']:
+        if item['filename'] == filename:
+            if item['status'] == 'downloading':
+                item['status'] = 'cancelled'
+                item['error'] = 'Cancelled by user'
+                # The download thread will check and stop
+                # Clean up partial file
+                if os.path.isfile(item['target_path']):
+                    try:
+                        os.remove(item['target_path'])
+                    except:
+                        pass
+                if download_state['active'] is item:
+                    download_state['active'] = None
+            elif item['status'] == 'queued':
+                item['status'] = 'cancelled'
+            return jsonify({'status': 'cancelled'})
+    
+    return jsonify({'error': 'Download not found'}), 404
 
 
 # ─── API: Statistics ──────────────────────────────────────────────────

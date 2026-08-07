@@ -5,10 +5,18 @@ let allHits = [];
 let rejectionCandidates = [];
 let statsInterval = null;
 let logInterval = null;
-let celestialTarget = null;
-let selectedFiles = new Set(); // Set of file paths currently selected
-let localDataCache = {};       // Cached file metadata from /api/targets
-let fileHeaderCache = {};      // Cached header info keyed by file path
+let celestialTargets = {};  // Map of target name -> {ra, dec} driven by file selection
+let selectedFiles = new Set();
+let localDataCache = {};
+let fileHeaderCache = {};
+
+// BL API search state
+var blResults = [];
+var blPage = 0;
+var blPageSize = 50;
+var blFilterRes = 'all';
+var blFilterType = 'all';
+var blFilterFileType = 'all';
 
 // ─── Init ─────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
@@ -36,11 +44,10 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('btn-run-rejection').onclick = runRejection;
 
     logInterval = setInterval(pollScanStatus, 3000);
+    setInterval(pollDownloadStatus, 2000);
 });
 
 // ─── Sky Map (d3-celestial) ───────────────────────────────────────────
-// Config and marker code adapted from the library author's working demos:
-// https://github.com/ofrohn/d3-celestial/tree/master/demo
 
 function initSkyMap() {
     var config = {
@@ -52,41 +59,27 @@ function initSkyMap() {
         transform: "equatorial",
         datapath: "/static/data/",
         stars: {
-            show: true,
-            limit: 6,
-            colors: true,
+            show: true, limit: 6, colors: true,
             style: { fill: "#ffffff", opacity: 1 },
-            names: false,
-            proper: false,
-            desig: false,
+            names: false, proper: false, desig: false,
             namelimit: 2.5,
             namestyle: { fill: "#ddddbb", font: "11px Georgia, Times, 'Times Roman', serif", align: "left", baseline: "top" },
-            size: 4,
-            data: "stars.6.json"
+            size: 4, data: "stars.6.json"
         },
         dsos: {
-            show: false,
-            limit: 6,
-            names: true,
-            desig: true,
-            namelimit: 4,
+            show: false, limit: 6, names: true, desig: true, namelimit: 4,
             namestyle: { fill: "#cccccc", font: "11px Helvetica, Arial, serif", align: "left", baseline: "top" },
             data: "dsos.bright.json"
         },
         constellations: {
-            show: true,
-            names: true,
-            desig: true,
+            show: true, names: true, desig: true,
             namestyle: { fill: "#9999cc", font: "12px Helvetica, Arial, sans-serif", align: "center", baseline: "middle" },
             lines: true,
             linestyle: { stroke: "#3a3a5a", width: 1, opacity: 0.6 },
             bounds: false,
             boundstyle: { stroke: "#cccc00", width: 0.5, opacity: 0.8, dash: [2, 4] }
         },
-        mw: {
-            show: true,
-            style: { fill: "#ffffff", opacity: 0.15 }
-        },
+        mw: { show: true, style: { fill: "#ffffff", opacity: 0.15 } },
         lines: {
             graticule: { show: true, stroke: "#444466", width: 0.8, opacity: 0.6 },
             equatorial: { show: true, stroke: "#6688aa", width: 1.3, opacity: 0.8 },
@@ -101,66 +94,64 @@ function initSkyMap() {
         zoom: false,
     };
 
-    // Register custom target marker BEFORE display, using the documented
-    // Celestial.add() API from the triangle demo.
+    // Register multi-target marker renderer BEFORE display
     Celestial.add({
         type: "line",
         callback: function(error, json) {
             if (error) return console.warn(error);
         },
         redraw: function() {
-            if (!celestialTarget) return;
-
-            var pt = null;
-            try {
-                pt = Celestial.mapProjection([celestialTarget.ra * 15, celestialTarget.dec]);
-            } catch(e) { return; }
-            if (!pt) return;
-
-            // Check visibility
-            var visible = false;
-            try {
-                visible = Celestial.clip([celestialTarget.ra * 15, celestialTarget.dec]);
-            } catch(e) { visible = true; }
-            if (!visible) return;
-
             var ctx = Celestial.context;
             if (!ctx) return;
 
-            // Crosshair ring
-            ctx.strokeStyle = "#ff6666";
-            ctx.lineWidth = 1.5;
-            ctx.globalAlpha = 0.7;
-            ctx.beginPath();
-            ctx.arc(pt[0], pt[1], 12, 0, 2 * Math.PI);
-            ctx.stroke();
+            // Draw all targets currently in celestialTargets
+            for (var name in celestialTargets) {
+                if (!celestialTargets.hasOwnProperty(name)) continue;
+                var t = celestialTargets[name];
 
-            // Solid dot
-            ctx.globalAlpha = 1.0;
-            ctx.fillStyle = "#ff4444";
-            ctx.strokeStyle = "#ffffff";
-            ctx.lineWidth = 1.5;
-            ctx.beginPath();
-            ctx.arc(pt[0], pt[1], 4, 0, 2 * Math.PI);
-            ctx.fill();
-            ctx.stroke();
+                var pt = null;
+                try { pt = Celestial.mapProjection([t.ra * 15, t.dec]); } catch(e) { continue; }
+                if (!pt) continue;
 
-            // Crosshair lines
-            ctx.strokeStyle = "#ff6666";
-            ctx.lineWidth = 1.5;
-            ctx.globalAlpha = 0.7;
-            ctx.beginPath();
-            ctx.moveTo(pt[0] - 22, pt[1]); ctx.lineTo(pt[0] - 14, pt[1]);
-            ctx.moveTo(pt[0] + 14, pt[1]); ctx.lineTo(pt[0] + 22, pt[1]);
-            ctx.moveTo(pt[0], pt[1] - 22); ctx.lineTo(pt[0], pt[1] - 14);
-            ctx.moveTo(pt[0], pt[1] + 14); ctx.lineTo(pt[0], pt[1] + 22);
-            ctx.stroke();
+                var visible = false;
+                try { visible = Celestial.clip([t.ra * 15, t.dec]); } catch(e) { visible = true; }
+                if (!visible) continue;
 
-            // Label
-            ctx.globalAlpha = 1.0;
-            ctx.fillStyle = "#ff8888";
-            ctx.font = "bold 12px sans-serif";
-            ctx.fillText(celestialTarget.name, pt[0] + 16, pt[1] + 4);
+                // Crosshair ring
+                ctx.strokeStyle = "#ff6666";
+                ctx.lineWidth = 1.5;
+                ctx.globalAlpha = 0.7;
+                ctx.beginPath();
+                ctx.arc(pt[0], pt[1], 12, 0, 2 * Math.PI);
+                ctx.stroke();
+
+                // Solid dot
+                ctx.globalAlpha = 1.0;
+                ctx.fillStyle = "#ff4444";
+                ctx.strokeStyle = "#ffffff";
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.arc(pt[0], pt[1], 4, 0, 2 * Math.PI);
+                ctx.fill();
+                ctx.stroke();
+
+                // Crosshair lines
+                ctx.strokeStyle = "#ff6666";
+                ctx.lineWidth = 1.5;
+                ctx.globalAlpha = 0.7;
+                ctx.beginPath();
+                ctx.moveTo(pt[0] - 22, pt[1]); ctx.lineTo(pt[0] - 14, pt[1]);
+                ctx.moveTo(pt[0] + 14, pt[1]); ctx.lineTo(pt[0] + 22, pt[1]);
+                ctx.moveTo(pt[0], pt[1] - 22); ctx.lineTo(pt[0], pt[1] - 14);
+                ctx.moveTo(pt[0], pt[1] + 14); ctx.lineTo(pt[0], pt[1] + 22);
+                ctx.stroke();
+
+                // Label
+                ctx.globalAlpha = 1.0;
+                ctx.fillStyle = "#ff8888";
+                ctx.font = "bold 12px sans-serif";
+                ctx.fillText(name, pt[0] + 16, pt[1] + 4);
+            }
         }
     });
 
@@ -170,22 +161,51 @@ function initSkyMap() {
         console.warn("Celestial.display error:", e);
     }
 
-    // Set default target and trigger redraw
-    celestialTarget = { name: "Proxima Cen", ra: 14.495, dec: -61.32 };
-    setTimeout(function() {
-        try { Celestial.redraw(); } catch(e) {}
-    }, 3000);
-
+    // No default markers - sky map starts clean
     document.getElementById('sky-map-info').innerHTML =
-        '<p><span style="color:#ff6666;">\u25cf</span> <strong>Proxima Centauri</strong><br>RA: 14h 29m 43s, Dec: -61\u00b0 19\u2032 14\u2033</p>';
+        '<p style="color:#546e7a;">Select a file below to mark its target on the sky map.</p>';
 }
 
-function plotTargetOnMap(name, ra, dec) {
-    celestialTarget = { name: name, ra: ra, dec: dec };
+// Add a target marker to the sky map
+function addTargetMarker(name, raHours, decDeg) {
+    celestialTargets[name] = { ra: raHours, dec: decDeg };
     try { Celestial.redraw(); } catch(e) {}
-    document.getElementById('sky-map-info').innerHTML =
-        '<p><span style="color:#ff6666;">\u25cf</span> <strong>' + name + '</strong><br>RA: ' +
-        formatRA(ra) + ', Dec: ' + formatDec(dec) + '</p>';
+    updateSkyMapInfo();
+}
+
+// Remove a target marker from the sky map
+function removeTargetMarker(name) {
+    delete celestialTargets[name];
+    try { Celestial.redraw(); } catch(e) {}
+    updateSkyMapInfo();
+}
+
+// Clear all target markers
+function clearTargetMarkers() {
+    celestialTargets = {};
+    try { Celestial.redraw(); } catch(e) {}
+    updateSkyMapInfo();
+}
+
+// Update the info bar below the sky map
+function updateSkyMapInfo() {
+    var keys = Object.keys(celestialTargets);
+    var info = document.getElementById('sky-map-info');
+    if (keys.length === 0) {
+        info.innerHTML = '<p style="color:#546e7a;">Select a file below to mark its target on the sky map.</p>';
+        return;
+    }
+    var html = '';
+    for (var i = 0; i < keys.length; i++) {
+        var t = celestialTargets[keys[i]];
+        html += '<p style="margin:2px 0;"><span style="color:#ff6666;">\u25cf</span> <strong>' + keys[i] + '</strong> &nbsp;RA: ' + formatRA(t.ra) + ', Dec: ' + formatDec(t.dec) + '</p>';
+    }
+    info.innerHTML = html;
+}
+
+// Also support BL API search click plotting a marker
+function plotTargetOnMap(name, ra, dec) {
+    addTargetMarker(name, ra, dec);
 }
 
 function formatRA(raHours) {
@@ -205,12 +225,6 @@ function formatDec(decDeg) {
 }
 
 // ─── Target Search (BL API) ───────────────────────────────────────────
-var blResults = [];
-var blPage = 0;
-var blPageSize = 50;
-var blFilterRes = 'all';
-var blFilterType = 'all';
-var blFilterFileType = 'all';
 
 async function searchBL() {
     var target = document.getElementById('target-input').value.trim();
@@ -235,9 +249,10 @@ async function searchBL() {
             blFilterType = 'all';
             blFilterFileType = 'all';
 
+            // Plot first result on sky map
             var first = data.data[0];
-            var raVal = first.ra || first.ra_hours;
-            var decVal = first.decl || first.dec;
+            var raVal = first.ra;
+            var decVal = first.decl;
             if (raVal && decVal) {
                 var raHours = typeof raVal === 'number' ? raVal / 15.0 : parseRA(raVal);
                 var decDeg = typeof decVal === 'number' ? decVal : parseDec(decVal);
@@ -256,19 +271,14 @@ async function searchBL() {
 
 function getFilteredBL() {
     return blResults.filter(function(obs) {
-        // BL API has no 'resolution' field; extract from URL filename
         var url = obs.url || '';
         var res = '';
         if (url.indexOf('_fine.') !== -1) res = 'fine';
         else if (url.indexOf('_mid.') !== -1) res = 'mid';
         else if (url.indexOf('_time.') !== -1) res = 'time';
         else if (url.indexOf('_coarse.') !== -1) res = 'coarse';
-        res = res.toLowerCase();
 
-        // File type from API
         var fileType = (obs.file_type || '').toLowerCase();
-
-        // ON/OFF from target name (PROXCEN_S = ON, PROXCEN_R = OFF)
         var targetName = obs.target || '';
         var isOn = targetName.indexOf('_S') !== -1;
         var isOff = targetName.indexOf('_R') !== -1;
@@ -291,8 +301,7 @@ function renderBLResults() {
     var endIdx = Math.min(startIdx + blPageSize, filtered.length);
     var pageData = filtered.slice(startIdx, endIdx);
 
-    var html = '';
-    html += '<div class="bl-summary">';
+    var html = '<div class="bl-summary">';
     html += '<span style="color:#66bb6a;font-weight:600;">' + blResults.length + ' observations found</span>';
     if (filtered.length !== blResults.length) {
         html += '<span style="color:#8ab4f8;"> (' + filtered.length + ' after filter)</span>';
@@ -327,30 +336,28 @@ function renderBLResults() {
         var dv = obs.decl || obs.dec || '?';
         var rH = typeof rv === 'number' ? rv / 15.0 : (parseRA(rv) || 0);
         var dD = typeof dv === 'number' ? dv : (parseDec(dv) || 0);
-        var sn = (obs.target || obs.source_name || 'target').replace(/'/g, '');
+        var sn = (obs.target || 'target').replace(/'/g, '');
         var sz = obs.size || obs.file_size;
-
-        html += '<tr onclick="onBLRowClick(\'' + sn + '\',' + rH + ',' + dD + ')">';
-        var mjdVal = obs.mjd || obs.tstart || 0;
-        html += '<td>' + (mjdVal ? mjdVal.toFixed(4) : '?') + '</td>';
-        html += '<td>' + (mjdVal ? mjdToDate(mjdVal) : '?') + '</td>';
-        html += '<td>' + (obs.target || obs.source_name || '?') + '</td>';
-        html += '<td>' + (typeof rv === 'number' ? rv.toFixed(3) : rv) + '</td>';
-        html += '<td>' + (typeof dv === 'number' ? dv.toFixed(3) : dv) + '</td>';
-        // Extract resolution from URL since BL API doesn't have a resolution field
         var obsUrl = obs.url || '';
         var resDisplay = '?';
         if (obsUrl.indexOf('_fine.') !== -1) resDisplay = 'fine';
         else if (obsUrl.indexOf('_mid.') !== -1) resDisplay = 'mid';
         else if (obsUrl.indexOf('_time.') !== -1) resDisplay = 'time';
         else if (obsUrl.indexOf('_coarse.') !== -1) resDisplay = 'coarse';
+        var fname = obsUrl.split('/').pop();
 
+        html += '<tr onclick="onBLRowClick(\'' + sn + '\',' + rH + ',' + dD + ')">';
+        var mjdVal = obs.mjd || obs.tstart || 0;
+        html += '<td>' + (mjdVal ? mjdVal.toFixed(4) : '?') + '</td>';
+        html += '<td>' + (mjdVal ? mjdToDate(mjdVal) : '?') + '</td>';
+        html += '<td>' + (obs.target || '?') + '</td>';
+        html += '<td>' + (typeof rv === 'number' ? rv.toFixed(3) : rv) + '</td>';
+        html += '<td>' + (typeof dv === 'number' ? dv.toFixed(3) : dv) + '</td>';
         html += '<td>' + (obs.file_type || '') + '</td>';
         html += '<td>' + resDisplay + '</td>';
         html += '<td>' + (sz ? (sz / 1e9).toFixed(1) + ' GB' : '?') + '</td>';
-        var u = obs.url || '';
-        if (u) {
-            html += '<td><a href="' + u + '" target="_blank" class="dl-link" onclick="event.stopPropagation()" title="Download">\u2b07</a></td>';
+        if (obsUrl) {
+            html += '<td><button class="dl-btn" onclick="event.stopPropagation();downloadFile(\'' + obsUrl + '\',\'' + fname + '\')" title="Download">\u2b07</button></td>';
         } else {
             html += '<td>\u2014</td>';
         }
@@ -378,9 +385,7 @@ function onBLRowClick(name, ra, dec) {
 }
 
 function mjdToDate(mjd) {
-    // Modified Julian Day to human-readable date
-    // MJD = days since 1858-11-17 (Julian day 2400000.5)
-    var epoch = Date.UTC(1858, 10, 17); // Month is 0-indexed, so 10 = November
+    var epoch = Date.UTC(1858, 10, 17);
     var dateMs = epoch + (mjd * 86400000);
     var d = new Date(dateMs);
     var y = d.getUTCFullYear();
@@ -424,33 +429,43 @@ async function loadLocalData() {
             var files = data[target];
             var fineCount = (files.fine || []).length;
             var midCount = (files.mid || []).length;
-            html += '<div style="margin-bottom:8px;"><strong style="color:#4fc3f7;">' + target + '</strong><span style="color:#546e7a;"> ' + fineCount + ' fine, ' + midCount + ' mid</span></div>';
-            for (var i = 0; i < (files.fine || []).length; i++) {
-                var f = files.fine[i];
-                var isOn = f.name.indexOf('_S_') !== -1;
-                var isSelected = selectedFiles.has(f.path);
-                html += '<div class="data-file-row' + (isSelected ? ' selected' : '') + '" data-path="' + f.path + '" onclick="toggleFileSelection(\'' + f.path + '\')">';
-                html += '<span>' + f.name + '</span>';
-                html += '<span><span class="file-type fine">' + (isOn ? 'ON' : 'OFF') + '</span> ' + f.size_gb + ' GB</span>';
+            var fbCount = (files.filterbank || []).length;
+            var h5Count = (files.h5 || []).length;
+            var totalCount = fineCount + midCount + fbCount + h5Count;
+            if (totalCount === 0) continue;
+
+            html += '<div class="target-header"><strong style="color:#4fc3f7;">' + target + '</strong><span style="color:#546e7a;"> ' + totalCount + ' files</span></div>';
+
+            // Helper to render a format section
+            function renderSection(label, labelClass, fileList) {
+                if (!fileList || fileList.length === 0) return;
+                html += '<div class="format-section"><div class="format-label ' + labelClass + '">' + label + ' (' + fileList.length + ')</div>';
+                for (var i = 0; i < fileList.length; i++) {
+                    var f = fileList[i];
+                    var isOn = f.name.indexOf('_S_') !== -1;
+                    var isSelected = selectedFiles.has(f.path);
+                    var sizeStr = f.size_gb < 1 ? (f.size_gb * 1000).toFixed(0) + ' MB' : f.size_gb + ' GB';
+                    html += '<div class="data-file-row' + (isSelected ? ' selected' : '') + '" data-path="' + f.path + '">';
+                    html += '<span class="file-name-click" onclick="toggleFileSelection(\'' + f.path + '\')">' + f.name + '</span>';
+                    html += '<span><span class="file-type ' + labelClass.replace('-label','') + '">' + (isOn ? 'ON' : 'OFF') + '</span> ' + sizeStr + ' <button class="btn-del" onclick="event.stopPropagation();deleteFile(\'' + f.path + '\',\'' + f.name + '\')" title="Delete">\u2715</button></span>';
+                    html += '</div>';
+                    totalFiles++;
+                }
                 html += '</div>';
-                totalFiles++;
             }
-            if (midCount > 0) {
-                html += '<div style="padding:4px 8px;color:#546e7a;font-size:0.8em;">+ ' + midCount + ' mid-res files</div>';
-            }
+
+            renderSection('FINE-RES', 'fine-label', files.fine);
+            renderSection('MID-RES', 'mid-label', files.mid);
+            renderSection('FILTERBANK', 'fb-label', files.filterbank);
+            renderSection('HDF5', 'h5-label', files.h5);
         }
         div.innerHTML = html || '<p style="color:#546e7a;">No local data found.</p>';
 
-        // Show selection controls if there are files
         var selControls = document.getElementById('file-selection-controls');
-        if (totalFiles > 0) {
-            selControls.style.display = 'flex';
-        } else {
-            selControls.style.display = 'none';
-        }
+        if (totalFiles > 0) { selControls.style.display = 'flex'; }
+        else { selControls.style.display = 'none'; }
         updateSelectionBadge();
         updateScanBadge();
-        // Re-apply selections to detail panel
         refreshFileDetailPanel();
     } catch(e) {
         div.innerHTML = '<p style="color:#ef5350;">Error: ' + e.message + '</p>';
@@ -462,25 +477,68 @@ function toggleFileSelection(path) {
         selectedFiles.delete(path);
     } else {
         selectedFiles.add(path);
-        // Fetch header if not cached
         if (!fileHeaderCache[path]) {
             fetchFileHeader(path);
         }
     }
 
-    // Update row visual
     var row = document.querySelector('.data-file-row[data-path="' + CSS.escape(path) + '"]');
     if (row) {
-        if (selectedFiles.has(path)) {
-            row.classList.add('selected');
-        } else {
-            row.classList.remove('selected');
-        }
+        if (selectedFiles.has(path)) { row.classList.add('selected'); }
+        else { row.classList.remove('selected'); }
     }
 
     updateSelectionBadge();
     updateScanBadge();
     refreshFileDetailPanel();
+    refreshSkyMapMarkers();
+}
+
+// Rebuild sky map markers from selected files
+function refreshSkyMapMarkers() {
+    // Group selected files by target name
+    var targetCoords = {};  // target name -> {ra, dec}
+    var neededHeaders = [];
+
+    selectedFiles.forEach(function(path) {
+        // Find the target name and header for this file
+        for (var target in localDataCache) {
+            if (!localDataCache.hasOwnProperty(target)) continue;
+            var allFiles = (localDataCache[target].fine || []).concat(localDataCache[target].mid || [])
+                .concat(localDataCache[target].filterbank || []).concat(localDataCache[target].h5 || []);
+            for (var i = 0; i < allFiles.length; i++) {
+                if (allFiles[i].path === path) {
+                    // Found the target for this file
+                    var header = fileHeaderCache[path];
+                    if (header && header.header) {
+                        var h = header.header;
+                        var raHours = typeof h.src_raj === 'number' ? h.src_raj : parseFloat(h.src_raj);
+                        var decDeg = typeof h.src_dej === 'number' ? h.src_dej : parseFloat(h.src_dej);
+                        if (!isNaN(raHours) && !isNaN(decDeg)) {
+                            targetCoords[target] = { ra: raHours, dec: decDeg };
+                        }
+                    } else {
+                        // Header not loaded yet, will need to fetch
+                        neededHeaders.push(path);
+                    }
+                    break;
+                }
+            }
+        }
+    });
+
+    // Update the markers
+    celestialTargets = targetCoords;
+
+    // Fetch any missing headers, then refresh markers again
+    if (neededHeaders.length > 0) {
+        neededHeaders.forEach(function(p) {
+            if (!fileHeaderCache[p]) fetchFileHeader(p);
+        });
+    }
+
+    try { Celestial.redraw(); } catch(e) {}
+    updateSkyMapInfo();
 }
 
 async function fetchFileHeader(path) {
@@ -490,64 +548,55 @@ async function fetchFileHeader(path) {
         if (!data.error) {
             fileHeaderCache[path] = data;
             refreshFileDetailPanel();
+            refreshSkyMapMarkers();
         }
-    } catch(e) {
-        // Silently fail; detail panel just won't have this file's info
-    }
+    } catch(e) {}
 }
 
 function selectAllFiles() {
     for (var target in localDataCache) {
         if (!localDataCache.hasOwnProperty(target)) continue;
         var files = localDataCache[target];
-        var allFiles = (files.fine || []).concat(files.mid || []);
+        var allFiles = (files.fine || []).concat(files.mid || []).concat(files.filterbank || []).concat(files.h5 || []);
         for (var i = 0; i < allFiles.length; i++) {
             selectedFiles.add(allFiles[i].path);
-            if (!fileHeaderCache[allFiles[i].path]) {
-                fetchFileHeader(allFiles[i].path);
-            }
+            if (!fileHeaderCache[allFiles[i].path]) fetchFileHeader(allFiles[i].path);
         }
     }
-    // Update all rows
     var rows = document.querySelectorAll('.data-file-row');
-    for (var i = 0; i < rows.length; i++) {
-        rows[i].classList.add('selected');
-    }
+    for (var i = 0; i < rows.length; i++) rows[i].classList.add('selected');
     updateSelectionBadge();
     updateScanBadge();
     refreshFileDetailPanel();
+    refreshSkyMapMarkers();
 }
 
 function selectNoneFiles() {
     selectedFiles.clear();
     var rows = document.querySelectorAll('.data-file-row');
-    for (var i = 0; i < rows.length; i++) {
-        rows[i].classList.remove('selected');
-    }
+    for (var i = 0; i < rows.length; i++) rows[i].classList.remove('selected');
     updateSelectionBadge();
     updateScanBadge();
     refreshFileDetailPanel();
+    refreshSkyMapMarkers();
 }
 
 function updateSelectionBadge() {
     var badge = document.getElementById('file-selection-count');
     var count = selectedFiles.size;
     badge.textContent = count + ' file' + (count !== 1 ? 's' : '') + ' selected';
-    if (count === 0) {
-        badge.classList.add('zero');
-    } else {
-        badge.classList.remove('zero');
-    }
+    if (count === 0) badge.classList.add('zero');
+    else badge.classList.remove('zero');
 }
 
 function updateScanBadge() {
     var badge = document.getElementById('scan-target-badge');
     if (selectedFiles.size > 0) {
-        // Count total available files
         var total = 0;
         for (var target in localDataCache) {
             if (!localDataCache.hasOwnProperty(target)) continue;
-            total += ((localDataCache[target].fine || []).length + (localDataCache[target].mid || []).length);
+            total += ((localDataCache[target].fine || []).length + (localDataCache[target].mid || []).length +
+                      (localDataCache[target].filterbank || []).length + (localDataCache[target].h5 || []).length);
         }
         badge.textContent = 'Scanning: ' + selectedFiles.size + ' of ' + total + ' files';
     } else {
@@ -558,112 +607,73 @@ function updateScanBadge() {
 function refreshFileDetailPanel() {
     var panel = document.getElementById('file-detail-panel');
     var content = document.getElementById('file-detail-content');
-
-    if (selectedFiles.size === 0) {
-        panel.style.display = 'none';
-        return;
-    }
-
+    if (selectedFiles.size === 0) { panel.style.display = 'none'; return; }
     panel.style.display = 'block';
     var html = '';
-
     selectedFiles.forEach(function(path) {
-        // Find file info from cache
         var fileInfo = null;
         for (var target in localDataCache) {
             if (!localDataCache.hasOwnProperty(target)) continue;
-            var allFiles = (localDataCache[target].fine || []).concat(localDataCache[target].mid || []);
+            var allFiles = (localDataCache[target].fine || []).concat(localDataCache[target].mid || [])
+                .concat(localDataCache[target].filterbank || []).concat(localDataCache[target].h5 || []);
             for (var i = 0; i < allFiles.length; i++) {
-                if (allFiles[i].path === path) {
-                    fileInfo = allFiles[i];
-                    break;
-                }
+                if (allFiles[i].path === path) { fileInfo = allFiles[i]; break; }
             }
             if (fileInfo) break;
         }
         if (!fileInfo) return;
-
         var isOn = fileInfo.name.indexOf('_S_') !== -1;
         var header = fileHeaderCache[path];
         var headerData = header ? header.header : null;
-
         html += '<div class="file-detail-card">';
         html += '<div class="fd-name">' + fileInfo.name + '</div>';
         html += '<div class="fd-grid">';
-
-        // Source name from header or filename
-        var sourceName = headerData ? (headerData.source_name || fileInfo.name.split('_')[3] || '?') : fileInfo.name.split('_')[3] || '?';
+        var sourceName = headerData ? (headerData.source_name || '?') : '?';
         html += '<span>Source:</span><span class="fd-val">' + sourceName + '</span>';
-
-        // ON/OFF status
         html += '<span>Cadence:</span><span class="fd-val"><span class="on-badge ' + (isOn ? 'on' : 'off') + '">' + (isOn ? 'ON' : 'OFF') + '</span></span>';
-
         if (headerData) {
-            // MJD date
             var mjd = headerData.tstart || headerData.mjd || '?';
             html += '<span>MJD:</span><span class="fd-val">' + (typeof mjd === 'number' ? mjd.toFixed(4) : mjd) + '</span>';
-
-            // RA / Dec
-            var ra = headerData.src_raj || headerData.src_ra || headerData.ra || '?';
-            var dec = headerData.src_dej || headerData.src_dec || headerData.dec || '?';
+            var ra = headerData.src_raj || '?';
+            var dec = headerData.src_dej || '?';
             html += '<span>RA:</span><span class="fd-val">' + (typeof ra === 'number' ? ra.toFixed(5) : ra) + '</span>';
             html += '<span>Dec:</span><span class="fd-val">' + (typeof dec === 'number' ? dec.toFixed(5) : dec) + '</span>';
-
-            // Frequency range
             var fch1 = headerData.fch1 || '?';
             var nchans = headerData.nchans || '?';
-            var chBandwidth = headerData.foff || 0;
-            var fEnd = (typeof fch1 === 'number' && typeof nchans === 'number' && typeof chBandwidth === 'number') ? (fch1 + nchans * chBandwidth) : '?';
-            html += '<span>Freq:</span><span class="fd-val">' + (typeof fch1 === 'number' ? fch1.toFixed(6) : fch1) + ' → ' + (typeof fEnd === 'number' ? fEnd.toFixed(6) : fEnd) + ' MHz</span>';
-
-            // Nchans
+            var chBw = headerData.foff || 0;
+            var fEnd = (typeof fch1 === 'number' && typeof nchans === 'number' && typeof chBw === 'number') ? (fch1 + nchans * chBw) : '?';
+            html += '<span>Freq:</span><span class="fd-val">' + (typeof fch1 === 'number' ? fch1.toFixed(3) : fch1) + ' \u2192 ' + (typeof fEnd === 'number' ? fEnd.toFixed(3) : fEnd) + ' MHz</span>';
             html += '<span>Channels:</span><span class="fd-val">' + nchans + '</span>';
-
-            // Tsamp
             var tsamp = headerData.tsamp || '?';
-            html += '<span>Tsamp:</span><span class="fd-val">' + (typeof tsamp === 'number' ? (tsamp * 1e6).toFixed(2) + ' µs' : tsamp) + '</span>';
+            html += '<span>Tsamp:</span><span class="fd-val">' + (typeof tsamp === 'number' ? tsamp.toFixed(3) + 's' : tsamp) + '</span>';
         } else {
             html += '<span style="grid-column:1/-1;color:#546e7a;">Loading header...</span>';
         }
-
-        // File size
         html += '<span>Size:</span><span class="fd-val">' + fileInfo.size_gb + ' GB</span>';
-
-        html += '</div>'; // fd-grid
-        html += '</div>'; // fd-card
+        html += '</div></div>';
     });
-
     content.innerHTML = html;
 }
 
 // ─── Scan Control ─────────────────────────────────────────────────────
 async function startScan() {
     var params = {
-        target: 'PROXCEN',
-        resolution: 'fine',
+        target: 'PROXCEN', resolution: 'fine',
         sub_band_chans: parseInt(document.getElementById('ctrl-subband-width').value),
         overlap: parseInt(document.getElementById('ctrl-overlap').value),
         max_drift: parseFloat(document.getElementById('ctrl-max-drift').value),
         snr: parseFloat(document.getElementById('ctrl-snr').value),
     };
-
-    // Send selected files if any are chosen
-    if (selectedFiles.size > 0) {
-        params.files = Array.from(selectedFiles);
-    }
-
+    if (selectedFiles.size > 0) params.files = Array.from(selectedFiles);
     var fStart = document.getElementById('ctrl-f-start').value;
     var fStop = document.getElementById('ctrl-f-stop').value;
     if (fStart) params.f_start = parseFloat(fStart);
     if (fStop) params.f_stop = parseFloat(fStop);
-
     document.getElementById('btn-start-scan').disabled = true;
     document.getElementById('btn-stop-scan').disabled = false;
-
     try {
         var resp = await fetch('/api/scan/start', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
+            method: 'POST', headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(params),
         });
         var data = await resp.json();
@@ -685,14 +695,12 @@ async function stopScan() {
     document.getElementById('btn-stop-scan').disabled = true;
 }
 
-// ─── Scan Status Polling ──────────────────────────────────────────────
 async function pollScanStatus() {
     try {
         var resp = await fetch('/api/scan/status');
         var data = await resp.json();
         var statusDiv = document.getElementById('scan-status');
         var progBar = document.getElementById('progress-bar-container');
-
         if (data.active) {
             statusDiv.innerHTML = '<p class="status-running">Scan running...</p>';
             progBar.style.display = 'block';
@@ -712,8 +720,7 @@ async function pollScanStatus() {
                 statusDiv.innerHTML = '<p class="status-idle">Scan complete.</p>';
                 document.getElementById('btn-start-scan').disabled = false;
                 document.getElementById('btn-stop-scan').disabled = true;
-                loadResults();
-                loadStats();
+                loadResults(); loadStats();
             }
         }
     } catch(e) {}
@@ -749,9 +756,7 @@ async function loadResults() {
         }
         renderHitTable();
         renderHitChart();
-    } catch(e) {
-        console.error('Error loading results:', e);
-    }
+    } catch(e) { console.error('Error loading results:', e); }
 }
 
 function renderHitTable() {
@@ -759,28 +764,23 @@ function renderHitTable() {
     var filter = document.getElementById('results-filter').value;
     var search = document.getElementById('results-search').value.toLowerCase();
     var hits = allHits.slice();
-    
     if (filter === 'on') hits = hits.filter(function(h) { return h.on_off === 'ON' || (h._source || '').indexOf('_S_') !== -1; });
     else if (filter === 'off') hits = hits.filter(function(h) { return h.on_off === 'OFF' || (h._source || '').indexOf('_R_') !== -1; });
     else if (filter === 'candidates') hits = rejectionCandidates.slice();
     if (search) hits = hits.filter(function(h) { return String(h.freq || '').indexOf(search) !== -1; });
     hits.sort(function(a, b) { return (b.snr || 0) - (a.snr || 0); });
     if (hits.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="8" class="empty">No hits found. Run a scan or adjust filters.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" class="empty">No hits found.</td></tr>';
         return;
     }
     var html = '';
     for (var i = 0; i < Math.min(hits.length, 500); i++) {
         var h = hits[i];
         var isOn = h.on_off === 'ON' || (h._source || '').indexOf('_S_') !== -1;
-        var status = h.status || '';
         var statusHtml = '';
-        if (status === 'CANDIDATE') {
-            statusHtml = '<span style="color:#66bb6a;font-weight:bold;">CANDIDATE</span>';
-        } else if (status === 'RFI') {
-            statusHtml = '<span style="color:#ef5350;">RFI</span>';
-        }
-        html += '<tr><td>' + (i + 1) + '</td><td style="color:#66bb6a;font-weight:600;">' + (h.snr || 0).toFixed(2) + '</td><td style="color:#4fc3f7;">' + (h.freq || 0).toFixed(6) + '</td><td>' + (h.drift_rate || 0).toFixed(4) + '</td><td>' + (h.channel || '-') + '</td><td><span class="on-badge ' + (isOn ? 'on' : 'off') + '">' + (isOn ? 'ON' : 'OFF') + '</span></td><td>' + statusHtml + '</td><td style="font-size:0.8em;color:#546e7a;">' + (h._source || h.file || h.source_file || '').substring(0, 30) + '</td></tr>';
+        if (h.status === 'CANDIDATE') statusHtml = '<span style="color:#66bb6a;font-weight:bold;">CANDIDATE</span>';
+        else if (h.status === 'RFI') statusHtml = '<span style="color:#ef5350;">RFI</span>';
+        html += '<tr><td>' + (i+1) + '</td><td style="color:#66bb6a;font-weight:600;">' + (h.snr||0).toFixed(2) + '</td><td style="color:#4fc3f7;">' + (h.freq||0).toFixed(6) + '</td><td>' + (h.drift_rate||0).toFixed(4) + '</td><td>' + (h.channel||'-') + '</td><td><span class="on-badge ' + (isOn?'on':'off') + '">' + (isOn?'ON':'OFF') + '</span></td><td>' + statusHtml + '</td><td style="font-size:0.8em;color:#546e7a;">' + (h._source||h.file||'').substring(0,30) + '</td></tr>';
     }
     tbody.innerHTML = html;
 }
@@ -814,7 +814,6 @@ function renderHitChart() {
     }, { displayModeBar: false, responsive: true });
 }
 
-// ─── Statistics ───────────────────────────────────────────────────────
 async function loadStats() {
     try {
         var resp = await fetch('/api/stats');
@@ -823,67 +822,113 @@ async function loadStats() {
         document.getElementById('stat-on').textContent = 'ON: ' + data.on_hits;
         document.getElementById('stat-off').textContent = 'OFF: ' + data.off_hits;
         document.getElementById('stat-top').textContent = 'Top SNR: ' + data.top_snr;
-    } catch(e) { console.error('Error loading stats:', e); }
+    } catch(e) {}
 }
 
 // ─── ON/OFF Rejection ───────────────────────────────────────────────
 async function runRejection() {
     var btn = document.getElementById('btn-run-rejection');
     var summaryDiv = document.getElementById('rejection-summary');
-    btn.disabled = true;
-    btn.textContent = 'Running...';
+    btn.disabled = true; btn.textContent = 'Running...';
     summaryDiv.innerHTML = '<p style="color:#8ab4f8;">Running ON/OFF rejection...</p>';
-
     var params = {
         tolerance_mhz: parseFloat(document.getElementById('reject-freq-tol').value),
         drift_tolerance: parseFloat(document.getElementById('reject-drift-tol').value),
         source: 'validation_50mhz',
     };
-
     try {
         var resp = await fetch('/api/reject', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
+            method: 'POST', headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(params),
         });
         var data = await resp.json();
-
-        if (data.error) {
-            summaryDiv.innerHTML = '<p style="color:#ef5350;">Error: ' + data.error + '</p>';
-            return;
-        }
-
+        if (data.error) { summaryDiv.innerHTML = '<p style="color:#ef5350;">Error: ' + data.error + '</p>'; return; }
         var s = data.summary;
         rejectionCandidates = data.candidates || [];
-
-        var pct = s.rejection_rate;
-        var candidateColor = s.candidates > 0 ? '#66bb6a' : '#546e7a';
-        summaryDiv.innerHTML =
-            '<div class="rejection-stats">' +
+        summaryDiv.innerHTML = '<div class="rejection-stats">' +
             '<span class="rstat"><span class="rstat-label">Total ON</span><span class="rstat-val">' + s.total_on.toLocaleString() + '</span></span>' +
             '<span class="rstat"><span class="rstat-label">Total OFF</span><span class="rstat-val">' + s.total_off.toLocaleString() + '</span></span>' +
-            '<span class="rstat"><span class="rstat-label">Rejected (RFI)</span><span class="rstat-val" style="color:#ef5350;">' + s.rejected_rfi.toLocaleString() + ' (' + pct + '%)</span></span>' +
-            '<span class="rstat"><span class="rstat-label">Candidates</span><span class="rstat-val" style="color:' + candidateColor + ';font-weight:bold;font-size:1.3em;">' + s.candidates.toLocaleString() + '</span></span>' +
-            '</div>';
-
-        // Update results filter to show candidates
-        var filterSelect = document.getElementById('results-filter');
-        if (s.candidates > 0) {
-            filterSelect.value = 'candidates';
-        }
-        renderHitTable();
-        renderHitChart();
+            '<span class="rstat"><span class="rstat-label">Rejected (RFI)</span><span class="rstat-val" style="color:#ef5350;">' + s.rejected_rfi.toLocaleString() + ' (' + s.rejection_rate + '%)</span></span>' +
+            '<span class="rstat"><span class="rstat-label">Candidates</span><span class="rstat-val" style="color:' + (s.candidates > 0 ? '#66bb6a' : '#546e7a') + ';font-weight:bold;font-size:1.3em;">' + s.candidates.toLocaleString() + '</span></span></div>';
+        if (s.candidates > 0) document.getElementById('results-filter').value = 'candidates';
+        renderHitTable(); renderHitChart();
     } catch(e) {
         summaryDiv.innerHTML = '<p style="color:#ef5350;">Error: ' + e.message + '</p>';
-    } finally {
-        btn.disabled = false;
-        btn.textContent = 'Run ON/OFF Rejection';
-    }
+    } finally { btn.disabled = false; btn.textContent = 'Run ON/OFF Rejection'; }
 }
 
-// ─── Utilities ────────────────────────────────────────────────────────
-function escapeHtml(text) {
-    var div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+// ─── File Download ───────────────────────────────────────────────────
+async function downloadFile(url, filename) {
+    try {
+        var resp = await fetch('/api/download', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({url: url, filename: filename}),
+        });
+        var data = await resp.json();
+        if (data.error) { alert(data.error); }
+        else if (data.status === 'exists') { alert(filename + ' already exists'); loadLocalData(); }
+        else { showDownloadPanel(); }
+    } catch(e) { alert('Download error: ' + e.message); }
 }
+
+function showDownloadPanel() {
+    var panel = document.getElementById('download-panel');
+    if (panel) panel.style.display = 'block';
+}
+
+async function pollDownloadStatus() {
+    try {
+        var resp = await fetch('/api/download/status');
+        var data = await resp.json();
+        var panel = document.getElementById('download-panel');
+        if (!panel) return;
+        if (data.queue.length === 0) { panel.style.display = 'none'; return; }
+        panel.style.display = 'block';
+        var activeDl = data.queue.filter(function(q) { return q.status === 'downloading' || q.status === 'queued'; });
+        var completedDl = data.queue.filter(function(q) { return q.status === 'complete'; });
+        var html = '<div class="panel-header" style="font-size:0.85em;">\u2b07 Downloads</div><div class="download-list">';
+        for (var i = 0; i < data.queue.length; i++) {
+            var q = data.queue[i];
+            var sc = q.status === 'downloading' ? '#4fc3f7' : q.status === 'complete' ? '#66bb6a' : q.status === 'error' ? '#ef5350' : '#546e7a';
+            var sz = q.size_total > 0 ? (q.size_total / 1e9).toFixed(1) + ' GB' : '?';
+            var done = (q.size_done / 1e9).toFixed(1) + ' GB';
+            html += '<div class="download-item"><div class="dl-item-header"><span class="dl-item-name">' + q.filename + '</span><span class="dl-item-status" style="color:' + sc + ';">' + q.status + '</span></div>';
+            if (q.status === 'downloading') {
+                html += '<div class="dl-progress-bar"><div class="dl-progress-fill" style="width:' + q.progress + '%"></div></div>';
+                html += '<div class="dl-item-stats">' + done + ' / ' + sz + ' (' + q.progress + '%)';
+                if (q.speed_mbs > 0) {
+                    html += ' | ' + q.speed_mbs + ' MB/s';
+                    if (q.eta_s > 0) { html += ' | ETA ' + Math.floor(q.eta_s/60) + 'm ' + (q.eta_s%60) + 's'; }
+                }
+                html += ' <button class="btn-small" onclick="cancelDownload(\'' + q.filename + '\')">Cancel</button></div>';
+            } else if (q.status === 'complete') {
+                html += '<div class="dl-item-stats" style="color:#66bb6a;">' + sz + ' downloaded</div>';
+            } else if (q.status === 'error') {
+                html += '<div class="dl-item-stats" style="color:#ef5350;">' + (q.error || 'Error') + '</div>';
+            }
+            html += '</div>';
+        }
+        panel.innerHTML = html + '</div>';
+        var newComp = completedDl.filter(function(q) { return !q._refreshed; });
+        if (newComp.length > 0 && activeDl.length === 0) {
+            for (var j = 0; j < data.queue.length; j++) { if (data.queue[j].status === 'complete') data.queue[j]._refreshed = true; }
+            loadLocalData();
+        }
+    } catch(e) {}
+}
+
+async function cancelDownload(filename) {
+    try { await fetch('/api/download/cancel', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({filename: filename}) }); } catch(e) {}
+}
+
+async function deleteFile(path, name) {
+    if (!confirm('Delete "' + name + '"?\nFile will be moved to trash.')) return;
+    try {
+        var resp = await fetch('/api/delete', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({path: path}) });
+        var data = await resp.json();
+        if (data.error) { alert(data.error); }
+        else { selectedFiles.delete(path); loadLocalData(); refreshSkyMapMarkers(); }
+    } catch(e) { alert('Error: ' + e.message); }
+}
+
+function escapeHtml(text) { var d = document.createElement('div'); d.textContent = text; return d.innerHTML; }
