@@ -1,0 +1,9 @@
+# -------------------------- o --------------------------
+# File ID: midres_clone_pos_foff.h5 
+# -------------------------- o --------------------------
+# Source:Synthetic
+# MJD: 61259.519455593880	RA: 17h47m15s	DEC: -28d22m59.16s
+# DELTAT:   1.073742	DELTAF(Hz): 2861.022949	max_drift_rate:   5.000000	obs_length:  17.179869
+# --------------------------
+# Top_Hit_# 	Drift_Rate 	SNR 	Uncorrected_Frequency 	Corrected_Frequency 	Index 	freq_start 	freq_end 	SEFD 	SEFD_freq 	Coarse_Channel_Number 	Full_number_of_hits 	
+# --------------------------

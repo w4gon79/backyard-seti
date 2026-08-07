@@ -8,22 +8,22 @@ File name format: spliced_blc<band>_guppi_<MJD>_<seq>_DIAG_<TARGET>_<obs_num>.gp
 
 Search for any target:
 
-.\seti-python.bat src\bl_search.py --find proxima
+python src\bl_search.py --find proxima
 
 Get files for a target:
 
-.\seti-python.bat src\bl_search.py --target PROXCEN --telescope Parkes --cadence
+python src\bl_search.py --target PROXCEN --telescope Parkes --cadence
 
 Download files:
 
-.\seti-python.bat src\bl_search.py --target PROXCEN --cadence --download data/ --n 2
+python src\bl_search.py --target PROXCEN --cadence --download data/ --n 2
 
 The API docs are at docs/bl_api_reference.md with every endpoint, parameter, filename convention, and target name mapping documented. Next time you ask for data on a target, I can query the API directly instead of fighting that broken portal.
 
 ******************************************
 ***BL analysis and Waterfall Creator***
 ******************************************
-.\seti-python.bat src\bl_inspect.py data\spliced_blc2021222324252627_guppi_57895_36299_DIAG_KIC8462852_0002.gpuspec.0002.h5 --header
+python src\bl_inspect.py data\spliced_blc2021222324252627_guppi_57895_36299_DIAG_KIC8462852_0002.gpuspec.0002.h5 --header
 
 usage: bl_inspect.py [-h] [--waterfall] [--save] [--header] filepath
 
@@ -42,7 +42,7 @@ options:
 ***RFI Rejection Script ***
 ******************************************
 
-.\seti-python.bat src\bl_rfi_reject.py --on results\Parkes_57910_35370_PROXCEN_S_fine.dat --off results\Parkes_57910_35032_PROXCEN_R_fine.dat --plot --save-plot results\proxima_rfi_rejection.png
+python src\bl_rfi_reject.py --on results\Parkes_57910_35370_PROXCEN_S_fine.dat --off results\Parkes_57910_35032_PROXCEN_R_fine.dat --plot --save-plot results\proxima_rfi_rejection.png
 
 usage: bl_doppler_search.py [-h] [--out OUT] [--min-drift MIN_DRIFT] [--max-drift MAX_DRIFT][--snr SNR]
 filepath
@@ -72,7 +72,7 @@ A frequency/SNR scatter plot gets saved showing green stars for candidates, red 
 ******************************************
 ***Doppler Search***
 ******************************************
-.\seti-python.bat src\bl_doppler_search.py data\spliced_blc2021222324252627_guppi_57895_36299_DIAG_KIC8462852_0002.gpuspec.0002.h5 --out results
+python src\bl_doppler_search.py data\spliced_blc2021222324252627_guppi_57895_36299_DIAG_KIC8462852_0002.gpuspec.0002.h5 --out results
 
 usage: bl_doppler_search.py [-h] [--out OUT] [--min-drift MIN_DRIFT] [--max-drift MAX_DRIFT]
                             [--snr SNR]
@@ -94,28 +94,28 @@ options:
 
 
 ******************************************
-***Example full pipeline run***
+***Example full Prod pipeline run***
 ******************************************
 Step 1: Run Doppler search on all 6 files
 
-.\seti-python.bat src\bl_doppler_search.py data\Parkes_57910_34684_PROXCEN_S_mid.h5 --out results
-.\seti-python.bat src\bl_doppler_search.py data\Parkes_57910_35032_PROXCEN_R_mid.h5 --out results
-.\seti-python.bat src\bl_doppler_search.py data\Parkes_57910_35370_PROXCEN_S_mid.h5 --out results
-.\seti-python.bat src\bl_doppler_search.py data\Parkes_57910_35708_PROXCEN_R_mid.h5 --out results
-.\seti-python.bat src\bl_doppler_search.py data\Parkes_57910_36052_PROXCEN_S_mid.h5 --out results
-.\seti-python.bat src\bl_doppler_search.py data\Parkes_57910_36390_PROXCEN_R_mid.h5 --out results
+python src\bl_doppler_search.py data\Parkes_57910_34684_PROXCEN_S_mid.h5 --out results
+python src\bl_doppler_search.py data\Parkes_57910_35032_PROXCEN_R_mid.h5 --out results
+python src\bl_doppler_search.py data\Parkes_57910_35370_PROXCEN_S_mid.h5 --out results
+python src\bl_doppler_search.py data\Parkes_57910_35708_PROXCEN_R_mid.h5 --out results
+python src\bl_doppler_search.py data\Parkes_57910_36052_PROXCEN_S_mid.h5 --out results
+python src\bl_doppler_search.py data\Parkes_57910_36390_PROXCEN_R_mid.h5 --out results
 Or for lower SNR
-.\seti-python.bat src\bl_doppler_search.py data\Parkes_57910_34684_PROXCEN_S_mid.h5 --out results --snr 10
-.\seti-python.bat src\bl_doppler_search.py data\Parkes_57910_35032_PROXCEN_R_mid.h5 --out results --snr 10
-.\seti-python.bat src\bl_doppler_search.py data\Parkes_57910_35370_PROXCEN_S_mid.h5 --out results --snr 10
-.\seti-python.bat src\bl_doppler_search.py data\Parkes_57910_35708_PROXCEN_R_mid.h5 --out results --snr 10
-.\seti-python.bat src\bl_doppler_search.py data\Parkes_57910_36052_PROXCEN_S_mid.h5 --out results --snr 10
-.\seti-python.bat src\bl_doppler_search.py data\Parkes_57910_36390_PROXCEN_R_mid.h5 --out results --snr 10
+python src\bl_doppler_search.py data\Parkes_57910_34684_PROXCEN_S_mid.h5 --out results --snr 5
+python src\bl_doppler_search.py data\Parkes_57910_35032_PROXCEN_R_mid.h5 --out results --snr 5
+python src\bl_doppler_search.py data\Parkes_57910_35370_PROXCEN_S_mid.h5 --out results --snr 5
+python src\bl_doppler_search.py data\Parkes_57910_35708_PROXCEN_R_mid.h5 --out results --snr 5
+python src\bl_doppler_search.py data\Parkes_57910_36052_PROXCEN_S_mid.h5 --out results --snr 5
+python src\bl_doppler_search.py data\Parkes_57910_36390_PROXCEN_R_mid.h5 --out results --snr 5
 
 
 Step 2: RFI rejection (all 6 files at once)
 
-.\seti-python.bat src\bl_rfi_reject.py --on results\Parkes_57910_34684_PROXCEN_S_mid.dat results\Parkes_57910_35370_PROXCEN_S_mid.dat results\Parkes_57910_36052_PROXCEN_S_mid.dat --off results\Parkes_57910_35032_PROXCEN_R_mid.dat results\Parkes_57910_35708_PROXCEN_R_mid.dat results\Parkes_57910_36390_PROXCEN_R_mid.dat --plot --save-plot results\proxima_rfi_rejection.png
+python src\bl_rfi_reject.py --on results\Parkes_57910_34684_PROXCEN_S_mid.dat results\Parkes_57910_35370_PROXCEN_S_mid.dat results\Parkes_57910_36052_PROXCEN_S_mid.dat --off results\Parkes_57910_35032_PROXCEN_R_mid.dat results\Parkes_57910_35708_PROXCEN_R_mid.dat results\Parkes_57910_36390_PROXCEN_R_mid.dat --plot --save-plot results\proxima_rfi_rejection.png
 
 The script categorizes every hit into four buckets:
 
