@@ -32,13 +32,12 @@ def run_doppler_search(filepath, out_dir='results', min_drift=-5, max_drift=5,
     os.chdir(data_dir)
 
     try:
-        # turbo_seti takes absolute drift magnitudes, searches both + and -
-        abs_min = abs(min_drift)
+        # turbo_seti: min_drift = smallest detectable drift rate (near zero)
+        #             max_drift = largest detectable drift rate
+        # It searches BOTH positive and negative automatically.
+        # Most signals drift at 0.01-0.5 Hz/s, so min_drift must be tiny.
         abs_max = abs(max_drift)
-        if abs_min > abs_max:
-            abs_min, abs_max = abs_max, abs_min
-        if abs_min == 0:
-            abs_min = 1e-05
+        abs_min = 1e-05  # near-zero, catches slow drifters (RFI and real signals)
 
         print(f"Loading: {filepath}")
         print(f"Drift range: -{abs_max} to +{abs_max} Hz/s (min detectable: {abs_min} Hz/s)")

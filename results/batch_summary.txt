@@ -1,0 +1,158 @@
+Found 5 PROXCEN cadence sessions
+Data dir: G:\seti\data
+Results dir: G:\seti\results
+
+============================================================
+=== Session MJD 57790 (6 files) ===
+============================================================
+
+[1/6] [ON ] Parkes_57790_62144_PROXCEN_S_mid.h5
+  -> 0 hits at SNR>=10
+
+[2/6] [OFF] Parkes_57790_62489_PROXCEN_R_mid.h5
+  -> 0 hits at SNR>=10
+
+[3/6] [ON ] Parkes_57790_62830_PROXCEN_S_mid.h5
+  -> 0 hits at SNR>=10
+
+[4/6] [OFF] Parkes_57790_63169_PROXCEN_R_mid.h5
+  -> 0 hits at SNR>=10
+
+[5/6] [ON ] Parkes_57790_63510_PROXCEN_S_mid.h5
+  -> 0 hits at SNR>=10
+
+[6/6] [OFF] Parkes_57790_63847_PROXCEN_R_mid.h5
+  -> 0 hits at SNR>=10
+
+--- Session MJD 57790 Summary ---
+  Total ON hits:  0
+  Total OFF hits: 0
+  ON-only freqs:  0
+  Elapsed: 271s
+
+============================================================
+=== Session MJD 57846 (6 files) ===
+============================================================
+
+[1/6] [ON ] Parkes_57846_49534_PROXCEN_S_mid.h5
+  -> 0 hits at SNR>=10
+
+[2/6] [OFF] Parkes_57846_49879_PROXCEN_R_mid.h5
+  -> 0 hits at SNR>=10
+
+[3/6] [ON ] Parkes_57846_50220_PROXCEN_S_mid.h5
+  -> 0 hits at SNR>=10
+
+[4/6] [OFF] Parkes_57846_50560_PROXCEN_R_mid.h5
+  -> 0 hits at SNR>=10
+
+[5/6] [ON ] Parkes_57846_50900_PROXCEN_S_mid.h5
+  -> 0 hits at SNR>=10
+
+[6/6] [OFF] Parkes_57846_51239_PROXCEN_R_mid.h5
+  -> 0 hits at SNR>=10
+
+--- Session MJD 57846 Summary ---
+  Total ON hits:  0
+  Total OFF hits: 0
+  ON-only freqs:  0
+  Elapsed: 272s
+
+============================================================
+=== Session MJD 57904 (6 files) ===
+============================================================
+
+[1/6] [ON ] Parkes_57904_43071_PROXCEN_S_mid.h5
+  -> 0 hits at SNR>=10
+
+[2/6] [OFF] Parkes_57904_43412_PROXCEN_R_mid.h5
+  -> 0 hits at SNR>=10
+
+[3/6] [ON ] Parkes_57904_43752_PROXCEN_S_mid.h5
+  -> 0 hits at SNR>=10
+
+[4/6] [OFF] Parkes_57904_44092_PROXCEN_R_mid.h5
+  -> 0 hits at SNR>=10
+
+[5/6] [ON ] Parkes_57904_44432_PROXCEN_S_mid.h5
+  -> 0 hits at SNR>=10
+
+[6/6] [OFF] Parkes_57904_44772_PROXCEN_R_mid.h5
+  -> 0 hits at SNR>=10
+
+--- Session MJD 57904 Summary ---
+  Total ON hits:  0
+  Total OFF hits: 0
+  ON-only freqs:  0
+  Elapsed: 273s
+
+============================================================
+=== Session MJD 57942 (6 files) ===
+============================================================
+
+[1/6] [ON ] Parkes_57942_33681_PROXCEN_S_mid.h5
+  -> 0 hits at SNR>=10
+
+[2/6] [OFF] Parkes_57942_34021_PROXCEN_R_mid.h5
+  -> 0 hits at SNR>=10
+
+[3/6] [ON ] Parkes_57942_34362_PROXCEN_S_mid.h5
+  -> 0 hits at SNR>=10
+
+[4/6] [OFF] Parkes_57942_34702_PROXCEN_R_mid.h5
+  -> 0 hits at SNR>=10
+
+[5/6] [ON ] Parkes_57942_35042_PROXCEN_S_mid.h5
+  -> 0 hits at SNR>=10
+
+[6/6] [OFF] Parkes_57942_35382_PROXCEN_R_mid.h5
+  -> 0 hits at SNR>=10
+
+--- Session MJD 57942 Summary ---
+  Total ON hits:  0
+  Total OFF hits: 0
+  ON-only freqs:  0
+  Elapsed: 282s
+
+============================================================
+=== Session MJD 58026 (6 files) ===
+============================================================
+
+[1/6] [ON ] Parkes_58026_20429_PROXCEN_S_mid.h5
+  -> 0 hits at SNR>=10
+
+[2/6] [OFF] Parkes_58026_20771_PROXCEN_R_mid.h5
+  -> 0 hits at SNR>=10
+
+[3/6] [ON ] Parkes_58026_21110_PROXCEN_S_mid.h5
+  -> 0 hits at SNR>=10
+
+[4/6] [OFF] Parkes_58026_21450_PROXCEN_R_mid.h5
+  -> 0 hits at SNR>=10
+
+[5/6] [ON ] Parkes_58026_21790_PROXCEN_S_mid.h5
+  -> 0 hits at SNR>=10
+
+[6/6] [OFF] Parkes_58026_22130_PROXCEN_R_mid.h5
+  -> 0 hits at SNR>=10
+
+--- Session MJD 58026 Summary ---
+  Total ON hits:  0
+  Total OFF hits: 0
+  ON-only freqs:  0
+  Elapsed: 274s
+
+
+============================================================
+=== FINAL SUMMARY (SNR >= 10) ===
+============================================================
+MJD        ON hits    OFF hits   ON-only    Time    
+57790      0          0          0          271s
+57846      0          0          0          272s
+57904      0          0          0          273s
+57942      0          0          0          282s
+58026      0          0          0          274s
+
+*** Zero ON-only candidates across all sessions ***
+
+Done.

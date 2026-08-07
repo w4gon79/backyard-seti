@@ -104,6 +104,14 @@ Step 1: Run Doppler search on all 6 files
 .\seti-python.bat src\bl_doppler_search.py data\Parkes_57910_35708_PROXCEN_R_mid.h5 --out results
 .\seti-python.bat src\bl_doppler_search.py data\Parkes_57910_36052_PROXCEN_S_mid.h5 --out results
 .\seti-python.bat src\bl_doppler_search.py data\Parkes_57910_36390_PROXCEN_R_mid.h5 --out results
+Or for lower SNR
+.\seti-python.bat src\bl_doppler_search.py data\Parkes_57910_34684_PROXCEN_S_mid.h5 --out results --snr 10
+.\seti-python.bat src\bl_doppler_search.py data\Parkes_57910_35032_PROXCEN_R_mid.h5 --out results --snr 10
+.\seti-python.bat src\bl_doppler_search.py data\Parkes_57910_35370_PROXCEN_S_mid.h5 --out results --snr 10
+.\seti-python.bat src\bl_doppler_search.py data\Parkes_57910_35708_PROXCEN_R_mid.h5 --out results --snr 10
+.\seti-python.bat src\bl_doppler_search.py data\Parkes_57910_36052_PROXCEN_S_mid.h5 --out results --snr 10
+.\seti-python.bat src\bl_doppler_search.py data\Parkes_57910_36390_PROXCEN_R_mid.h5 --out results --snr 10
+
 
 Step 2: RFI rejection (all 6 files at once)
 
