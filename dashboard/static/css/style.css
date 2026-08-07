@@ -540,6 +540,60 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
     text-decoration: underline;
 }
 
+/* Scan History Bar */
+.scan-history-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    background: #0d1b2a;
+    border: 1px solid #1e3a5f;
+    border-radius: 6px;
+    margin-bottom: 12px;
+    font-size: 0.88em;
+}
+.scan-history-bar label {
+    color: #64b5f6;
+    font-weight: 600;
+    white-space: nowrap;
+}
+#scan-selector {
+    flex: 1;
+    max-width: 340px;
+    padding: 5px 10px;
+    background: #111827;
+    border: 1px solid #1e3a5f;
+    border-radius: 4px;
+    color: #c8c8e0;
+    font-size: 0.92em;
+    cursor: pointer;
+}
+#scan-selector:hover { border-color: #2a4a7f; }
+#scan-selector:focus { outline: none; border-color: #4fc3f7; }
+.scan-meta-display {
+    color: #8ab4f8;
+    font-size: 0.85em;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+.scan-meta-display .sm-tag {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 0.85em;
+}
+.scan-meta-display .sm-tag.status-complete {
+    background: #1b5e20; color: #a5d6a7;
+}
+.scan-meta-display .sm-tag.status-running {
+    background: #e65100; color: #ffcc80;
+}
+.scan-meta-display .sm-sep {
+    color: #37474f;
+}
+
 /* Responsive */
 @media (max-width: 1200px) {
     .row { flex-direction: column; }

@@ -9,6 +9,8 @@ let celestialTargets = {};  // Map of target name -> {ra, dec} driven by file se
 let selectedFiles = new Set();
 let localDataCache = {};
 let fileHeaderCache = {};
+let scansList = [];       // Array of scan metadata objects
+let currentScanId = null; // Currently selected scan_id
 
 // BL API search state
 var blResults = [];
@@ -22,14 +24,13 @@ var blFilterFileType = 'all';
 document.addEventListener('DOMContentLoaded', () => {
     initSkyMap();
     loadLocalData();
-    loadStats();
-    loadResults();
+    loadScansList();  // Load scan history, then load results for most recent
 
     document.getElementById('btn-search-bl').onclick = searchBL;
     document.getElementById('btn-search-local').onclick = loadLocalData;
     document.getElementById('btn-start-scan').onclick = startScan;
     document.getElementById('btn-stop-scan').onclick = stopScan;
-    document.getElementById('btn-refresh').onclick = () => { loadResults(); loadStats(); };
+    document.getElementById('btn-refresh').onclick = () => { loadResults(); loadStats(); loadScansList(); };
     document.getElementById('btn-select-all').onclick = selectAllFiles;
     document.getElementById('btn-select-none').onclick = selectNoneFiles;
     document.getElementById('btn-full-band').onclick = () => {
@@ -42,6 +43,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('results-filter').onchange = renderHitTable;
     document.getElementById('results-search').oninput = renderHitTable;
     document.getElementById('btn-run-rejection').onclick = runRejection;
+    document.getElementById('scan-selector').onchange = onScanSelected;
 
     logInterval = setInterval(pollScanStatus, 3000);
     setInterval(pollDownloadStatus, 2000);
@@ -681,6 +683,8 @@ async function startScan() {
             alert(data.error);
             document.getElementById('btn-start-scan').disabled = false;
             document.getElementById('btn-stop-scan').disabled = true;
+        } else if (data.scan_id) {
+            currentScanId = data.scan_id;
         }
     } catch(e) {
         alert('Error: ' + e.message);
@@ -720,16 +724,194 @@ async function pollScanStatus() {
                 statusDiv.innerHTML = '<p class="status-idle">Scan complete.</p>';
                 document.getElementById('btn-start-scan').disabled = false;
                 document.getElementById('btn-stop-scan').disabled = true;
+                // Reload scan list to pick up the new/updated scan
+                loadScansList();
                 loadResults(); loadStats();
             }
         }
     } catch(e) {}
 }
 
+// ─── Scan History ────────────────────────────────────────────────────
+
+async function loadScansList() {
+    try {
+        var resp = await fetch('/api/scans');
+        scansList = await resp.json();
+        renderScanSelector();
+        // Auto-select the most recent scan if none selected
+        if (!currentScanId && scansList.length > 0) {
+            currentScanId = scansList[0].scan_id;
+            document.getElementById('scan-selector').value = currentScanId;
+            onScanSelected();
+        } else if (scansList.length === 0) {
+            // No scans at all, load legacy results
+            loadResults();
+            loadStats();
+        }
+    } catch(e) {
+        console.error('Error loading scans:', e);
+        loadResults();  // Fallback to legacy
+        loadStats();
+    }
+}
+
+function renderScanSelector() {
+    var sel = document.getElementById('scan-selector');
+    if (scansList.length === 0) {
+        sel.innerHTML = '<option value="">No scans yet</option>';
+        document.getElementById('scan-meta-display').innerHTML = '';
+        return;
+    }
+    var html = '';
+    for (var i = 0; i < scansList.length; i++) {
+        var s = scansList[i];
+        var label = s.scan_id;
+        // Shorten label if too long
+        if (label.length > 50) label = label.substring(0, 50);
+        var selAttr = (currentScanId === s.scan_id) ? ' selected' : '';
+        html += '<option value="' + s.scan_id + '"' + selAttr + '>' + label + '</option>';
+    }
+    sel.innerHTML = html;
+}
+
+function onScanSelected() {
+    var sel = document.getElementById('scan-selector');
+    currentScanId = sel.value;
+    if (!currentScanId) {
+        // Load all results (legacy)
+        allHits = [];
+        rejectionCandidates = [];
+        loadResults();
+        loadStats();
+        document.getElementById('scan-meta-display').innerHTML = '';
+        return;
+    }
+    loadScanResults(currentScanId);
+    loadScanStats(currentScanId);
+}
+
+async function loadScanResults(scanId) {
+    try {
+        var resp = await fetch('/api/scans/' + encodeURIComponent(scanId) + '/results');
+        var data = await resp.json();
+        if (data.error) {
+            console.error('Scan results error:', data.error);
+            return;
+        }
+        // Render scan meta display
+        renderScanMetaDisplay(data.meta || {}, data.results);
+        
+        // Process results into allHits
+        allHits = [];
+        var results = data.results || [];
+        for (var i = 0; i < results.length; i++) {
+            var result = results[i];
+            if (result.data && result.data.hits) {
+                for (var j = 0; j < result.data.hits.length; j++) {
+                    result.data.hits[j]._source = result.name;
+                    allHits.push(result.data.hits[j]);
+                }
+            }
+            if (result.type === 'summary' && result.data.files) {
+                for (var fname in result.data.files) {
+                    if (!result.data.files.hasOwnProperty(fname)) continue;
+                    var info = result.data.files[fname];
+                    if (info.top_hits) {
+                        for (var k = 0; k < info.top_hits.length; k++) {
+                            info.top_hits[k]._source = fname;
+                            info.top_hits[k].on_off = info.on_off;
+                            allHits.push(info.top_hits[k]);
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Load rejection results if present for this scan
+        if (data.rejection && data.rejection.candidates) {
+            rejectionCandidates = data.rejection.candidates;
+            renderRejectionSummary(data.rejection.summary, data.rejection.parameters);
+        } else {
+            rejectionCandidates = [];
+            document.getElementById('rejection-summary').innerHTML =
+                '<p style="color:#546e7a;">No rejection run for this scan yet.</p>';
+        }
+        
+        renderHitTable();
+        renderHitChart();
+    } catch(e) {
+        console.error('Error loading scan results:', e);
+    }
+}
+
+async function loadScanStats(scanId) {
+    try {
+        var resp = await fetch('/api/stats?scan_id=' + encodeURIComponent(scanId));
+        var data = await resp.json();
+        document.getElementById('stat-total').textContent = 'Total Hits: ' + data.total_hits;
+        document.getElementById('stat-on').textContent = 'ON: ' + data.on_hits;
+        document.getElementById('stat-off').textContent = 'OFF: ' + data.off_hits;
+        document.getElementById('stat-top').textContent = 'Top SNR: ' + data.top_snr;
+    } catch(e) {}
+}
+
+function renderScanMetaDisplay(meta, results) {
+    var display = document.getElementById('scan-meta-display');
+    if (!meta || !meta.scan_id) {
+        display.innerHTML = '<span style="color:#546e7a;">' + (results ? results.length + ' result files' : '') + '</span>';
+        return;
+    }
+    var html = '';
+    // Status badge
+    var status = meta.status || 'unknown';
+    html += '<span class="sm-tag status-' + status + '">' + status.toUpperCase() + '</span>';
+    // Target
+    if (meta.target) html += '<span class="sm-sep">|</span><span><strong>Target:</strong> ' + meta.target + '</span>';
+    // Date
+    if (meta.timestamp) {
+        var dt = meta.timestamp.replace('T', ' ').substring(0, 16);
+        html += '<span class="sm-sep">|</span><span>' + dt + '</span>';
+    }
+    // Hit count
+    var stats = meta.stats || {};
+    if (stats.total_hits !== undefined) {
+        html += '<span class="sm-sep">|</span><span>Hits: ' + stats.total_hits;
+        if (stats.on_hits !== undefined) html += ' (ON:' + stats.on_hits + ' / OFF:' + stats.off_hits + ')';
+        html += '</span>';
+    }
+    // Duration
+    if (stats.duration_s && stats.duration_s > 0) {
+        var mins = Math.floor(stats.duration_s / 60);
+        var secs = Math.round(stats.duration_s % 60);
+        html += '<span class="sm-sep">|</span><span>' + mins + 'm ' + secs + 's</span>';
+    }
+    // Parameters
+    var p = meta.parameters || {};
+    if (p.max_drift) html += '<span class="sm-sep">|</span><span>drift \u2264 ' + p.max_drift + ' Hz/s</span>';
+    if (p.snr) html += '<span class="sm-sep">|</span><span>SNR \u2265 ' + p.snr + '</span>';
+    display.innerHTML = html;
+}
+
+function renderRejectionSummary(summary, params) {
+    var summaryDiv = document.getElementById('rejection-summary');
+    if (!summary) {
+        summaryDiv.innerHTML = '<p style="color:#546e7a;">No rejection run for this scan yet.</p>';
+        return;
+    }
+    summaryDiv.innerHTML = '<div class="rejection-stats">' +
+        '<span class="rstat"><span class="rstat-label">Total ON</span><span class="rstat-val">' + summary.total_on.toLocaleString() + '</span></span>' +
+        '<span class="rstat"><span class="rstat-label">Total OFF</span><span class="rstat-val">' + summary.total_off.toLocaleString() + '</span></span>' +
+        '<span class="rstat"><span class="rstat-label">Rejected (RFI)</span><span class="rstat-val" style="color:#ef5350;">' + summary.rejected_rfi.toLocaleString() + ' (' + summary.rejection_rate + '%)</span></span>' +
+        '<span class="rstat"><span class="rstat-label">Candidates</span><span class="rstat-val" style="color:' + (summary.candidates > 0 ? '#66bb6a' : '#546e7a') + ';font-weight:bold;font-size:1.3em;">' + summary.candidates.toLocaleString() + '</span></span></div>';
+}
+
 // ─── Results ──────────────────────────────────────────────────────────
 async function loadResults() {
     try {
-        var resp = await fetch('/api/results');
+        var url = '/api/results';
+        if (currentScanId) url += '?scan_id=' + encodeURIComponent(currentScanId);
+        var resp = await fetch(url);
         var data = await resp.json();
         allHits = [];
         for (var i = 0; i < data.length; i++) {
@@ -816,7 +998,9 @@ function renderHitChart() {
 
 async function loadStats() {
     try {
-        var resp = await fetch('/api/stats');
+        var url = '/api/stats';
+        if (currentScanId) url += '?scan_id=' + encodeURIComponent(currentScanId);
+        var resp = await fetch(url);
         var data = await resp.json();
         document.getElementById('stat-total').textContent = 'Total Hits: ' + data.total_hits;
         document.getElementById('stat-on').textContent = 'ON: ' + data.on_hits;
@@ -834,7 +1018,7 @@ async function runRejection() {
     var params = {
         tolerance_mhz: parseFloat(document.getElementById('reject-freq-tol').value),
         drift_tolerance: parseFloat(document.getElementById('reject-drift-tol').value),
-        source: 'validation_50mhz',
+        source: currentScanId || 'validation_50mhz',
     };
     try {
         var resp = await fetch('/api/reject', {
@@ -852,6 +1036,8 @@ async function runRejection() {
             '<span class="rstat"><span class="rstat-label">Candidates</span><span class="rstat-val" style="color:' + (s.candidates > 0 ? '#66bb6a' : '#546e7a') + ';font-weight:bold;font-size:1.3em;">' + s.candidates.toLocaleString() + '</span></span></div>';
         if (s.candidates > 0) document.getElementById('results-filter').value = 'candidates';
         renderHitTable(); renderHitChart();
+        // Refresh scan list to pick up updated meta
+        loadScansList();
     } catch(e) {
         summaryDiv.innerHTML = '<p style="color:#ef5350;">Error: ' + e.message + '</p>';
     } finally { btn.disabled = false; btn.textContent = 'Run ON/OFF Rejection'; }

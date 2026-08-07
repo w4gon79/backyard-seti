@@ -18,6 +18,8 @@ import glob as glob_module
 import threading
 import time
 import subprocess
+import re
+from datetime import datetime
 from pathlib import Path
 from flask import Flask, render_template, jsonify, request, send_from_directory
 import numpy as np
@@ -81,6 +83,8 @@ scan_state = {
     'pid': None,
     'progress': {},
     'log_lines': [],
+    'active_scan_id': None,  # Track which scan_id is running
+    'scan_start_time': None,
 }
 
 # Track downloads
@@ -203,22 +207,316 @@ def api_blsearch():
         return jsonify({'error': str(e)}), 500
 
 
-# ─── API: Scan Results ────────────────────────────────────────────────
+# ─── API: Scan History ────────────────────────────────────────────────
+
+def _load_scan_meta(scan_dir):
+    """Load scan_meta.json from a scan directory."""
+    meta_path = os.path.join(scan_dir, 'scan_meta.json')
+    if os.path.isfile(meta_path):
+        try:
+            with open(meta_path) as f:
+                return json.load(f)
+        except:
+            pass
+    return None
+
+
+def _discover_scans():
+    """Discover all scan result sets in the results directory.
+    
+    A scan is any directory under results/ that contains a scan_meta.json file.
+    Also includes legacy directories (validation_50mhz) via migration.
+    """
+    scans = []
+    
+    if not os.path.isdir(RESULTS_DIR):
+        return scans
+    
+    for entry in os.listdir(RESULTS_DIR):
+        full_path = os.path.join(RESULTS_DIR, entry)
+        if not os.path.isdir(full_path):
+            continue
+        
+        meta = _load_scan_meta(full_path)
+        if meta:
+            scans.append(meta)
+        elif entry == 'validation_50mhz':
+            # Legacy: create a virtual meta if none exists
+            scans.append({
+                'scan_id': 'validation_50mhz',
+                'target': 'PROXCEN',
+                'timestamp': '2026-08-06T20:00:00',
+                'status': 'complete',
+                'parameters': {},
+                'stats': {},
+                '_dir': entry,
+            })
+    
+    # Sort by timestamp descending (newest first)
+    scans.sort(key=lambda s: s.get('timestamp', ''), reverse=True)
+    return scans
+
+
+def _get_scan_dir(scan_id):
+    """Resolve a scan_id to its directory path."""
+    # Prevent path traversal
+    if not re.match(r'^[A-Za-z0-9_-]+$', scan_id):
+        return None
+    scan_dir = os.path.join(RESULTS_DIR, scan_id)
+    if os.path.isdir(scan_dir):
+        return scan_dir
+    return None
+
+
+@app.route('/api/scans')
+def api_scans_list():
+    """List all scan result sets, newest first."""
+    scans = _discover_scans()
+    # Add hit counts by quickly scanning for _hits.json files
+    for scan in scans:
+        scan_dir = _get_scan_dir(scan['scan_id'])
+        if scan_dir:
+            # If meta already has total_hits, trust it
+            if not scan.get('stats', {}).get('total_hits'):
+                hit_files = glob_module.glob(
+                    os.path.join(scan_dir, '**/*_hits.json'), recursive=True)
+                on_count = 0
+                off_count = 0
+                total = 0
+                for hf in hit_files:
+                    fname = os.path.basename(hf)
+                    is_on = '_S_' in fname
+                    try:
+                        with open(hf) as f:
+                            data = json.load(f)
+                        n = len(data.get('hits', []))
+                        total += n
+                        if is_on:
+                            on_count += n
+                        else:
+                            off_count += n
+                    except:
+                        pass
+                if 'stats' not in scan:
+                    scan['stats'] = {}
+                scan['stats']['total_hits'] = total
+                scan['stats']['on_hits'] = on_count
+                scan['stats']['off_hits'] = off_count
+    return jsonify(scans)
+
+
+@app.route('/api/scans/<scan_id>/results')
+def api_scan_results(scan_id):
+    """Get all hits for a specific scan."""
+    scan_dir = _get_scan_dir(scan_id)
+    if not scan_dir:
+        return jsonify({'error': f'Scan not found: {scan_id}'}), 404
+    
+    results = []
+    
+    for fpath in glob_module.glob(
+        os.path.join(scan_dir, '**/*_hits.json'), recursive=True):
+        try:
+            with open(fpath) as fh:
+                data = json.load(fh)
+            if isinstance(data, dict) and 'hits' in data:
+                fname = os.path.basename(fpath)
+                results.append({
+                    'type': 'file',
+                    'name': fname,
+                    'data': data,
+                })
+        except:
+            pass
+    
+    # Also check for summary files
+    for fpath in glob_module.glob(os.path.join(scan_dir, '*_summary.json')):
+        try:
+            with open(fpath) as fh:
+                data = json.load(fh)
+            if isinstance(data, dict) and 'files' in data:
+                results.append({
+                    'type': 'summary',
+                    'name': os.path.basename(fpath),
+                    'data': data,
+                })
+        except:
+            pass
+    
+    # Include scan metadata
+    meta = _load_scan_meta(scan_dir) or {}
+    
+    # Include rejection results if they exist
+    reject_path = os.path.join(scan_dir, 'rejection', 'rejection_results.json')
+    rejection = None
+    if os.path.isfile(reject_path):
+        try:
+            with open(reject_path) as f:
+                rejection = json.load(f)
+        except:
+            pass
+    
+    return jsonify({
+        'scan_id': scan_id,
+        'meta': meta,
+        'results': results,
+        'rejection': rejection,
+    })
+
+
+@app.route('/api/scans/create', methods=['POST'])
+def api_scans_create():
+    """Create a new scan result set. Returns scan_id."""
+    params = request.json or {}
+    target = params.get('target', 'PROXCEN').upper()
+    
+    # Generate scan_id: TARGET_YYYY-MM-DD_HHMM
+    now = datetime.now()
+    scan_id = f"{target}_{now.strftime('%Y-%m-%d_%H%M')}"
+    
+    # Ensure uniqueness
+    scan_dir = os.path.join(RESULTS_DIR, scan_id)
+    counter = 1
+    while os.path.isdir(scan_dir):
+        scan_id = f"{target}_{now.strftime('%Y-%m-%d_%H%M')}_{counter}"
+        scan_dir = os.path.join(RESULTS_DIR, scan_id)
+        counter += 1
+    
+    os.makedirs(scan_dir)
+    
+    meta = {
+        'scan_id': scan_id,
+        'target': target,
+        'timestamp': now.isoformat(timespec='seconds'),
+        'status': 'running',
+        'parameters': {
+            'sub_band_chans': params.get('sub_band_chans', 262144),
+            'overlap': params.get('overlap', 512),
+            'max_drift': params.get('max_drift', 5.0),
+            'snr': params.get('snr', 5.0),
+            'f_start': params.get('f_start', None),
+            'f_stop': params.get('f_stop', None),
+            'files': params.get('files', []),
+        },
+        'stats': {},
+    }
+    
+    meta_path = os.path.join(scan_dir, 'scan_meta.json')
+    with open(meta_path, 'w') as f:
+        json.dump(meta, f, indent=2)
+    
+    return jsonify({'scan_id': scan_id, 'scan_dir': scan_dir})
+
+
+@app.route('/api/scans/<scan_id>/complete', methods=['POST'])
+def api_scans_complete(scan_id):
+    """Mark a scan as complete and update its metadata."""
+    scan_dir = _get_scan_dir(scan_id)
+    if not scan_dir:
+        return jsonify({'error': f'Scan not found: {scan_id}'}), 404
+    
+    meta_path = os.path.join(scan_dir, 'scan_meta.json')
+    meta = _load_scan_meta(scan_dir) or {}
+    
+    # Calculate stats from result files
+    on_hits = 0
+    off_hits = 0
+    total_hits = 0
+    
+    for fpath in glob_module.glob(
+        os.path.join(scan_dir, '**/*_hits.json'), recursive=True):
+        try:
+            with open(fpath) as f:
+                data = json.load(f)
+            hits = data.get('hits', [])
+            fname = os.path.basename(fpath)
+            is_on = '_S_' in fname
+            count = len(hits)
+            total_hits += count
+            if is_on:
+                on_hits += count
+            else:
+                off_hits += count
+        except:
+            pass
+    
+    # Update with any provided stats
+    params = request.json or {}
+    duration = params.get('duration_s', 0)
+    
+    meta['status'] = 'complete'
+    meta['stats'] = {
+        'total_hits': total_hits,
+        'on_hits': on_hits,
+        'off_hits': off_hits,
+        'duration_s': duration,
+    }
+    
+    with open(meta_path, 'w') as f:
+        json.dump(meta, f, indent=2)
+    
+    return jsonify(meta)
+
+
+# ─── API: Scan Results (scan-aware) ───────────────────────────────────
 
 @app.route('/api/results')
 def api_results():
-    """Return hit results from pipeline output."""
+    """Return hit results from pipeline output.
+    
+    Query params:
+      - scan_id: If provided, load results from that scan's directory only.
+      - If not provided, load from all known result directories (legacy behavior).
+    """
+    scan_id = request.args.get('scan_id', None)
+    
+    if scan_id:
+        scan_dir = _get_scan_dir(scan_id)
+        if not scan_dir:
+            return jsonify({'error': f'Scan not found: {scan_id}'}), 404
+        
+        results = []
+        for fpath in glob_module.glob(
+            os.path.join(scan_dir, '**/*_hits.json'), recursive=True):
+            try:
+                with open(fpath) as fh:
+                    data = json.load(fh)
+                if isinstance(data, dict) and 'hits' in data:
+                    results.append({
+                        'type': 'file',
+                        'name': os.path.basename(fpath),
+                        'data': data,
+                    })
+            except:
+                pass
+        
+        # Also check for summary files
+        for fpath in glob_module.glob(os.path.join(scan_dir, '*_summary.json')):
+            try:
+                with open(fpath) as fh:
+                    data = json.load(fh)
+                if isinstance(data, dict) and 'files' in data:
+                    results.append({
+                        'type': 'summary',
+                        'name': os.path.basename(fpath),
+                        'data': data,
+                    })
+            except:
+                pass
+        
+        return jsonify(results)
+    
+    # Legacy: load from all known result directories
     results = []
     
     # Scan validation results
     val_dir = os.path.join(RESULTS_DIR, 'validation_50mhz')
     if os.path.isdir(val_dir):
         for f in os.listdir(val_dir):
-            if f.endswith('.json'):
+            if f.endswith('.json') and f != 'scan_meta.json':
                 with open(os.path.join(val_dir, f)) as fh:
                     data = json.load(fh)
                     if isinstance(data, dict) and 'files' in data:
-                        # Combined summary
                         results.append({
                             'type': 'summary',
                             'name': f,
@@ -314,6 +612,7 @@ def api_scan_status():
     """Get current scan status."""
     return jsonify({
         'active': scan_state['active'],
+        'scan_id': scan_state.get('active_scan_id'),
         'progress': scan_state['progress'],
         'log_tail': scan_state['log_lines'][-50:],
     })
@@ -338,11 +637,44 @@ def api_scan_start():
     f_stop = params.get('f_stop', None)
     files_list = params.get('files', None)  # Optional: list of specific file paths
     
-    # Build command
+    # Create a scan result set first
+    target = params.get('target', 'PROXCEN')
+    now = datetime.now()
+    scan_id = f"{target.upper()}_{now.strftime('%Y-%m-%d_%H%M')}"
+    scan_dir = os.path.join(RESULTS_DIR, scan_id)
+    # Ensure uniqueness
+    counter = 1
+    while os.path.isdir(scan_dir):
+        scan_id = f"{target.upper()}_{now.strftime('%Y-%m-%d_%H%M')}_{counter}"
+        scan_dir = os.path.join(RESULTS_DIR, scan_id)
+        counter += 1
+    os.makedirs(scan_dir)
+    
+    # Write scan_meta.json
+    scan_meta = {
+        'scan_id': scan_id,
+        'target': target.upper(),
+        'timestamp': now.isoformat(timespec='seconds'),
+        'status': 'running',
+        'parameters': {
+            'sub_band_chans': sub_band_chans,
+            'overlap': overlap,
+            'max_drift': max_drift,
+            'snr': snr,
+            'f_start': f_start,
+            'f_stop': f_stop,
+            'files': files_list if files_list else [],
+        },
+        'stats': {},
+    }
+    with open(os.path.join(scan_dir, 'scan_meta.json'), 'w') as f:
+        json.dump(scan_meta, f, indent=2)
+    
+    # Build command - output to the scan directory
     py = r'C:\Users\w4gon\AppData\Local\Programs\Python\Python311\python.exe'
     script = os.path.join(SETI_ROOT, 'src', 'fine_res_pipeline.py')
     
-    cmd = [py, script, '--out', os.path.join(RESULTS_DIR, 'dashboard_scan')]
+    cmd = [py, script, '--out', scan_dir]
     
     if files_list and len(files_list) > 0:
         # Scan specific files instead of entire data-dir
@@ -373,6 +705,8 @@ def api_scan_start():
     def run_scan():
         scan_state['active'] = True
         scan_state['log_lines'] = []
+        scan_state['active_scan_id'] = scan_id
+        scan_state['scan_start_time'] = time.time()
         try:
             proc = subprocess.Popen(
                 cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -390,11 +724,18 @@ def api_scan_start():
         finally:
             scan_state['active'] = False
             scan_state['pid'] = None
+            # Complete the scan: update scan_meta.json
+            elapsed = time.time() - scan_state.get('scan_start_time', time.time())
+            try:
+                _complete_scan_meta(scan_id, elapsed)
+            except Exception as e:
+                scan_state['log_lines'].append(f'WARN: Could not update scan_meta: {e}')
+            scan_state['active_scan_id'] = None
     
     thread = threading.Thread(target=run_scan, daemon=True)
     thread.start()
     
-    return jsonify({'status': 'started', 'pid': scan_state.get('pid')})
+    return jsonify({'status': 'started', 'scan_id': scan_id, 'pid': scan_state.get('pid')})
 
 
 @app.route('/api/scan/stop', methods=['POST'])
@@ -642,21 +983,87 @@ def api_download_cancel():
 
 # ─── API: Statistics ──────────────────────────────────────────────────
 
+def _complete_scan_meta(scan_id, duration_s=0):
+    """Update scan_meta.json with final stats after scan completes."""
+    scan_dir = _get_scan_dir(scan_id)
+    if not scan_dir:
+        return
+    
+    meta = _load_scan_meta(scan_dir) or {
+        'scan_id': scan_id,
+        'target': 'unknown',
+        'timestamp': datetime.now().isoformat(timespec='seconds'),
+    }
+    
+    on_hits = 0
+    off_hits = 0
+    total_hits = 0
+    
+    for fpath in glob_module.glob(
+        os.path.join(scan_dir, '**/*_hits.json'), recursive=True):
+        try:
+            with open(fpath) as f:
+                data = json.load(f)
+            hits = data.get('hits', [])
+            fname = os.path.basename(fpath)
+            is_on = '_S_' in fname
+            count = len(hits)
+            total_hits += count
+            if is_on:
+                on_hits += count
+            else:
+                off_hits += count
+        except:
+            pass
+    
+    meta['status'] = 'complete'
+    meta['stats'] = {
+        'total_hits': total_hits,
+        'on_hits': on_hits,
+        'off_hits': off_hits,
+        'duration_s': round(duration_s, 1),
+    }
+    
+    with open(os.path.join(scan_dir, 'scan_meta.json'), 'w') as f:
+        json.dump(meta, f, indent=2)
+
+
 @app.route('/api/stats')
 def api_stats():
-    """Aggregate statistics across all results."""
+    """Aggregate statistics. If scan_id provided, scope to that scan only."""
+    scan_id = request.args.get('scan_id', None)
+    
     total_hits = 0
     on_hits = 0
     off_hits = 0
     top_snr = 0
     top_hit = None
     
-    # Parse all result JSONs
-    for pattern in ['validation_50mhz/**/*_hits.json', 
-                    'validation_50mhz/*_summary.json',
-                    'fine_pipeline/**/*_hits.json',
-                    'dashboard_scan/**/*_hits.json']:
-        for fpath in glob_module.glob(os.path.join(RESULTS_DIR, pattern), recursive=True):
+    if scan_id:
+        scan_dir = _get_scan_dir(scan_id)
+        if not scan_dir:
+            return jsonify({'error': f'Scan not found: {scan_id}'}), 404
+        patterns = [os.path.join(scan_dir, '**/*_hits.json')]
+    else:
+        patterns = [
+            os.path.join(RESULTS_DIR, 'validation_50mhz', '**/*_hits.json'),
+            os.path.join(RESULTS_DIR, 'validation_50mhz', '*_summary.json'),
+            os.path.join(RESULTS_DIR, 'fine_pipeline', '**/*_hits.json'),
+        ]
+        # Also include any scan directories with scan_meta.json
+        for scan in _discover_scans():
+            sid = scan.get('scan_id', '')
+            if sid and sid != 'validation_50mhz':
+                sd = _get_scan_dir(sid)
+                if sd:
+                    patterns.append(os.path.join(sd, '**/*_hits.json'))
+    
+    seen_files = set()
+    for pattern in patterns:
+        for fpath in glob_module.glob(pattern, recursive=True):
+            if fpath in seen_files:
+                continue
+            seen_files.add(fpath)
             try:
                 with open(fpath) as f:
                     data = json.load(f)
@@ -702,7 +1109,7 @@ def api_reject():
     params = request.json or {}
     tolerance_mhz = params.get('tolerance_mhz', 0.001)
     drift_tolerance = params.get('drift_tolerance', 0.5)
-    source = params.get('source', 'validation_50mhz')
+    source = params.get('source', params.get('scan_id', 'validation_50mhz'))
     
     # Load all hits from the specified result set
     source_dir = os.path.join(RESULTS_DIR, source)
@@ -819,7 +1226,19 @@ def api_reject():
 
 @app.route('/api/rejection/results')
 def api_rejection_results():
-    """Get saved rejection results."""
+    """Get saved rejection results. If scan_id provided, scope to that scan."""
+    scan_id = request.args.get('scan_id', None)
+    
+    if scan_id:
+        scan_dir = _get_scan_dir(scan_id)
+        if scan_dir:
+            reject_path = os.path.join(scan_dir, 'rejection', 'rejection_results.json')
+            if os.path.isfile(reject_path):
+                with open(reject_path) as f:
+                    return jsonify(json.load(f))
+        return jsonify({'error': 'No rejection results for this scan'}), 404
+    
+    # Legacy: search known directories
     for source in ['validation_50mhz', 'fine_pipeline', 'dashboard_scan']:
         reject_path = os.path.join(RESULTS_DIR, source, 'rejection', 'rejection_results.json')
         if os.path.isfile(reject_path):

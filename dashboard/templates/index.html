@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>📡 Backyard SETI Dashboard</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=8">
-    <link rel="stylesheet" href="/static/css/style.css?v=19">
+    <link rel="stylesheet" href="/static/css/style.css?v=20">
     <link rel="stylesheet" href="/static/css/celestial.css?v=1">
     <!-- Plotly for charts -->
     <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
@@ -139,6 +139,12 @@
                 </div>
             </div>
             <div class="results-content">
+                <!-- Scan History Selector -->
+                <div class="scan-history-bar">
+                    <label>Scan:</label>
+                    <select id="scan-selector"><option value="">Loading...</option></select>
+                    <span id="scan-meta-display" class="scan-meta-display"></span>
+                </div>
                 <!-- Rejection Controls -->
                 <div class="rejection-panel">
                     <div class="rejection-controls">
@@ -178,6 +184,6 @@
     </div>
 </div>
 
-<script src="/static/js/dashboard.js?v=36"></script>
+<script src="/static/js/dashboard.js?v=37"></script>
 </body>
 </html>
