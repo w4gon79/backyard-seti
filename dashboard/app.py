@@ -191,9 +191,21 @@ def api_header():
     if not filepath:
         return jsonify({'error': 'No file specified'}), 400
     
-    full_path = os.path.join(SETI_ROOT, filepath)
-    if not os.path.isfile(full_path):
-        return jsonify({'error': 'File not found'}), 404
+    # Try multiple path resolutions
+    candidates = [
+        os.path.join(SETI_ROOT, filepath),
+        os.path.join(SETI_ROOT, 'data', filepath),
+        os.path.join(DATA_DIR, filepath),
+        filepath,  # absolute path
+    ]
+    full_path = None
+    for c in candidates:
+        if os.path.isfile(c):
+            full_path = c
+            break
+    
+    if not full_path:
+        return jsonify({'error': f'File not found: tried {candidates}'}), 404
     
     try:
         from blimpy import Waterfall
@@ -246,6 +258,7 @@ def api_scan_start():
     snr = params.get('snr', 5.0)
     f_start = params.get('f_start', None)
     f_stop = params.get('f_stop', None)
+    files_list = params.get('files', None)  # Optional: list of specific file paths
     
     # Build command
     py = r'C:\Users\w4gon\AppData\Local\Programs\Python\Python311\python.exe'
@@ -253,7 +266,23 @@ def api_scan_start():
     
     cmd = [py, script, '--out', os.path.join(RESULTS_DIR, 'dashboard_scan')]
     
-    if resolution == 'fine':
+    if files_list and len(files_list) > 0:
+        # Scan specific files instead of entire data-dir
+        for fpath in files_list:
+            # Resolve each file path
+            candidates = [
+                os.path.join(SETI_ROOT, fpath),
+                os.path.join(SETI_ROOT, 'data', fpath),
+                os.path.join(DATA_DIR, fpath),
+            ]
+            resolved = None
+            for c in candidates:
+                if os.path.isfile(c):
+                    resolved = c
+                    break
+            if resolved:
+                cmd.extend(['--file', resolved])
+    elif resolution == 'fine':
         cmd.extend(['--data-dir', FINE_DIR])
     else:
         cmd.extend(['--data-dir', MID_DIR])

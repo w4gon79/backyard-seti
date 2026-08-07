@@ -288,7 +288,7 @@ def process_file(filepath, out_dir, sub_band_chans=8192, overlap_chans=512,
 def main():
     parser = argparse.ArgumentParser(
         description='Fine-res turbo_seti pipeline')
-    parser.add_argument('--file', help='Single fine-res .h5 file')
+    parser.add_argument('--file', action='append', help='Fine-res .h5 file (can be specified multiple times)')
     parser.add_argument('--data-dir', help='Directory of fine-res files')
     parser.add_argument('--out', '-o', default='results/fine_pipeline',
                         help='Output directory')
@@ -308,7 +308,7 @@ def main():
 
     files = []
     if args.file:
-        files = [args.file]
+        files = args.file
     elif args.data_dir:
         files = sorted([
             os.path.join(args.data_dir, f)

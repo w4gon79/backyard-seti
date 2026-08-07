@@ -6,6 +6,9 @@ let rejectionCandidates = [];
 let statsInterval = null;
 let logInterval = null;
 let celestialTarget = null;
+let selectedFiles = new Set(); // Set of file paths currently selected
+let localDataCache = {};       // Cached file metadata from /api/targets
+let fileHeaderCache = {};      // Cached header info keyed by file path
 
 // ─── Init ─────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
@@ -19,6 +22,8 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('btn-start-scan').onclick = startScan;
     document.getElementById('btn-stop-scan').onclick = stopScan;
     document.getElementById('btn-refresh').onclick = () => { loadResults(); loadStats(); };
+    document.getElementById('btn-select-all').onclick = selectAllFiles;
+    document.getElementById('btn-select-none').onclick = selectNoneFiles;
     document.getElementById('btn-full-band').onclick = () => {
         document.getElementById('ctrl-f-start').value = '2744';
         document.getElementById('ctrl-f-stop').value = '3324';
@@ -218,19 +223,44 @@ async function searchBL() {
 
         if (data.data && data.data.length > 0) {
             const first = data.data[0];
-            if (first.ra && first.dec) {
-                const raHours = parseRA(first.ra);
-                const decDeg = parseDec(first.dec);
+            // BL API uses 'ra' (degrees) and 'decl' (degrees) - convert RA to hours
+            var raVal = first.ra || first.ra_hours;
+            var decVal = first.decl || first.dec;
+            if (raVal && decVal) {
+                // BL API returns RA in degrees; convert to hours for plotTargetOnMap
+                var raHours = typeof raVal === 'number' ? raVal / 15.0 : parseRA(raVal);
+                var decDeg = typeof decVal === 'number' ? decVal : parseDec(decVal);
                 if (raHours !== null && decDeg !== null) {
                     plotTargetOnMap(target.toUpperCase(), raHours, decDeg);
                 }
             }
 
             var html = '<p style="color:#66bb6a;margin-bottom:8px;">Found ' + data.data.length + ' observations</p>';
-            html += '<table><thead><tr><th>Date</th><th>Target</th><th>Type</th><th>Res</th><th>Size</th></tr></thead><tbody>';
+            html += '<table><thead><tr><th>Date</th><th>Target</th><th>RA</th><th>Dec</th><th>Type</th><th>Res</th><th>Size</th><th>DL</th></tr></thead><tbody>';
             for (var i = 0; i < Math.min(data.data.length, 50); i++) {
                 var obs = data.data[i];
-                html += '<tr><td>' + (obs.mjd || obs.tstart || '?') + '</td><td>' + (obs.source_name || target) + '</td><td>' + (obs.file_type || '') + '</td><td>' + (obs.resolution || '?') + '</td><td>' + (obs.file_size ? (obs.file_size / 1e9).toFixed(1) + ' GB' : '?') + '</td></tr>';
+                var raVal = obs.ra || obs.ra_hours || '?';
+                var decVal = obs.decl || obs.dec || '?';
+                // BL API returns RA in degrees; display as-is
+                var raHoursVal = typeof raVal === 'number' ? raVal / 15.0 : parseRA(raVal);
+                var decDegVal = typeof decVal === 'number' ? decVal : parseDec(decVal);
+                var safeName = (obs.target || obs.source_name || target).replace(/'/g, "");
+                html += '<tr onclick="onBLRowClick(\'' + safeName + '\', ' + (raHoursVal || 0) + ', ' + (decDegVal || 0) + ')">';
+                html += '<td>' + (obs.mjd || obs.tstart || '?') + '</td>';
+                html += '<td>' + (obs.target || obs.source_name || target) + '</td>';
+                html += '<td>' + raVal + '</td>';
+                html += '<td>' + decVal + '</td>';
+                html += '<td>' + (obs.file_type || '') + '</td>';
+                html += '<td>' + (obs.resolution || '?') + '</td>';
+                var obsSize = obs.size || obs.file_size;
+                html += '<td>' + (obsSize ? (obsSize / 1e9).toFixed(1) + ' GB' : '?') + '</td>';
+                var dlUrl = obs.url || '';
+                if (dlUrl) {
+                    html += '<td><a href="' + dlUrl + '" target="_blank" class="dl-link" onclick="event.stopPropagation()" title="Download">⬇</a></td>';
+                } else {
+                    html += '<td>—</td>';
+                }
+                html += '</tr>';
             }
             html += '</tbody></table>';
             resultsDiv.innerHTML = html;
@@ -239,6 +269,12 @@ async function searchBL() {
         }
     } catch(e) {
         resultsDiv.innerHTML = '<p style="color:#ef5350;">Error: ' + e.message + '</p>';
+    }
+}
+
+function onBLRowClick(name, ra, dec) {
+    if (ra && dec) {
+        plotTargetOnMap(name, ra, dec);
     }
 }
 
@@ -259,7 +295,8 @@ function parseDec(dec) {
     return parseFloat(dec) || null;
 }
 
-// ─── Local Data ───────────────────────────────────────────────────────
+// ─── Local Data with File Selection ──────────────────────────────────
+
 async function loadLocalData() {
     var div = document.getElementById('local-data-list');
     div.innerHTML = '<p style="color:#8ab4f8;">Loading local data...</p>';
@@ -267,8 +304,10 @@ async function loadLocalData() {
     try {
         var resp = await fetch('/api/targets');
         var data = await resp.json();
+        localDataCache = data;
 
         var html = '';
+        var totalFiles = 0;
         for (var target in data) {
             if (!data.hasOwnProperty(target)) continue;
             var files = data[target];
@@ -278,27 +317,212 @@ async function loadLocalData() {
             for (var i = 0; i < (files.fine || []).length; i++) {
                 var f = files.fine[i];
                 var isOn = f.name.indexOf('_S_') !== -1;
-                html += '<div class="data-file-row" onclick="inspectFile(\'' + f.path + '\')"><span>' + f.name + '</span><span><span class="file-type fine">' + (isOn ? 'ON' : 'OFF') + '</span> ' + f.size_gb + ' GB</span></div>';
+                var isSelected = selectedFiles.has(f.path);
+                html += '<div class="data-file-row' + (isSelected ? ' selected' : '') + '" data-path="' + f.path + '" onclick="toggleFileSelection(\'' + f.path + '\')">';
+                html += '<span>' + f.name + '</span>';
+                html += '<span><span class="file-type fine">' + (isOn ? 'ON' : 'OFF') + '</span> ' + f.size_gb + ' GB</span>';
+                html += '</div>';
+                totalFiles++;
             }
             if (midCount > 0) {
                 html += '<div style="padding:4px 8px;color:#546e7a;font-size:0.8em;">+ ' + midCount + ' mid-res files</div>';
             }
         }
         div.innerHTML = html || '<p style="color:#546e7a;">No local data found.</p>';
+
+        // Show selection controls if there are files
+        var selControls = document.getElementById('file-selection-controls');
+        if (totalFiles > 0) {
+            selControls.style.display = 'flex';
+        } else {
+            selControls.style.display = 'none';
+        }
+        updateSelectionBadge();
+        updateScanBadge();
+        // Re-apply selections to detail panel
+        refreshFileDetailPanel();
     } catch(e) {
         div.innerHTML = '<p style="color:#ef5350;">Error: ' + e.message + '</p>';
     }
 }
 
-async function inspectFile(path) {
-    try {
-        var resp = await fetch('/api/header?file=' + path);
-        var data = await resp.json();
-        if (data.error) { alert(data.error); return; }
-        alert(JSON.stringify(data.header, null, 2));
-    } catch(e) {
-        alert('Error: ' + e.message);
+function toggleFileSelection(path) {
+    if (selectedFiles.has(path)) {
+        selectedFiles.delete(path);
+    } else {
+        selectedFiles.add(path);
+        // Fetch header if not cached
+        if (!fileHeaderCache[path]) {
+            fetchFileHeader(path);
+        }
     }
+
+    // Update row visual
+    var row = document.querySelector('.data-file-row[data-path="' + CSS.escape(path) + '"]');
+    if (row) {
+        if (selectedFiles.has(path)) {
+            row.classList.add('selected');
+        } else {
+            row.classList.remove('selected');
+        }
+    }
+
+    updateSelectionBadge();
+    updateScanBadge();
+    refreshFileDetailPanel();
+}
+
+async function fetchFileHeader(path) {
+    try {
+        var resp = await fetch('/api/header?file=' + encodeURIComponent(path));
+        var data = await resp.json();
+        if (!data.error) {
+            fileHeaderCache[path] = data;
+            refreshFileDetailPanel();
+        }
+    } catch(e) {
+        // Silently fail; detail panel just won't have this file's info
+    }
+}
+
+function selectAllFiles() {
+    for (var target in localDataCache) {
+        if (!localDataCache.hasOwnProperty(target)) continue;
+        var files = localDataCache[target];
+        var allFiles = (files.fine || []).concat(files.mid || []);
+        for (var i = 0; i < allFiles.length; i++) {
+            selectedFiles.add(allFiles[i].path);
+            if (!fileHeaderCache[allFiles[i].path]) {
+                fetchFileHeader(allFiles[i].path);
+            }
+        }
+    }
+    // Update all rows
+    var rows = document.querySelectorAll('.data-file-row');
+    for (var i = 0; i < rows.length; i++) {
+        rows[i].classList.add('selected');
+    }
+    updateSelectionBadge();
+    updateScanBadge();
+    refreshFileDetailPanel();
+}
+
+function selectNoneFiles() {
+    selectedFiles.clear();
+    var rows = document.querySelectorAll('.data-file-row');
+    for (var i = 0; i < rows.length; i++) {
+        rows[i].classList.remove('selected');
+    }
+    updateSelectionBadge();
+    updateScanBadge();
+    refreshFileDetailPanel();
+}
+
+function updateSelectionBadge() {
+    var badge = document.getElementById('file-selection-count');
+    var count = selectedFiles.size;
+    badge.textContent = count + ' file' + (count !== 1 ? 's' : '') + ' selected';
+    if (count === 0) {
+        badge.classList.add('zero');
+    } else {
+        badge.classList.remove('zero');
+    }
+}
+
+function updateScanBadge() {
+    var badge = document.getElementById('scan-target-badge');
+    if (selectedFiles.size > 0) {
+        // Count total available files
+        var total = 0;
+        for (var target in localDataCache) {
+            if (!localDataCache.hasOwnProperty(target)) continue;
+            total += ((localDataCache[target].fine || []).length + (localDataCache[target].mid || []).length);
+        }
+        badge.textContent = 'Scanning: ' + selectedFiles.size + ' of ' + total + ' files';
+    } else {
+        badge.textContent = 'Scanning: All fine-res files';
+    }
+}
+
+function refreshFileDetailPanel() {
+    var panel = document.getElementById('file-detail-panel');
+    var content = document.getElementById('file-detail-content');
+
+    if (selectedFiles.size === 0) {
+        panel.style.display = 'none';
+        return;
+    }
+
+    panel.style.display = 'block';
+    var html = '';
+
+    selectedFiles.forEach(function(path) {
+        // Find file info from cache
+        var fileInfo = null;
+        for (var target in localDataCache) {
+            if (!localDataCache.hasOwnProperty(target)) continue;
+            var allFiles = (localDataCache[target].fine || []).concat(localDataCache[target].mid || []);
+            for (var i = 0; i < allFiles.length; i++) {
+                if (allFiles[i].path === path) {
+                    fileInfo = allFiles[i];
+                    break;
+                }
+            }
+            if (fileInfo) break;
+        }
+        if (!fileInfo) return;
+
+        var isOn = fileInfo.name.indexOf('_S_') !== -1;
+        var header = fileHeaderCache[path];
+        var headerData = header ? header.header : null;
+
+        html += '<div class="file-detail-card">';
+        html += '<div class="fd-name">' + fileInfo.name + '</div>';
+        html += '<div class="fd-grid">';
+
+        // Source name from header or filename
+        var sourceName = headerData ? (headerData.source_name || fileInfo.name.split('_')[3] || '?') : fileInfo.name.split('_')[3] || '?';
+        html += '<span>Source:</span><span class="fd-val">' + sourceName + '</span>';
+
+        // ON/OFF status
+        html += '<span>Cadence:</span><span class="fd-val"><span class="on-badge ' + (isOn ? 'on' : 'off') + '">' + (isOn ? 'ON' : 'OFF') + '</span></span>';
+
+        if (headerData) {
+            // MJD date
+            var mjd = headerData.tstart || headerData.mjd || '?';
+            html += '<span>MJD:</span><span class="fd-val">' + (typeof mjd === 'number' ? mjd.toFixed(4) : mjd) + '</span>';
+
+            // RA / Dec
+            var ra = headerData.src_raj || headerData.src_ra || headerData.ra || '?';
+            var dec = headerData.src_dej || headerData.src_dec || headerData.dec || '?';
+            html += '<span>RA:</span><span class="fd-val">' + (typeof ra === 'number' ? ra.toFixed(5) : ra) + '</span>';
+            html += '<span>Dec:</span><span class="fd-val">' + (typeof dec === 'number' ? dec.toFixed(5) : dec) + '</span>';
+
+            // Frequency range
+            var fch1 = headerData.fch1 || '?';
+            var nchans = headerData.nchans || '?';
+            var chBandwidth = headerData.foff || 0;
+            var fEnd = (typeof fch1 === 'number' && typeof nchans === 'number' && typeof chBandwidth === 'number') ? (fch1 + nchans * chBandwidth) : '?';
+            html += '<span>Freq:</span><span class="fd-val">' + (typeof fch1 === 'number' ? fch1.toFixed(6) : fch1) + ' → ' + (typeof fEnd === 'number' ? fEnd.toFixed(6) : fEnd) + ' MHz</span>';
+
+            // Nchans
+            html += '<span>Channels:</span><span class="fd-val">' + nchans + '</span>';
+
+            // Tsamp
+            var tsamp = headerData.tsamp || '?';
+            html += '<span>Tsamp:</span><span class="fd-val">' + (typeof tsamp === 'number' ? (tsamp * 1e6).toFixed(2) + ' µs' : tsamp) + '</span>';
+        } else {
+            html += '<span style="grid-column:1/-1;color:#546e7a;">Loading header...</span>';
+        }
+
+        // File size
+        html += '<span>Size:</span><span class="fd-val">' + fileInfo.size_gb + ' GB</span>';
+
+        html += '</div>'; // fd-grid
+        html += '</div>'; // fd-card
+    });
+
+    content.innerHTML = html;
 }
 
 // ─── Scan Control ─────────────────────────────────────────────────────
@@ -311,6 +535,12 @@ async function startScan() {
         max_drift: parseFloat(document.getElementById('ctrl-max-drift').value),
         snr: parseFloat(document.getElementById('ctrl-snr').value),
     };
+
+    // Send selected files if any are chosen
+    if (selectedFiles.size > 0) {
+        params.files = Array.from(selectedFiles);
+    }
+
     var fStart = document.getElementById('ctrl-f-start').value;
     var fStop = document.getElementById('ctrl-f-stop').value;
     if (fStart) params.f_start = parseFloat(fStart);
