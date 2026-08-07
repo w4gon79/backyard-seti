@@ -12,6 +12,11 @@ let fileHeaderCache = {};
 let scansList = [];       // Array of scan metadata objects
 let currentScanId = null; // Currently selected scan_id
 
+// Results pagination state
+let resultsPage = 0;
+let resultsPageSize = 100;
+let resultsSort = { col: 'snr', dir: 'desc' };  // default: SNR descending
+
 // BL API search state
 var blResults = [];
 var blPage = 0;
@@ -40,8 +45,11 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('target-input').addEventListener('keypress', (e) => {
         if (e.key === 'Enter') searchBL();
     });
-    document.getElementById('results-filter').onchange = renderHitTable;
-    document.getElementById('results-search').oninput = renderHitTable;
+    document.getElementById('results-filter').onchange = applyFilters;
+    document.getElementById('results-snr-min').oninput = applyFilters;
+    document.getElementById('results-drift-max').oninput = applyFilters;
+    document.getElementById('results-freq-min').oninput = applyFilters;
+    document.getElementById('results-freq-max').oninput = applyFilters;
     document.getElementById('btn-run-rejection').onclick = runRejection;
     document.getElementById('scan-selector').onchange = onScanSelected;
 
@@ -942,50 +950,144 @@ async function loadResults() {
     } catch(e) { console.error('Error loading results:', e); }
 }
 
-function renderHitTable() {
-    var tbody = document.getElementById('hit-table-body');
+function getFilteredHits() {
     var filter = document.getElementById('results-filter').value;
-    var search = document.getElementById('results-search').value.toLowerCase();
+    var snrMin = parseFloat(document.getElementById('results-snr-min').value);
+    var driftMax = parseFloat(document.getElementById('results-drift-max').value);
+    var freqMin = parseFloat(document.getElementById('results-freq-min').value);
+    var freqMax = parseFloat(document.getElementById('results-freq-max').value);
+
     var hits = allHits.slice();
     if (filter === 'on') hits = hits.filter(function(h) { return h.on_off === 'ON' || (h._source || '').indexOf('_S_') !== -1; });
     else if (filter === 'off') hits = hits.filter(function(h) { return h.on_off === 'OFF' || (h._source || '').indexOf('_R_') !== -1; });
     else if (filter === 'candidates') hits = rejectionCandidates.slice();
-    if (search) hits = hits.filter(function(h) { return String(h.freq || '').indexOf(search) !== -1; });
-    hits.sort(function(a, b) { return (b.snr || 0) - (a.snr || 0); });
+
+    if (!isNaN(snrMin)) hits = hits.filter(function(h) { return (h.snr || 0) >= snrMin; });
+    if (!isNaN(driftMax)) hits = hits.filter(function(h) { return Math.abs(h.drift_rate || 0) <= driftMax; });
+    if (!isNaN(freqMin)) hits = hits.filter(function(h) { return (h.freq || 0) >= freqMin; });
+    if (!isNaN(freqMax)) hits = hits.filter(function(h) { return (h.freq || 0) <= freqMax; });
+
+    hits.sort(function(a, b) {
+        var col = resultsSort.col;
+        var dir = resultsSort.dir === 'asc' ? 1 : -1;
+        var av = a[col] || 0;
+        var bv = b[col] || 0;
+        if (typeof av === 'string' && typeof bv === 'string') {
+            return av < bv ? -dir : (av > bv ? dir : 0);
+        }
+        return (av - bv) * dir;
+    });
+    return hits;
+}
+
+function applyFilters() {
+    resultsPage = 0;
+    renderHitTable();
+    renderHitChart();
+}
+
+function toggleSort(col) {
+    if (resultsSort.col === col) {
+        resultsSort.dir = resultsSort.dir === 'asc' ? 'desc' : 'asc';
+    } else {
+        resultsSort.col = col;
+        resultsSort.dir = 'desc';
+    }
+    updateSortIndicators();
+    renderHitTable();
+}
+
+function updateSortIndicators() {
+    var cols = ['snr', 'freq', 'drift_rate', 'channel'];
+    for (var i = 0; i < cols.length; i++) {
+        var el = document.getElementById('sort-' + cols[i]);
+        if (el) {
+            if (resultsSort.col === cols[i]) {
+                el.textContent = resultsSort.dir === 'asc' ? ' \u25b2' : ' \u25bc';
+            } else {
+                el.textContent = '';
+            }
+        }
+    }
+}
+
+function renderHitTable() {
+    var tbody = document.getElementById('hit-table-body');
+    var pagDiv = document.getElementById('results-pagination');
+    var hits = getFilteredHits();
+
     if (hits.length === 0) {
         tbody.innerHTML = '<tr><td colspan="8" class="empty">No hits found.</td></tr>';
+        pagDiv.style.display = 'none';
         return;
     }
+
+    var totalPages = Math.max(1, Math.ceil(hits.length / resultsPageSize));
+    if (resultsPage >= totalPages) resultsPage = totalPages - 1;
+    if (resultsPage < 0) resultsPage = 0;
+    var startIdx = resultsPage * resultsPageSize;
+    var endIdx = Math.min(startIdx + resultsPageSize, hits.length);
+    var pageData = hits.slice(startIdx, endIdx);
+
     var html = '';
-    for (var i = 0; i < Math.min(hits.length, 500); i++) {
-        var h = hits[i];
+    for (var i = 0; i < pageData.length; i++) {
+        var h = pageData[i];
+        var rowNum = startIdx + i + 1;
         var isOn = h.on_off === 'ON' || (h._source || '').indexOf('_S_') !== -1;
         var statusHtml = '';
         if (h.status === 'CANDIDATE') statusHtml = '<span style="color:#66bb6a;font-weight:bold;">CANDIDATE</span>';
         else if (h.status === 'RFI') statusHtml = '<span style="color:#ef5350;">RFI</span>';
-        html += '<tr><td>' + (i+1) + '</td><td style="color:#66bb6a;font-weight:600;">' + (h.snr||0).toFixed(2) + '</td><td style="color:#4fc3f7;">' + (h.freq||0).toFixed(6) + '</td><td>' + (h.drift_rate||0).toFixed(4) + '</td><td>' + (h.channel||'-') + '</td><td><span class="on-badge ' + (isOn?'on':'off') + '">' + (isOn?'ON':'OFF') + '</span></td><td>' + statusHtml + '</td><td style="font-size:0.8em;color:#546e7a;">' + (h._source||h.file||'').substring(0,30) + '</td></tr>';
+        html += '<tr><td>' + rowNum + '</td><td style="color:#66bb6a;font-weight:600;">' + (h.snr||0).toFixed(2) + '</td><td style="color:#4fc3f7;">' + (h.freq||0).toFixed(6) + '</td><td>' + (h.drift_rate||0).toFixed(4) + '</td><td>' + (h.channel||'-') + '</td><td><span class="on-badge ' + (isOn?'on':'off') + '">' + (isOn?'ON':'OFF') + '</span></td><td>' + statusHtml + '</td><td style="font-size:0.8em;color:#546e7a;">' + (h._source||h.file||'').substring(0,30) + '</td></tr>';
     }
     tbody.innerHTML = html;
+
+    // Render pagination controls
+    if (totalPages > 1) {
+        pagDiv.style.display = 'flex';
+        var html2 = '';
+        html2 += '<button onclick="resultsPage=0;renderHitTable()"' + (resultsPage === 0 ? ' disabled' : '') + '>\u00ab First</button>';
+        html2 += '<button onclick="resultsPage=Math.max(0,resultsPage-1);renderHitTable()"' + (resultsPage === 0 ? ' disabled' : '') + '>\u2039 Prev</button>';
+        html2 += '<span class="bl-page-info">Page ' + (resultsPage + 1) + ' of ' + totalPages + ' (' + (startIdx + 1) + '-' + endIdx + ' of ' + hits.length + ')</span>';
+        html2 += '<button onclick="resultsPage=Math.min(' + (totalPages - 1) + ',resultsPage+1);renderHitTable()"' + (resultsPage >= totalPages - 1 ? ' disabled' : '') + '>Next \u203a</button>';
+        html2 += '<button onclick="resultsPage=' + (totalPages - 1) + ';renderHitTable()"' + (resultsPage >= totalPages - 1 ? ' disabled' : '') + '>Last \u00bb</button>';
+        pagDiv.innerHTML = html2;
+    } else {
+        pagDiv.style.display = 'none';
+    }
 }
 
 function renderHitChart() {
     var chartDiv = document.getElementById('hit-chart');
+    // Always clear previous content (including stale empty-state messages)
+    chartDiv.innerHTML = '';
     if (allHits.length === 0) {
         chartDiv.innerHTML = '<p style="text-align:center;color:#546e7a;padding:40px;">No hits to plot yet.</p>';
         return;
     }
-    var onHits = allHits.filter(function(h) { return h.on_off === 'ON' || (h._source || '').indexOf('_S_') !== -1; });
-    var offHits = allHits.filter(function(h) { return h.on_off === 'OFF' || (h._source || '').indexOf('_R_') !== -1; });
+    // Use shared filter function
+    var hits = getFilteredHits();
+    
+    if (hits.length === 0) {
+        chartDiv.innerHTML = '<p style="text-align:center;color:#546e7a;padding:40px;">No hits match the current filter.</p>';
+        return;
+    }
+    
+    var onHits = hits.filter(function(h) { return h.on_off === 'ON' || (h._source || '').indexOf('_S_') !== -1; });
+    var offHits = hits.filter(function(h) { return h.on_off === 'OFF' || (h._source || '').indexOf('_R_') !== -1; });
     var traces = [{
         x: onHits.map(function(h) { return h.freq; }), y: onHits.map(function(h) { return h.snr; }),
         mode: 'markers', type: 'scatter', name: 'ON',
         marker: { color: '#66bb6a', size: 8, opacity: 0.7 },
+        text: onHits.map(function(h) { return 'Drift: ' + (h.drift_rate||0).toFixed(4) + ' Hz/s'; }),
+        hovertemplate: '%{x:.6f} MHz<br>SNR: %{y:.1f}<br>%{text}<extra></extra>',
     }];
     if (offHits.length > 0) {
         traces.push({
             x: offHits.map(function(h) { return h.freq; }), y: offHits.map(function(h) { return h.snr; }),
             mode: 'markers', type: 'scatter', name: 'OFF',
             marker: { color: '#ef5350', size: 8, opacity: 0.7 },
+            text: offHits.map(function(h) { return 'Drift: ' + (h.drift_rate||0).toFixed(4) + ' Hz/s'; }),
+            hovertemplate: '%{x:.6f} MHz<br>SNR: %{y:.1f}<br>%{text}<extra></extra>',
         });
     }
     Plotly.newPlot(chartDiv, traces, {

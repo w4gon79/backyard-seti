@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>📡 Backyard SETI Dashboard</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=8">
-    <link rel="stylesheet" href="/static/css/style.css?v=20">
+    <link rel="stylesheet" href="/static/css/style.css?v=22">>
     <link rel="stylesheet" href="/static/css/celestial.css?v=1">
     <!-- Plotly for charts -->
     <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
@@ -135,7 +135,10 @@
                         <option value="off">OFF Only</option>
                         <option value="candidates">Candidates (ON-only after rejection)</option>
                     </select>
-                    <input type="text" id="results-search" placeholder="Filter by frequency...">
+                    <input type="number" id="results-snr-min" placeholder="Min SNR" min="0" step="0.5" style="width:80px;" title="Minimum SNR">
+                    <input type="number" id="results-drift-max" placeholder="Max |drift|" min="0" step="0.1" style="width:100px;" title="Maximum absolute drift rate (Hz/s)">
+                    <input type="number" id="results-freq-min" placeholder="Freq min" step="0.1" style="width:90px;" title="Minimum frequency (MHz)">
+                    <input type="number" id="results-freq-max" placeholder="Freq max" step="0.1" style="width:90px;" title="Maximum frequency (MHz)">
                 </div>
             </div>
             <div class="results-content">
@@ -165,10 +168,10 @@
                         <thead>
                             <tr>
                                 <th>#</th>
-                                <th>SNR</th>
-                                <th>Frequency (MHz)</th>
-                                <th>Drift (Hz/s)</th>
-                                <th>Channel</th>
+                                <th class="sortable" onclick="toggleSort('snr')">SNR <span id="sort-snr"></span></th>
+                                <th class="sortable" onclick="toggleSort('freq')">Frequency (MHz) <span id="sort-freq"></span></th>
+                                <th class="sortable" onclick="toggleSort('drift_rate')">Drift (Hz/s) <span id="sort-drift_rate"></span></th>
+                                <th class="sortable" onclick="toggleSort('channel')">Channel <span id="sort-channel"></span></th>
                                 <th>ON/OFF</th>
                                 <th>Status</th>
                                 <th>File</th>
@@ -179,11 +182,12 @@
                         </tbody>
                     </table>
                 </div>
+                <div id="results-pagination" class="bl-pagination" style="display:none;"></div>
             </div>
         </div>
     </div>
 </div>
 
-<script src="/static/js/dashboard.js?v=38"></script>
+<script src="/static/js/dashboard.js?v=45"></script>
 </body>
 </html>

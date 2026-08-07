@@ -400,6 +400,15 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
     white-space: nowrap;
 }
 
+#hit-table th.sortable {
+    cursor: pointer;
+    user-select: none;
+}
+#hit-table th.sortable:hover {
+    background: #1e3a5f;
+    color: #ffffff;
+}
+
 /* Download Panel */
 #download-panel { margin-bottom: 12px; padding: 0; }
 .download-list { padding: 8px 12px; max-height: 300px; overflow-y: auto; }
@@ -592,6 +601,24 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 }
 .scan-meta-display .sm-sep {
     color: #37474f;
+}
+
+/* Results advanced filters layout */
+.results-controls {
+    flex-wrap: wrap;
+}
+.results-controls input[type="number"] {
+    width: 80px;
+}
+.results-controls input[type="number"]#results-drift-max {
+    width: 100px;
+}
+.results-controls input[type="number"]#results-freq-min,
+.results-controls input[type="number"]#results-freq-max {
+    width: 90px;
+}
+#results-pagination {
+    margin-top: 8px;
 }
 
 /* Responsive */
