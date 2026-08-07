@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>📡 Backyard SETI Dashboard</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=8">
-    <link rel="stylesheet" href="/static/css/style.css?v=24">>>
+    <link rel="stylesheet" href="/static/css/style.css?v=26">>>
     <link rel="stylesheet" href="/static/css/celestial.css?v=1">
     <!-- Plotly for charts -->
     <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
@@ -71,9 +71,9 @@
             <div class="panel-header">⚙️ Scan Controls</div>
             <div class="controls-content">
                 <div class="control-grid">
-                    <label title="Number of frequency channels per sub-band. Smaller = finer frequency detail but slower scan. Larger = faster scan but each sub-band covers more bandwidth.">Sub-band Width (channels)</label>
-                    <select id="ctrl-subband-width" title="Number of frequency channels per sub-band. Smaller = finer frequency detail but slower scan. Larger = faster scan but each sub-band covers more bandwidth.">
-                        <option value="8192">8,192 (23 kHz) - Highest Resolution</option>
+                    <label title="Number of frequency channels processed per turbo_seti run. Does NOT affect frequency resolution or sensitivity, which are fixed by the data format. Only affects processing speed and memory: smaller sub-bands = more runs = slower total scan. Larger = fewer runs = faster. Default 262,144 is the fastest option.">Sub-band Width (channels)</label>
+                    <select id="ctrl-subband-width" title="Number of frequency channels processed per turbo_seti run. Does NOT affect frequency resolution or sensitivity. Only affects speed: smaller = slower, larger = faster.">
+                        <option value="8192">8,192 (23 kHz) - Slowest</option>
                         <option value="32768">32,768 (92 kHz)</option>
                         <option value="65536">65,536 (183 kHz)</option>
                         <option value="131072">131,072 (366 kHz)</option>
@@ -89,12 +89,12 @@
                     <label title="Minimum Signal-to-Noise Ratio for a detection. Lower values (5) catch weaker signals but produce more false positives. Higher values (15-25) only catch strong signals but with higher confidence. Default 5 is standard for SETI surveys.">SNR Threshold</label>
                     <input type="number" id="ctrl-snr" value="5.0" min="1" max="50" step="0.5" title="Minimum Signal-to-Noise Ratio for a detection. Lower values (5) catch weaker signals but produce more false positives. Higher values (15-25) only catch strong signals but with higher confidence. Default 5 is standard for SETI surveys.">
 
-                    <label title="Restrict the scan to a specific frequency range within the data. Leave blank to scan the full band (2744-3324 MHz for Parkes fine-res). Useful for targeted searches or avoiding known RFI-dense regions.">Frequency Window (MHz)</label>
-                    <div class="freq-range" title="Restrict the scan to a specific frequency range within the data. Leave blank to scan the full band (2744-3324 MHz for Parkes fine-res). Useful for targeted searches or avoiding known RFI-dense regions.">
-                        <input type="number" id="ctrl-f-start" placeholder="Start (e.g. 2744)" step="0.1" title="Starting frequency in MHz. Parkes fine-res covers 2744-3324 MHz.">
+                    <label title="Restrict the scan to a specific frequency range within the data file. Leave blank to scan the full band. Useful for targeted searches or avoiding known RFI-dense regions. Click 'Full Band' to auto-fill the entire available range.">Frequency Window (MHz)</label>
+                    <div class="freq-range" title="Restrict the scan to a specific frequency range within the data file. Leave blank to scan the full band. Useful for targeted searches or avoiding known RFI-dense regions.">
+                        <input type="number" id="ctrl-f-start" placeholder="Start MHz" step="0.1" title="Starting frequency in MHz. Leave blank for auto.">
                         <span>to</span>
-                        <input type="number" id="ctrl-f-stop" placeholder="Stop (e.g. 3324)" step="0.1" title="Ending frequency in MHz. Parkes fine-res covers 2744-3324 MHz.">
-                        <button id="btn-full-band" class="btn-small" title="Set frequency window to the full Parkes fine-res band (2744-3324 MHz).">Full Band</button>
+                        <input type="number" id="ctrl-f-stop" placeholder="Stop MHz" step="0.1" title="Ending frequency in MHz. Leave blank for auto.">
+                        <button id="btn-full-band" class="btn-small" title="Set frequency window to the full available band of the selected data files.">Full Band</button>
                     </div>
                 </div>
                 <div id="scan-target-badge" class="scan-target-badge">Scanning: All files</div>
@@ -202,6 +202,6 @@
     </div>
 </div>
 
-<script src="/static/js/dashboard.js?v=48"></script>
+<script src="/static/js/dashboard.js?v=50"></script>
 </body>
 </html>

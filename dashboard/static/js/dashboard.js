@@ -38,10 +38,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('btn-refresh').onclick = () => { loadResults(); loadStats(); loadScansList(); };
     document.getElementById('btn-select-all').onclick = selectAllFiles;
     document.getElementById('btn-select-none').onclick = selectNoneFiles;
-    document.getElementById('btn-full-band').onclick = () => {
-        document.getElementById('ctrl-f-start').value = '2744';
-        document.getElementById('ctrl-f-stop').value = '3324';
-    };
+    document.getElementById('btn-full-band').onclick = autoFillBandRange;
     document.getElementById('target-input').addEventListener('keypress', (e) => {
         if (e.key === 'Enter') searchBL();
     });
@@ -182,7 +179,7 @@ function initSkyMap() {
 
     // No default markers - sky map starts clean
     document.getElementById('sky-map-info').innerHTML =
-        '<p style="color:#546e7a;">Select a file below to mark its target on the sky map.</p>';
+        '<p style="color:#546e7a;">Select a file from Target Search to mark its target on the sky map.</p>';
 }
 
 // Add a target marker to the sky map
@@ -211,7 +208,7 @@ function updateSkyMapInfo() {
     var keys = Object.keys(celestialTargets);
     var info = document.getElementById('sky-map-info');
     if (keys.length === 0) {
-        info.innerHTML = '<p style="color:#546e7a;">Select a file below to mark its target on the sky map.</p>';
+        info.innerHTML = '<p style="color:#546e7a;">Select a file from Target Search to mark its target on the sky map.</p>';
         return;
     }
     var html = '';
@@ -1229,6 +1226,31 @@ async function deleteFile(path, name) {
         if (data.error) { alert(data.error); }
         else { selectedFiles.delete(path); loadLocalData(); refreshSkyMapMarkers(); }
     } catch(e) { alert('Error: ' + e.message); }
+}
+
+function autoFillBandRange() {
+    // Try to read the band range from the first selected file's header
+    var bandFound = false;
+    for (var path in fileHeaderCache) {
+        var h = fileHeaderCache[path];
+        if (h && h.header) {
+            var fch1 = h.header.fch1;
+            var nchans = h.header.nchans;
+            var foff = h.header.foff;
+            if (typeof fch1 === 'number' && typeof nchans === 'number' && typeof foff === 'number') {
+                var fEnd = fch1 + nchans * foff;
+                var fMin = Math.min(fch1, fEnd);
+                var fMax = Math.max(fch1, fEnd);
+                document.getElementById('ctrl-f-start').value = fMin.toFixed(1);
+                document.getElementById('ctrl-f-stop').value = fMax.toFixed(1);
+                bandFound = true;
+                return;
+            }
+        }
+    }
+    // Fallback: if no headers loaded, clear the fields for auto-detect
+    document.getElementById('ctrl-f-start').value = '';
+    document.getElementById('ctrl-f-stop').value = '';
 }
 
 function escapeHtml(text) { var d = document.createElement('div'); d.textContent = text; return d.innerHTML; }
