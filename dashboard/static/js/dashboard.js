@@ -55,6 +55,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     logInterval = setInterval(pollScanStatus, 3000);
     setInterval(pollDownloadStatus, 2000);
+
+    // Waterfall modal close handlers
+    document.getElementById('waterfall-close').onclick = closeWaterfallModal;
+    document.getElementById('waterfall-modal').addEventListener('click', function(e) {
+        if (e.target === this) closeWaterfallModal();
+    });
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') closeWaterfallModal();
+    });
 });
 
 // ─── Sky Map (d3-celestial) ───────────────────────────────────────────
@@ -1037,7 +1046,9 @@ function renderHitTable() {
         var statusHtml = '';
         if (h.status === 'CANDIDATE') statusHtml = '<span style="color:#66bb6a;font-weight:bold;">CANDIDATE</span>';
         else if (h.status === 'RFI') statusHtml = '<span style="color:#ef5350;">RFI</span>';
-        html += '<tr><td>' + rowNum + '</td><td style="color:#66bb6a;font-weight:600;">' + (h.snr||0).toFixed(2) + '</td><td style="color:#4fc3f7;">' + (h.freq||0).toFixed(6) + '</td><td>' + (h.drift_rate||0).toFixed(4) + '</td><td>' + (h.channel||'-') + '</td><td><span class="on-badge ' + (isOn?'on':'off') + '">' + (isOn?'ON':'OFF') + '</span></td><td>' + statusHtml + '</td><td style="font-size:0.8em;color:#546e7a;">' + (h._source||h.file||'').substring(0,30) + '</td></tr>';
+        // Store hit data as data attributes for the click handler
+        var hitJson = encodeURIComponent(JSON.stringify(h));
+        html += '<tr class="hit-row" data-hit="' + hitJson + '" onclick="showWaterfall(this)" style="cursor:pointer;"><td>' + rowNum + '</td><td style="color:#66bb6a;font-weight:600;">' + (h.snr||0).toFixed(2) + '</td><td style="color:#4fc3f7;">' + (h.freq||0).toFixed(6) + '</td><td>' + (h.drift_rate||0).toFixed(4) + '</td><td>' + (h.channel||'-') + '</td><td><span class="on-badge ' + (isOn?'on':'off') + '">' + (isOn?'ON':'OFF') + '</span></td><td>' + statusHtml + '</td><td style="font-size:0.8em;color:#546e7a;">' + (h._source||h.file||'').substring(0,30) + '</td></tr>';
     }
     tbody.innerHTML = html;
 
@@ -1221,3 +1232,203 @@ async function deleteFile(path, name) {
 }
 
 function escapeHtml(text) { var d = document.createElement('div'); d.textContent = text; return d.innerHTML; }
+
+// ─── Waterfall Modal ───────────────────────────────────────────────
+
+function resolveHitFile(h) {
+    // Try source_file first, then derive from _source
+    if (h.source_file) {
+        // source_file should be like 'Parkes_57791_72989_PROXCEN_S_fine.h5'
+        // Prepend 'fine/' if it's a bare filename
+        if (h.source_file.indexOf('/') === -1) {
+            return 'fine/' + h.source_file;
+        }
+        return h.source_file;
+    }
+    // Derive from _source (JSON filename like 'Parkes_57791_72989_PROXCEN_S_fine_hits.json')
+    if (h._source) {
+        var base = h._source.replace('_hits.json', '.h5');
+        if (base.indexOf('/') === -1) {
+            return 'fine/' + base;
+        }
+        return base;
+    }
+    // Try h.file
+    if (h.file) {
+        var base2 = h.file.replace(/\.(json|txt)$/, '.h5');
+        if (base2.indexOf('/') === -1) return 'fine/' + base2;
+        return base2;
+    }
+    return null;
+}
+
+function showWaterfall(rowEl) {
+    var hitJson = rowEl.getAttribute('data-hit');
+    if (!hitJson) return;
+    var h;
+    try { h = JSON.parse(decodeURIComponent(hitJson)); }
+    catch(e) { console.error('Failed to parse hit data', e); return; }
+
+    var modal = document.getElementById('waterfall-modal');
+    var title = document.getElementById('waterfall-title');
+    var metaDiv = document.getElementById('waterfall-meta');
+    var bodyDiv = document.getElementById('waterfall-body');
+
+    var freq = h.freq || 0;
+    var snr = h.snr || 0;
+    var drift = h.drift_rate || 0;
+    var isOn = h.on_off === 'ON' || (h._source || '').indexOf('_S_') !== -1;
+    var sourceFile = h._source || h.source_file || h.file || '?';
+
+    // Set title
+    title.textContent = 'Waterfall — ' + freq.toFixed(6) + ' MHz';
+
+    // Show metadata
+    var metaHtml = '';
+    metaHtml += '<div class="wm-item"><span class="wm-label">Freq:</span><span class="wm-val">' + freq.toFixed(6) + ' MHz</span></div>';
+    metaHtml += '<div class="wm-item"><span class="wm-label">SNR:</span><span class="wm-val" style="color:#66bb6a;">' + snr.toFixed(2) + '</span></div>';
+    metaHtml += '<div class="wm-item"><span class="wm-label">Drift:</span><span class="wm-val">' + drift.toFixed(4) + ' Hz/s</span></div>';
+    metaHtml += '<div class="wm-item"><span class="wm-label">Channel:</span><span class="wm-val">' + (h.channel || '-') + '</span></div>';
+    metaHtml += '<div class="wm-item"><span class="wm-label">Cadence:</span><span class="wm-val"><span class="on-badge ' + (isOn?'on':'off') + '">' + (isOn?'ON':'OFF') + '</span></span></div>';
+    if (h.status) {
+        var statColor = h.status === 'CANDIDATE' ? '#66bb6a' : '#ef5350';
+        metaHtml += '<div class="wm-item"><span class="wm-label">Status:</span><span class="wm-val" style="color:' + statColor + ';">' + h.status + '</span></div>';
+    }
+    metaHtml += '<div class="wm-item" style="flex-basis:100%;"><span class="wm-label">File:</span><span class="wm-val" style="font-size:0.9em;">' + sourceFile + '</span></div>';
+    metaDiv.innerHTML = metaHtml;
+
+    // Show loading spinner
+    bodyDiv.innerHTML = '<div class="waterfall-loading"><div class="spinner"></div><div>Loading waterfall data...</div><div style="font-size:0.8em;color:#546e7a;margin-top:4px;">Reading from 12 GB HDF5 file</div></div>';
+
+    // Show modal
+    modal.style.display = 'flex';
+
+    // Resolve the HDF5 file path
+    var filePath = resolveHitFile(h);
+    if (!filePath) {
+        bodyDiv.innerHTML = '<div class="waterfall-error">Could not determine HDF5 source file for this hit.</div>';
+        return;
+    }
+
+    // Fetch waterfall data
+    var url = '/api/waterfall?file=' + encodeURIComponent(filePath) +
+              '&freq_mhz=' + freq +
+              '&width_chans=200&max_tints=20';
+
+    fetch(url).then(function(resp) { return resp.json(); }).then(function(data) {
+        if (data.error) {
+            bodyDiv.innerHTML = '<div class="waterfall-error">Error loading waterfall: ' + escapeHtml(data.error) + '</div>';
+            return;
+        }
+        renderWaterfallPlot(data, freq, drift);
+    }).catch(function(err) {
+        bodyDiv.innerHTML = '<div class="waterfall-error">Fetch error: ' + escapeHtml(err.message) + '</div>';
+    });
+}
+
+function renderWaterfallPlot(data, centerFreq, driftRate) {
+    var bodyDiv = document.getElementById('waterfall-body');
+    bodyDiv.innerHTML = '<div id="waterfall-plot" style="width:100%;height:400px;"></div>';
+    var plotDiv = document.getElementById('waterfall-plot');
+
+    var z = data.data;        // 2D array: time x freq (now in dB above median)
+    var freqs = data.freqs;   // MHz
+    var times = data.times;   // seconds
+
+    // Data is already dB above median from backend, use fixed range
+    var zmin = -2;  // 2 dB below median
+    var zmax = 10;  // 10 dB above median (bright signals)
+
+    var traces = [{
+        type: 'heatmap',
+        z: z,
+        x: freqs,
+        y: times,
+        zmin: zmin,
+        zmax: zmax,
+        colorscale: 'Viridis',
+        reversescale: true,
+        hovertemplate: '%{x:.6f} MHz<br>t=%{y:.1f}s<br>Power=%{z:.2f}<extra></extra>',
+        name: 'Power'
+    }];
+
+    // Drift rate overlay: at time t, freq shifts by driftRate * t / 1e6 MHz
+    if (driftRate && Math.abs(driftRate) > 0.001) {
+        var driftFreqs = times.map(function(t) {
+            return centerFreq + driftRate * t / 1e6;
+        });
+        traces.push({
+            type: 'scatter',
+            mode: 'lines',
+            x: driftFreqs,
+            y: times,
+            line: { color: '#ff4444', width: 2, dash: 'dashdot' },
+            name: 'Drift track',
+            hovertemplate: '%{x:.6f} MHz<br>t=%{y:.1f}s<extra>Drift track</extra>'
+        });
+    }
+
+    // Center frequency marker (vertical line)
+    traces.push({
+        type: 'scatter',
+        mode: 'lines',
+        x: [centerFreq, centerFreq],
+        y: [times[0], times[times.length - 1]],
+        line: { color: '#ffff00', width: 1, dash: 'dot' },
+        name: 'Hit freq',
+        hoverinfo: 'skip',
+        showlegend: false
+    });
+
+    var layout = {
+        paper_bgcolor: 'transparent',
+        plot_bgcolor: '#0a0a1a',
+        font: { color: '#c8c8e0', size: 11 },
+        xaxis: {
+            title: 'Frequency (MHz)',
+            gridcolor: '#1e3a5f',
+            tickformat: '.4f',
+        },
+        yaxis: {
+            title: 'Time (s)',
+            gridcolor: '#1e3a5f',
+            autorange: 'reversed',  // time goes top to bottom
+        },
+        margin: { l: 60, r: 20, t: 30, b: 50 },
+        height: 400,
+        legend: {
+            orientation: 'h',
+            y: 1.08,
+            font: { size: 10 }
+        },
+        annotations: [{
+            x: centerFreq,
+            y: times[0],
+            xref: 'x',
+            yref: 'y',
+            text: '★ ' + centerFreq.toFixed(6) + ' MHz',
+            showarrow: true,
+            arrowhead: 2,
+            arrowsize: 1,
+            arrowwidth: 1,
+            arrowcolor: '#ffff00',
+            font: { color: '#ffff00', size: 10 },
+            ax: 0,
+            ay: -20
+        }]
+    };
+
+    Plotly.newPlot(plotDiv, traces, layout, {
+        displayModeBar: true,
+        responsive: true,
+        modeBarButtonsToRemove: ['lasso2d', 'autoScale2d']
+    });
+}
+
+function closeWaterfallModal() {
+    var modal = document.getElementById('waterfall-modal');
+    modal.style.display = 'none';
+    // Purge plot to free memory
+    var plotDiv = document.getElementById('waterfall-plot');
+    if (plotDiv) Plotly.purge(plotDiv);
+}

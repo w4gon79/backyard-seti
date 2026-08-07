@@ -1248,6 +1248,159 @@ def api_rejection_results():
     return jsonify({'error': 'No rejection results found'}), 404
 
 
+# ─── API: Waterfall Data ─────────────────────────────────────────────
+
+@app.route('/api/waterfall')
+def api_waterfall():
+    """Return a narrow-band waterfall (spectrogram) around a hit frequency.
+
+    Query params:
+      - file: path to HDF5 file (relative to SETI_ROOT or data/)
+      - freq_mhz: center frequency in MHz
+      - width_chans: channels per side (default 200, total = 2*width_chans)
+      - max_tints: max time integrations (default 20)
+    """
+    filepath = request.args.get('file', '')
+    freq_mhz = request.args.get('freq_mhz', type=float)
+    width_chans = request.args.get('width_chans', default=200, type=int)
+    max_tints = request.args.get('max_tints', default=20, type=int)
+
+    if not filepath or freq_mhz is None:
+        return jsonify({'error': 'Missing required params: file, freq_mhz'}), 400
+
+    # Resolve file path
+    candidates = [
+        os.path.join(SETI_ROOT, filepath),
+        os.path.join(SETI_ROOT, 'data', filepath),
+        os.path.join(DATA_DIR, filepath),
+        filepath,  # absolute
+    ]
+    full_path = None
+    for c in candidates:
+        if os.path.isfile(c):
+            full_path = c
+            break
+
+    if not full_path:
+        return jsonify({'error': f'File not found: {filepath}'}), 404
+
+    try:
+        from blimpy import Waterfall
+
+        # Read header first to get channel bandwidth
+        wf_header = Waterfall(full_path, load_data=False)
+        header = wf_header.header
+
+        # Get frequency info
+        fch1 = float(header.get('fch1', 0))
+        nchans = int(header.get('nchans', 1))
+        foff = float(header.get('foff', 0))  # MHz per channel
+        tsamp = float(header.get('tsamp', 18.25))  # seconds
+
+        # df in Hz (abs because foff can be negative)
+        df_hz = abs(foff) * 1e6
+
+        # Compute sub-band frequency range
+        half_width_mhz = width_chans * abs(foff)
+        f_start = freq_mhz - half_width_mhz
+        f_stop = freq_mhz + half_width_mhz
+
+        # Clamp to file frequency range
+        f_min_file = min(fch1, fch1 + nchans * foff)
+        f_max_file = max(fch1, fch1 + nchans * foff)
+        f_start = max(f_start, f_min_file)
+        f_stop = min(f_stop, f_max_file)
+
+        # Load the sub-band data
+        wf = Waterfall(full_path, load_data=True,
+                       f_start=f_start, f_stop=f_stop)
+        data = np.array(wf.data, dtype=np.float32)  # shape: (n_tints, 1, n_chans)
+
+        if data.ndim == 3:
+            data = data[:, 0, :]  # squeeze IF dimension
+        elif data.ndim == 2:
+            pass  # already 2D
+        elif data.ndim == 1:
+            data = data.reshape(1, -1)
+
+        n_tints, n_chans = data.shape
+
+        # Limit time integrations
+        if n_tints > max_tints:
+            # Evenly sample across time
+            indices = np.linspace(0, n_tints - 1, max_tints, dtype=int)
+            data = data[indices]
+            n_tints = max_tints
+
+        # Pad data to requested width (2 * width_chans) to avoid blank edges
+        target_chans = 2 * width_chans
+        if n_chans < target_chans:
+            # Pad with NaN on the right side (will render as dark/empty in heatmap)
+            padding = np.full((n_tints, target_chans - n_chans), np.nan, dtype=np.float32)
+            data = np.hstack([data, padding])
+            n_chans = target_chans
+            # Extend freqs axis to match
+            if len(freqs) < target_chans:
+                freqs = np.linspace(f_start, f_stop, target_chans)
+        elif n_chans > target_chans:
+            # Trim to requested width, centered on hit
+            center_idx = np.argmin(np.abs(freqs - freq_mhz))
+            half = target_chans // 2
+            start_idx = max(0, center_idx - half)
+            end_idx = start_idx + target_chans
+            if end_idx > n_chans:
+                end_idx = n_chans
+                start_idx = end_idx - target_chans
+            data = data[:, start_idx:end_idx]
+            freqs = freqs[start_idx:end_idx]
+            n_chans = target_chans
+
+        # Build frequency axis (MHz) for the loaded sub-band
+        # Waterfall object should have freqs available
+        try:
+            freqs = wf.container.sf_freqs  # MHz
+            freqs = np.array(freqs, dtype=np.float64)
+        except Exception:
+            # Fallback: compute from f_start/f_stop
+            freqs = np.linspace(f_start, f_stop, n_chans)
+
+        # Ensure freqs length matches data
+        if len(freqs) != n_chans:
+            freqs = np.linspace(f_start, f_stop, n_chans)
+
+        # Build time axis (seconds)
+        times = np.arange(n_tints, dtype=np.float64) * tsamp
+
+        # Replace NaN/Inf with 0 for JSON safety
+        data = np.nan_to_num(data, nan=0.0, posinf=0.0, neginf=0.0)
+        
+        # Convert to dB above median for better dynamic range visualization
+        # This compresses the huge value range (40M to 88B) into a readable scale
+        median_val = np.median(data[data > 0]) if np.any(data > 0) else 1.0
+        if median_val > 0:
+            data = 10.0 * np.log10(np.maximum(data, 1.0) / median_val)
+
+        # Convert to nested lists (time x freq)
+        data_list = data.tolist()
+        freqs_list = freqs.tolist()
+        times_list = times.tolist()
+
+        return jsonify({
+            'data': data_list,
+            'freqs': freqs_list,
+            'times': times_list,
+            'n_chans': n_chans,
+            'n_tints': n_tints,
+            'df_hz': round(df_hz, 4),
+            'dt_s': round(tsamp, 4),
+        })
+
+    except Exception as e:
+        import traceback
+        tb = traceback.format_exc()
+        return jsonify({'error': str(e), 'traceback': tb[-500:]}), 500
+
+
 # ─── Main ─────────────────────────────────────────────────────────────
 
 if __name__ == '__main__':

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>📡 Backyard SETI Dashboard</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=8">
-    <link rel="stylesheet" href="/static/css/style.css?v=22">>
+    <link rel="stylesheet" href="/static/css/style.css?v=24">>>
     <link rel="stylesheet" href="/static/css/celestial.css?v=1">
     <!-- Plotly for charts -->
     <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
@@ -71,8 +71,8 @@
             <div class="panel-header">⚙️ Scan Controls</div>
             <div class="controls-content">
                 <div class="control-grid">
-                    <label>Sub-band Width (channels)</label>
-                    <select id="ctrl-subband-width">
+                    <label title="Number of frequency channels per sub-band. Smaller = finer frequency detail but slower scan. Larger = faster scan but each sub-band covers more bandwidth.">Sub-band Width (channels)</label>
+                    <select id="ctrl-subband-width" title="Number of frequency channels per sub-band. Smaller = finer frequency detail but slower scan. Larger = faster scan but each sub-band covers more bandwidth.">
                         <option value="8192">8,192 (23 kHz) - Highest Resolution</option>
                         <option value="32768">32,768 (92 kHz)</option>
                         <option value="65536">65,536 (183 kHz)</option>
@@ -80,21 +80,21 @@
                         <option value="262144" selected>262,144 (732 kHz) - Fastest</option>
                     </select>
 
-                    <label>Overlap (channels)</label>
-                    <input type="number" id="ctrl-overlap" value="512" min="64" max="4096" step="64">
+                    <label title="Number of overlapping channels between adjacent sub-bands. Prevents signals at sub-band edges from being missed or split. 512 is a good default for 262k sub-bands.">Overlap (channels)</label>
+                    <input type="number" id="ctrl-overlap" value="512" min="64" max="4096" step="64" title="Number of overlapping channels between adjacent sub-bands. Prevents signals at sub-band edges from being missed or split. 512 is a good default for 262k sub-bands.">
 
-                    <label>Max Drift Rate (Hz/s)</label>
-                    <input type="number" id="ctrl-max-drift" value="5.0" min="0.1" max="100" step="0.1">
+                    <label title="Maximum drift rate to search in Hz/s. A real orbiting transmitter typically drifts at 0.01-2 Hz/s. Higher values catch faster-drifting signals but increase search time. Default 5 Hz/s covers most realistic scenarios.">Max Drift Rate (Hz/s)</label>
+                    <input type="number" id="ctrl-max-drift" value="5.0" min="0.1" max="100" step="0.1" title="Maximum drift rate to search in Hz/s. A real orbiting transmitter typically drifts at 0.01-2 Hz/s. Higher values catch faster-drifting signals but increase search time. Default 5 Hz/s covers most realistic scenarios.">
 
-                    <label>SNR Threshold</label>
-                    <input type="number" id="ctrl-snr" value="5.0" min="1" max="50" step="0.5">
+                    <label title="Minimum Signal-to-Noise Ratio for a detection. Lower values (5) catch weaker signals but produce more false positives. Higher values (15-25) only catch strong signals but with higher confidence. Default 5 is standard for SETI surveys.">SNR Threshold</label>
+                    <input type="number" id="ctrl-snr" value="5.0" min="1" max="50" step="0.5" title="Minimum Signal-to-Noise Ratio for a detection. Lower values (5) catch weaker signals but produce more false positives. Higher values (15-25) only catch strong signals but with higher confidence. Default 5 is standard for SETI surveys.">
 
-                    <label>Frequency Window (MHz)</label>
-                    <div class="freq-range">
-                        <input type="number" id="ctrl-f-start" placeholder="Start (e.g. 2744)" step="0.1">
+                    <label title="Restrict the scan to a specific frequency range within the data. Leave blank to scan the full band (2744-3324 MHz for Parkes fine-res). Useful for targeted searches or avoiding known RFI-dense regions.">Frequency Window (MHz)</label>
+                    <div class="freq-range" title="Restrict the scan to a specific frequency range within the data. Leave blank to scan the full band (2744-3324 MHz for Parkes fine-res). Useful for targeted searches or avoiding known RFI-dense regions.">
+                        <input type="number" id="ctrl-f-start" placeholder="Start (e.g. 2744)" step="0.1" title="Starting frequency in MHz. Parkes fine-res covers 2744-3324 MHz.">
                         <span>to</span>
-                        <input type="number" id="ctrl-f-stop" placeholder="Stop (e.g. 3324)" step="0.1">
-                        <button id="btn-full-band" class="btn-small">Full Band</button>
+                        <input type="number" id="ctrl-f-stop" placeholder="Stop (e.g. 3324)" step="0.1" title="Ending frequency in MHz. Parkes fine-res covers 2744-3324 MHz.">
+                        <button id="btn-full-band" class="btn-small" title="Set frequency window to the full Parkes fine-res band (2744-3324 MHz).">Full Band</button>
                     </div>
                 </div>
                 <div id="scan-target-badge" class="scan-target-badge">Scanning: All files</div>
@@ -151,11 +151,11 @@
                 <!-- Rejection Controls -->
                 <div class="rejection-panel">
                     <div class="rejection-controls">
-                        <label>Freq Tolerance (MHz)</label>
-                        <input type="number" id="reject-freq-tol" value="0.003" min="0.0001" max="0.1" step="0.0001">
-                        <label>Drift Tolerance (Hz/s)</label>
-                        <input type="number" id="reject-drift-tol" value="100" min="0.01" max="1000" step="1">
-                        <span class="tol-hint">(100 = effectively frequency-only match)</span>
+                        <label title="Frequency match tolerance in MHz for ON/OFF comparison. If an ON hit has a matching OFF hit within this frequency range, it is classified as RFI (terrestrial interference). Default 0.003 MHz (3 kHz) accounts for sub-band channel alignment differences between files. Wider tolerance catches more RFI but may reject real signals near known interference lines.">Freq Tolerance (MHz)</label>
+                        <input type="number" id="reject-freq-tol" value="0.003" min="0.0001" max="0.1" step="0.0001" title="Frequency match tolerance in MHz for ON/OFF comparison. If an ON hit has a matching OFF hit within this frequency range, it is classified as RFI. Default 0.003 MHz (3 kHz) accounts for sub-band channel alignment differences between files.">
+                        <label title="Drift rate match tolerance in Hz/s for ON/OFF comparison. Since turbo_seti assigns slightly different drift rates to the same RFI line across files, this should be set high (100 = effectively ignore drift and match on frequency only). Lower values require both frequency AND drift to match, which may miss RFI that reports at different drift bins.">Drift Tolerance (Hz/s)</label>
+                        <input type="number" id="reject-drift-tol" value="100" min="0.01" max="1000" step="1" title="Drift rate match tolerance in Hz/s. Since turbo_seti assigns slightly different drift rates to the same RFI line across files, set high (100 = frequency-only match). Lower values require both freq AND drift to match.">
+                        <span class="tol-hint" title="At 100 Hz/s drift tolerance, matching is effectively frequency-only. This is recommended because the same RFI line often appears at different drift rates across ON/OFF files due to turbo_seti bin alignment.">(100 = effectively frequency-only match)</span>
                         <button id="btn-run-rejection" class="btn-primary">Run ON/OFF Rejection</button>
                     </div>
                     <div id="rejection-summary" class="rejection-summary">
@@ -188,6 +188,20 @@
     </div>
 </div>
 
-<script src="/static/js/dashboard.js?v=45"></script>
+<!-- Waterfall Modal -->
+<div id="waterfall-modal" class="modal-overlay" style="display:none;">
+    <div class="modal-content">
+        <div class="modal-header">
+            <span id="waterfall-title">Waterfall View</span>
+            <button id="waterfall-close" class="modal-close">✕</button>
+        </div>
+        <div id="waterfall-meta" class="waterfall-meta"></div>
+        <div id="waterfall-body" style="width:100%;">
+            <div id="waterfall-plot" style="width:100%;height:400px;"></div>
+        </div>
+    </div>
+</div>
+
+<script src="/static/js/dashboard.js?v=48"></script>
 </body>
 </html>

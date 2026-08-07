@@ -276,6 +276,8 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
     border-bottom: 1px solid #1a2332;
 }
 #hit-table tr:hover { background: #162447; }
+#hit-table tr.hit-row:hover { background: #1a2a4a; cursor: pointer; }
+#hit-table tr.hit-row:hover td { color: #e0e0ff; }
 #hit-table .empty { text-align: center; color: #546e7a; padding: 24px; }
 .on-badge {
     padding: 2px 8px;
@@ -620,6 +622,56 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 #results-pagination {
     margin-top: 8px;
 }
+
+/* Waterfall Modal */
+.modal-overlay {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0,0,0,0.7); z-index: 1000;
+    display: flex; align-items: center; justify-content: center;
+}
+.modal-content {
+    background: #111827; border: 1px solid #1e3a5f; border-radius: 8px;
+    padding: 20px; max-width: 800px; width: 90%; max-height: 90vh; overflow-y: auto;
+}
+.modal-header {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 12px;
+}
+.modal-header span {
+    font-size: 1.1em; font-weight: 600; color: #64b5f6;
+}
+.modal-close {
+    background: none; border: none; color: #ef5350; font-size: 1.5em;
+    cursor: pointer; padding: 0; line-height: 1;
+}
+.modal-close:hover { color: #ef9a9a; }
+.waterfall-meta {
+    margin-bottom: 12px; font-size: 0.85em; color: #8ab4f8;
+    display: flex; flex-wrap: wrap; gap: 6px 16px;
+}
+.waterfall-meta .wm-item {
+    display: inline-flex; align-items: center; gap: 4px;
+}
+.waterfall-meta .wm-label {
+    color: #546e7a; text-transform: uppercase; font-size: 0.85em;
+}
+.waterfall-meta .wm-val {
+    color: #c8c8e0; font-weight: 600;
+}
+.waterfall-loading {
+    text-align: center; padding: 60px 20px; color: #8ab4f8;
+}
+.waterfall-loading .spinner {
+    display: inline-block; width: 32px; height: 32px;
+    border: 3px solid #1e3a5f; border-top-color: #4fc3f7;
+    border-radius: 50%; animation: wf-spin 0.8s linear infinite;
+    margin-bottom: 12px;
+}
+@keyframes wf-spin { to { transform: rotate(360deg); } }
+.waterfall-error {
+    text-align: center; padding: 40px 20px; color: #ef5350;
+}
+#waterfall-plot { width: 100%; min-height: 400px; }
 
 /* Responsive */
 @media (max-width: 1200px) {
