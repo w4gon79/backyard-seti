@@ -24,25 +24,32 @@ find new analysis methods. That is the niche we aim to fill.
 
 ### Data Inventory
 
-- **Proxima Centauri (PROXCEN):** 6 cadence sessions (MJD 57790, 57846, 57904, 
-  57910, 57942, 58026), spanning Apr-Oct 2017. Parkes 21cm (1.2-1.5 GHz), mid 
-  resolution (~3 Hz channels, ~1s time samples). 36 files, ~7 GB.
+- **Proxima Centauri (PROXCEN):** 6 cadence sessions (MJD 57791, 57847, 
+  57905, 57911, 57943, 58027), spanning Apr-Oct 2017. Parkes 21cm multibeam.
+  - **Fine-res:** 6 files (S/R pairs), 12 GB each, 580 MHz bandwidth 
+    (2744-3324 MHz), 2.79 Hz/ch, 18.25s tsamp, 207M channels. **Primary 
+    data for narrowband SETI.**
+  - **Mid-res:** 36 files, ~233 MB each, 869 MHz bandwidth, 2861 Hz/ch, 
+    1.074s tsamp. Useful for RFI characterization only.
 - **Tabby's Star (KIC8462852):** 6 files from 2 GBT sessions. Fine and coarse 
   resolution. Single ON observation (no OFF cadence).
 
 ### Search Results So Far
 
-All PROXCEN files processed at SNR 25 and SNR 10. Drift range: 0.00001 to 5 
-Hz/s, both polarities. Min drift effectively zero (1e-05 Hz/s).
+All 36 PROXCEN **mid-res** files processed at SNR 25 and SNR 10. Drift range: 
+0.00001 to 5 Hz/s, both polarities.
 
-**Result: Zero hits across all 36 files at both thresholds.**
+**Result: Zero hits across all 36 mid-res files at both thresholds.**
 
-This is consistent with either:
-1. Proxima is genuinely quiet at L-band
-2. The pipeline cannot detect weak signals below its noise floor
-3. Signals exist but fall between drift rate bins (resolution: 9.58 Hz/s)
+**Root cause (confirmed 2026-08-07): drift rate resolution mismatch.**
+turbo_seti min drift step = df / (n_timesteps * tsamp). Mid-res data has 
+df=2861 Hz and tsamp=1.074s, giving 166 Hz/s drift resolution. Any signal 
+drifting slower than 166 Hz/s is invisible. This is a fundamental limit of 
+the mid-res format, not a bug.
 
-**We cannot distinguish these possibilities without signal injection testing.**
+Fine-res data (df=2.79 Hz, tsamp=18.25s) gives 0.0076 Hz/s drift resolution. 
+Fine-res pipeline validated: synthetic injection recovered at SNR 698, real 
+data produces legitimate hits across 580 MHz band.
 
 ---
 
@@ -51,27 +58,23 @@ This is consistent with either:
 Before any advanced techniques, we MUST prove the pipeline can find a signal 
 if one exists. All current zero-hit results are meaningless without this.
 
-### 1A. Signal Injection and Recovery
+### 1A. Signal Injection and Recovery -- COMPLETED
 
-**Goal:** Produce a detection efficiency curve showing recovery rate as a 
-function of SNR and drift rate.
+**Status:** Complete (2026-08-07).
 
-**Method:**
-1. Take existing PROXCEN .h5 files
-2. Inject synthetic narrowband signals at known frequencies, drift rates 
-   (0.01, 0.1, 0.5, 1.0, 2.0 Hz/s), and SNR levels (5, 10, 15, 20, 25, 30)
-3. Run full pipeline (turbo_seti + ON/OFF rejection)
-4. Record which injected signals are recovered
-5. Plot detection efficiency vs SNR for each drift rate
+**Results:** Synthetic signal injection confirmed turbo_seti works correctly 
+on fine-res data. Pure synthetic setigen Frame recovered at SNR 36.5 
+(measured), 26-49 turbo_seti hits. Fine-res BL sub-band injection recovered 
+at SNR 698 (turbo_seti top hit). Mid-res format confirmed unusable for 
+narrowband SETI (166 Hz/s drift resolution).
 
-**Key things to test:**
-- Does a signal at SNR 10 drifting at 0.5 Hz/s get found? (Drift resolution 
-  is 9.58 Hz/s steps, so sub-step signals may be missed)
-- What is the true minimum detectable SNR?
-- Does the ON/OFF cadence correctly identify injected ON-only signals?
+**Test scripts:**
+- `test_synthetic_setigen.py` -- pure synthetic Frame from scratch
+- `test_midres_clone.py` -- synthetic with mid-res params (root cause confirmation)
+- `test_fine_res.py` -- fine-res BL sub-band with injection
 
-**Deliverable:** `inject_signal.py` + detection efficiency plot + confidence 
-interval on our zero-hit result.
+**Deliverable:** Detection confirmed. Efficiency curve (SNR vs recovery rate) 
+is a future enhancement but not blocking.
 
 ### 1B. RFI Environment Characterization
 
@@ -261,11 +264,16 @@ after observation.
 
 ### turbo_seti Limitations
 
-- Drift rate resolution: 9.58 Hz/s (determined by tsamp=1.07s). Sub-resolution 
-  signals lose SNR due to smearing.
+- **Drift rate resolution is data-format dependent:** 
+  `min_drift_step = df / (n_timesteps * tsamp)`
+  - Fine-res (2.79 Hz/ch, 18.25s, 20 ts): 0.0076 Hz/s -- excellent
+  - Mid-res (2861 Hz/ch, 1.074s, 16 ts): 166.5 Hz/s -- useless for narrowband
 - Searches both positive and negative drift from min_drift to max_drift.
 - No built-in RFI flagging beyond DC bin blanking.
 - Output: one .dat + .log per input file, tab-separated hit table.
+- .dat column format: `TopHit# DriftRate SNR UncorrectedFreq CorrectedFreq 
+  Index freq_start freq_end SEFD SEFD_freq CoarseChan NumHits`
+  (Index column is parts[5], 0-indexed)
 
 ### BL API
 
@@ -287,14 +295,36 @@ after observation.
 
 ## Priority Order
 
-1. **Signal injection test** (Phase 1A) - Proves pipeline works
-2. **SNR 5 run** on existing PROXCEN data - See if anything pops out
-3. **RFI characterization** (Phase 1B) - Know what we are looking at
-4. **Barycentric correction + cross-epoch** (Phase 2A-2B) - Real signal hunting
-5. **Incoherent stack** (Phase 2C) - Sensitivity boost from multiple epochs
-6. **ML training set** (Phase 3A) - Foundation for classifier
-7. **CNN classifier** (Phase 3B) - Novel contribution
-8. **Automated survey** (Phase 4) - Scale up
+1. ~~Signal injection test~~ (Phase 1A) -- COMPLETE
+2. **Fine-res full pipeline run** -- Run all 6 PROXCEN fine-res files 
+   through sub-band pipeline. Targeted frequency windows first, then 
+   expand to full-band overnight.
+3. **Sub-band edge deduplication** -- Feature add: when overlapping 
+   sub-bands produce duplicate hits for the same signal, deduplicate 
+   by frequency proximity. Edge filter to suppress boundary artifacts 
+   at sub-band edges (planned, not blocking).
+4. **RFI characterization** (Phase 1B) -- Catalog hits from OFF frames
+5. **Barycentric correction + cross-epoch** (Phase 2A-2B) -- Real signal hunting
+6. **Incoherent stack** (Phase 2C) -- Sensitivity boost from multiple epochs
+7. **ML training set** (Phase 3A) -- Foundation for classifier
+8. **CNN classifier** (Phase 3B) -- Novel contribution
+9. **Automated survey** (Phase 4) -- Scale up
+
+### Full-Band Processing Notes
+
+Sensitivity is identical across all sub-band widths. The df, tsamp, and 
+n_timesteps are fixed by the data format. Sub-band width only affects 
+memory management and wall-clock time, not detection capability. Overlap 
+(512 channels) ensures no signal is lost at sub-band boundaries.
+
+Full-band throughput estimates per 12 GB fine-res file:
+- 8,192 ch sub-bands: ~98h (27,034 sub-bands)
+- 131,072 ch sub-bands: ~6h (1,690 sub-bands)
+- 262,144 ch sub-bands: ~3h (845 sub-bands)
+
+Parallelization (multiprocessing) can cut wall time by 4-8x. Targeted 
+frequency windows (e.g. 50 MHz around expected barycentric frequency) 
+reduce sub-band count by 90%+ for initial reconnaissance.
 
 ---
 
@@ -312,5 +342,5 @@ after observation.
 ---
 
 *Document created: 2026-08-06*
-*Last updated: 2026-08-06*
+*Last updated: 2026-08-07*
 *Authors: Carl & Joel*
