@@ -210,6 +210,7 @@ var blPage = 0;
 var blPageSize = 50;
 var blFilterRes = 'all';
 var blFilterType = 'all';
+var blFilterFileType = 'all';
 
 async function searchBL() {
     var target = document.getElementById('target-input').value.trim();
@@ -232,6 +233,7 @@ async function searchBL() {
             blPage = 0;
             blFilterRes = 'all';
             blFilterType = 'all';
+            blFilterFileType = 'all';
 
             var first = data.data[0];
             var raVal = first.ra || first.ra_hours;
@@ -254,14 +256,27 @@ async function searchBL() {
 
 function getFilteredBL() {
     return blResults.filter(function(obs) {
-        var res = (obs.resolution || '').toLowerCase();
-        var fileType = obs.file_type || '';
-        var targetName = obs.target || obs.source_name || '';
-        var isOn = fileType.indexOf('S') !== -1 || targetName.indexOf('_S_') !== -1;
-        var isOff = fileType.indexOf('R') !== -1 || targetName.indexOf('_R_') !== -1;
-        if (blFilterRes !== 'all' && res.indexOf(blFilterRes) === -1) return false;
+        // BL API has no 'resolution' field; extract from URL filename
+        var url = obs.url || '';
+        var res = '';
+        if (url.indexOf('_fine.') !== -1) res = 'fine';
+        else if (url.indexOf('_mid.') !== -1) res = 'mid';
+        else if (url.indexOf('_time.') !== -1) res = 'time';
+        else if (url.indexOf('_coarse.') !== -1) res = 'coarse';
+        res = res.toLowerCase();
+
+        // File type from API
+        var fileType = (obs.file_type || '').toLowerCase();
+
+        // ON/OFF from target name (PROXCEN_S = ON, PROXCEN_R = OFF)
+        var targetName = obs.target || '';
+        var isOn = targetName.indexOf('_S') !== -1;
+        var isOff = targetName.indexOf('_R') !== -1;
+
+        if (blFilterRes !== 'all' && res !== blFilterRes) return false;
         if (blFilterType === 'on' && !isOn) return false;
         if (blFilterType === 'off' && !isOff) return false;
+        if (blFilterFileType !== 'all' && fileType !== blFilterFileType) return false;
         return true;
     });
 }
@@ -295,10 +310,15 @@ function renderBLResults() {
         html += '<option value="' + t[0] + '"' + (blFilterType === t[0] ? ' selected' : '') + '>' + t[1] + '</option>';
     });
     html += '</select>';
+    html += '<label>Format:</label><select onchange="blFilterFileType=this.value;blPage=0;renderBLResults()">';
+    ['all','hdf5','filterbank'].forEach(function(ft) {
+        html += '<option value="' + ft + '"' + (blFilterFileType === ft ? ' selected' : '') + '>' + (ft === 'all' ? 'All' : ft === 'hdf5' ? 'HDF5' : 'Filterbank') + '</option>';
+    });
+    html += '</select>';
     html += '</div>';
 
     html += '<table class="bl-table"><thead><tr>';
-    html += '<th>MJD</th><th>Target</th><th>RA</th><th>Dec</th><th>Type</th><th>Res</th><th>Size</th><th>DL</th>';
+    html += '<th>MJD</th><th>Date</th><th>Target</th><th>RA</th><th>Dec</th><th>Type</th><th>Res</th><th>Size</th><th>DL</th>';
     html += '</tr></thead><tbody>';
 
     for (var i = 0; i < pageData.length; i++) {
@@ -311,12 +331,22 @@ function renderBLResults() {
         var sz = obs.size || obs.file_size;
 
         html += '<tr onclick="onBLRowClick(\'' + sn + '\',' + rH + ',' + dD + ')">';
-        html += '<td>' + (obs.mjd || obs.tstart || '?') + '</td>';
+        var mjdVal = obs.mjd || obs.tstart || 0;
+        html += '<td>' + (mjdVal ? mjdVal.toFixed(4) : '?') + '</td>';
+        html += '<td>' + (mjdVal ? mjdToDate(mjdVal) : '?') + '</td>';
         html += '<td>' + (obs.target || obs.source_name || '?') + '</td>';
         html += '<td>' + (typeof rv === 'number' ? rv.toFixed(3) : rv) + '</td>';
         html += '<td>' + (typeof dv === 'number' ? dv.toFixed(3) : dv) + '</td>';
+        // Extract resolution from URL since BL API doesn't have a resolution field
+        var obsUrl = obs.url || '';
+        var resDisplay = '?';
+        if (obsUrl.indexOf('_fine.') !== -1) resDisplay = 'fine';
+        else if (obsUrl.indexOf('_mid.') !== -1) resDisplay = 'mid';
+        else if (obsUrl.indexOf('_time.') !== -1) resDisplay = 'time';
+        else if (obsUrl.indexOf('_coarse.') !== -1) resDisplay = 'coarse';
+
         html += '<td>' + (obs.file_type || '') + '</td>';
-        html += '<td>' + (obs.resolution || '?') + '</td>';
+        html += '<td>' + resDisplay + '</td>';
         html += '<td>' + (sz ? (sz / 1e9).toFixed(1) + ' GB' : '?') + '</td>';
         var u = obs.url || '';
         if (u) {
@@ -345,6 +375,18 @@ function onBLRowClick(name, ra, dec) {
     if (ra && dec) {
         plotTargetOnMap(name, ra, dec);
     }
+}
+
+function mjdToDate(mjd) {
+    // Modified Julian Day to human-readable date
+    // MJD = days since 1858-11-17 (Julian day 2400000.5)
+    var epoch = Date.UTC(1858, 10, 17); // Month is 0-indexed, so 10 = November
+    var dateMs = epoch + (mjd * 86400000);
+    var d = new Date(dateMs);
+    var y = d.getUTCFullYear();
+    var m = String(d.getUTCMonth() + 1).padStart(2, '0');
+    var day = String(d.getUTCDate()).padStart(2, '0');
+    return y + '-' + m + '-' + day;
 }
 
 function parseRA(ra) {
