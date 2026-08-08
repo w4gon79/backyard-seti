@@ -1628,7 +1628,7 @@ def api_reject():
                 'candidates': len(candidates),
                 'rejection_rate': round(len(rejected) / max(len(on_hits), 1) * 100, 2),
             },
-            'candidates': candidates[:1000],  # Top 1000 by SNR
+            'candidates': candidates,  # All candidates sorted by SNR
             'rejected_count': len(rejected),
         }, f, indent=2)
     
@@ -1645,7 +1645,7 @@ def api_reject():
             'candidates': len(candidates),
             'rejection_rate': round(len(rejected) / max(len(on_hits), 1) * 100, 2),
         },
-        'candidates': candidates[:200],  # Top 200 for dashboard display
+        'candidates': candidates,  # All candidates
     })
 
 
