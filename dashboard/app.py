@@ -21,7 +21,7 @@ import subprocess
 import re
 from datetime import datetime, timedelta
 from pathlib import Path
-from flask import Flask, render_template, jsonify, request, send_from_directory
+from flask import Flask, render_template, jsonify, request, send_from_directory, make_response
 import numpy as np
 
 # Add src to path for imports
@@ -126,7 +126,11 @@ def index():
 
 @app.route('/mission')
 def mission():
-    return render_template('mission.html')
+    resp = make_response(render_template('mission.html'))
+    resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    resp.headers['Pragma'] = 'no-cache'
+    resp.headers['Expires'] = '0'
+    return resp
 
 
 # ─── API: Target Search ───────────────────────────────────────────────
@@ -1833,7 +1837,16 @@ def api_barycentric_targets():
             'elev': info['elev'],
         })
     
-    return jsonify({'targets': targets, 'telescopes': telescopes})
+    # Also return which scans have barycentric correction completed
+    corrected_scans = []
+    for sid in _discover_scans():
+        scan_dir = _get_scan_dir(sid)
+        if scan_dir:
+            combined_path = os.path.join(scan_dir, 'barycentric', 'combined_corrected.json')
+            if os.path.isfile(combined_path):
+                corrected_scans.append(sid)
+    
+    return jsonify({'targets': targets, 'telescopes': telescopes, 'corrected_scans': corrected_scans})
 
 
 # ─── API: Waterfall Data ─────────────────────────────────────────────

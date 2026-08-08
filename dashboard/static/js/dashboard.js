@@ -1616,6 +1616,10 @@ async function loadBarycentricTargets() {
             html += '<option value="' + t.name + '">' + t.name + '</option>';
         }
         select.innerHTML = html;
+        // Store which scans have barycentric correction completed
+        window.correctedScanIds = data.corrected_scans || [];
+        // Refresh the cross-epoch checkboxes now that we know which scans are corrected
+        updateBaryScanCheckboxes();
     } catch(e) {
         console.error('Error loading bary targets:', e);
     }
@@ -1637,15 +1641,27 @@ function updateBaryScanCheckboxes() {
         container.innerHTML = '<span style="color:#546e7a;font-size:0.85em;">No scans available.</span>';
         return;
     }
+    // Only show scans that have barycentric correction completed
+    // correctedScanIds is populated by loadBarycentricTargets()
+    if (!window.correctedScanIds || window.correctedScanIds.length === 0) {
+        container.innerHTML = '<span style="color:#546e7a;font-size:0.85em;">No barycentrically corrected scans yet. Run correction first.</span>';
+        return;
+    }
     var html = '';
     for (var i = 0; i < scansList.length; i++) {
         var s = scansList[i];
         var sid = s.scan_id;
+        // Skip scans that haven't been corrected
+        if (window.correctedScanIds.indexOf(sid) === -1) continue;
         var label = sid;
         if (label.length > 40) label = label.substring(0, 37) + '...';
         html += '<label class="bary-scan-checkbox" data-scan-id="' + sid + '">';
         html += '<input type="checkbox" value="' + sid + '"> ';
         html += label + '</label>';
+    }
+    if (!html) {
+        container.innerHTML = '<span style="color:#546e7a;font-size:0.85em;">No barycentrically corrected scans yet. Run correction first.</span>';
+        return;
     }
     container.innerHTML = html;
     // Auto-check the currently selected scan
