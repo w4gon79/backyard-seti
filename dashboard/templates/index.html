@@ -157,15 +157,15 @@
                             <option value="effelsberg">Effelsberg</option>
                         </select>
                     </div>
-                    <button id="btn-bary-correct" class="btn-primary" onclick="runBarycentric()">Run Correction</button>
+                    <button id="btn-bary-correct" class="btn-primary" onclick="runBarycentric()" title="Computes the barycentric velocity correction for the selected scan using astropy. Shifts all hit frequencies to the solar system barycenter rest frame so signals from a real transmitter appear at the same frequency across different observation dates. Must be run before cross-epoch comparison.">Run Correction</button>
                 </div>
                 <div class="bary-cross-group">
                     <label title="Select 2+ scans to find signals that appear in ON frames across multiple epochs but NOT in OFF frames. Requires barycentric correction to be run first.">Cross-Epoch Scans</label>
                     <div id="bary-scan-checkboxes" class="bary-scan-list"></div>
-                    <label>Tolerance (Hz)</label>
-                    <input type="number" id="bary-tolerance-hz" value="10" min="1" max="1000" step="1" style="width:80px;">
-                    <label>Min Epochs</label>
-                    <input type="number" id="bary-min-epochs" value="2" min="2" max="10" step="1" style="width:60px;">
+                    <label title="How closely two hit frequencies must match across epochs to count as the same signal. After barycentric correction, a real transmitter should appear at the same rest-frame frequency in every epoch. Default 10 Hz accounts for small uncertainties in the correction and turbo_seti frequency binning. Tighter (1-5 Hz) is stricter but may miss slightly misaligned hits. Wider (50-100 Hz) catches more candidates but increases false positives.">Tolerance (Hz)</label>
+                    <input type="number" id="bary-tolerance-hz" value="10" min="1" max="1000" step="1" style="width:80px;" title="How closely two hit frequencies must match across epochs to count as the same signal. Default 10 Hz. Tighter = fewer false positives but may miss real signals. Wider = more candidates but more noise.">
+                    <label title="Minimum number of epochs a signal must appear in to be flagged as a candidate. With 2 epochs, a match in both ON frames is already statistically significant (false alarm probability is very low). With 3+ epochs, confidence is even higher. Default 2 is the standard for cross-epoch SETI. Raise to 3 if you have many epochs and want stricter filtering.">Min Epochs</label>
+                    <input type="number" id="bary-min-epochs" value="2" min="2" max="10" step="1" style="width:60px;" title="Minimum number of epochs a signal must appear in to count as a candidate. Default 2. Raise to 3+ for stricter filtering when you have many epochs.">
                     <button id="btn-cross-epoch" class="btn-warning" onclick="runCrossEpoch()">Run Cross-Epoch Search</button>
                 </div>
                 <div id="bary-status" class="bary-status"></div>
