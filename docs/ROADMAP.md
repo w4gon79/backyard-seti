@@ -9,7 +9,14 @@ find new analysis methods. That is the niche we aim to fill.
 
 ---
 
-## Current State (2026-08-06)
+## Roadmap Approval
+
+**Approved by Joel on 2026-08-08.** This roadmap is the official development
+plan for the Backyard SETI project. We follow it closely, one phase at a time.
+
+---
+
+## Current State (2026-08-08)
 
 ### Pipeline Components
 
@@ -304,22 +311,21 @@ after observation.
 
 ---
 
-## Priority Order
+## Priority Order (Approved 2026-08-08)
+
+We follow this strictly, one step at a time. No skipping ahead.
 
 1. ~~Signal injection test~~ (Phase 1A) -- COMPLETE
-2. **Fine-res full pipeline run** -- Run all 6 PROXCEN fine-res files 
-   through sub-band pipeline. Targeted frequency windows first, then 
-   expand to full-band overnight.
-3. **Sub-band edge deduplication** -- Feature add: when overlapping 
-   sub-bands produce duplicate hits for the same signal, deduplicate 
-   by frequency proximity. Edge filter to suppress boundary artifacts 
-   at sub-band edges (planned, not blocking).
-4. **RFI characterization** (Phase 1B) -- Catalog hits from OFF frames
-5. **Barycentric correction + cross-epoch** (Phase 2A-2B) -- Module built ✓, dashboard integrated ✓, awaiting multi-epoch scan completion
-6. **Incoherent stack** (Phase 2C) -- Sensitivity boost from multiple epochs
-7. **ML training set** (Phase 3A) -- Foundation for classifier
-8. **CNN classifier** (Phase 3B) -- Novel contribution
-9. **Automated survey** (Phase 4) -- Scale up
+2. ~~Fine-res full pipeline run~~ -- 57791 scan running, 58020 queued. IN PROGRESS.
+3. ~~Sub-band edge deduplication~~ -- Low priority, not blocking.
+4. ~~RFI characterization~~ (Phase 1B) -- Will harvest from OFF frames after scans complete.
+5. **Barycentric correction + cross-epoch** (Phase 2A-2B) -- Module built, dashboard integrated, awaiting 58020 scan completion. NEXT.
+6. **Cross-epoch hit stacking** (Phase 2B) -- False alarm probabilities for cross-epoch candidates.
+7. **Incoherent stack** (Phase 2C) -- Sensitivity boost from multiple epochs.
+8. **ML training set** (Phase 3A) -- Foundation for classifier.
+9. **CNN classifier** (Phase 3B) -- Novel contribution.
+10. **Unsupervised anomaly detection** (Phase 3C) -- Catch what turbo_seti structurally cannot.
+11. **Automated multi-target survey** (Phase 4) -- Scale up.
 
 ### Full-Band Processing Notes
 
