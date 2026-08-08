@@ -14,6 +14,53 @@ find new analysis methods. That is the niche we aim to fill.
 **Approved by Joel on 2026-08-08.** This roadmap is the official development
 plan for the Backyard SETI project. We follow it closely, one phase at a time.
 
+## Proxima Centauri Testbed
+
+Proxima Centauri is our primary testbed for proving out every phase of this
+roadmap. The BL open data catalog contains **25 complete 6-file fine-res
+cadence sets** for PROXCEN, spanning January to October 2017:
+
+| Epoch | MJD | Date | Status |
+|-------|-----|------|--------|
+| 1 | 57783 | Jan 30 | Available |
+| 2 | 57790 | Feb 6 | Available |
+| 3 | 57791 | Feb 7 | **Scanning** |
+| 4 | 57804 | Feb 20 | Available |
+| 5 | 57805 | Feb 21 | Available |
+| 6 | 57808 | Feb 24 | Available |
+| 7 | 57809 | Feb 25 | Available |
+| 8 | 57846 | Apr 3 | Available |
+| 9 | 57847 | Apr 4 | Available |
+| 10 | 57850 | Apr 7 | Available |
+| 11 | 57854 | Apr 11 | Available |
+| 12 | 57904 | May 31 | Available |
+| 13 | 57910 | Jun 6 | Available |
+| 14 | 57930 | Jun 26 | Available |
+| 15 | 57932 | Jun 28 | Available |
+| 16 | 57933 | Jun 29 | Available |
+| 17 | 57939 | Jul 5 | Available |
+| 18 | 57940 | Jul 6 | Available |
+| 19 | 57942 | Jul 8 | Available |
+| 20 | 57943 | Jul 9 | Available |
+| 21 | 58020 | Sep 24 | **Downloaded, queued** |
+| 22 | 58026 | Sep 30 | Available |
+| 23 | 58027 | Oct 1 | Available |
+| 24 | 58029 | Oct 3 | Available |
+| 25 | 58048 | Oct 22 | Available |
+
+**Validation strategy:** Scan 3-4 well-spaced epochs first (Feb, Apr, Jul, Sep)
+to validate cross-epoch pipeline end to end. Then batch-scan remaining epochs
+for deep incoherent stacking.
+
+**Stacking sensitivity:** With N epochs, a signal at SNR S in individual
+spectra becomes SNR ~S*sqrt(N) in the stack. With 25 epochs, SNR 1.5 becomes
+SNR ~7.5. This is the sensitivity that could pull a faint narrowband beacon
+out of the noise floor.
+
+**Processing cost:** ~21 hours per 6-file cadence (3.5 hr/file at 262,144
+sub-band width). Full 25-epoch suite = ~22 days continuous. Batch queue with
+resume capability handles unattended processing.
+
 ---
 
 ## Current State (2026-08-08)
@@ -314,18 +361,19 @@ after observation.
 ## Priority Order (Approved 2026-08-08)
 
 We follow this strictly, one step at a time. No skipping ahead.
+Proxima Centauri is our testbed for every phase.
 
 1. ~~Signal injection test~~ (Phase 1A) -- COMPLETE
-2. ~~Fine-res full pipeline run~~ -- 57791 scan running, 58020 queued. IN PROGRESS.
+2. ~~Fine-res full pipeline run~~ -- 57791 scanning, 58020 queued. IN PROGRESS.
 3. ~~Sub-band edge deduplication~~ -- Low priority, not blocking.
 4. ~~RFI characterization~~ (Phase 1B) -- Will harvest from OFF frames after scans complete.
-5. **Barycentric correction + cross-epoch** (Phase 2A-2B) -- Module built, dashboard integrated, awaiting 58020 scan completion. NEXT.
-6. **Cross-epoch hit stacking** (Phase 2B) -- False alarm probabilities for cross-epoch candidates.
-7. **Incoherent stack** (Phase 2C) -- Sensitivity boost from multiple epochs.
-8. **ML training set** (Phase 3A) -- Foundation for classifier.
-9. **CNN classifier** (Phase 3B) -- Novel contribution.
+5. **Barycentric correction + cross-epoch** (Phase 2A-2B) -- Module built, dashboard integrated. Validate with 57791 vs 58020. NEXT.
+6. **Cross-epoch hit stacking** (Phase 2B) -- False alarm probabilities. Validate with 4 epochs (Feb, Apr, Jul, Sep).
+7. **Incoherent stack** (Phase 2C) -- Deep sensitivity from all 25 PROXCEN epochs. SNR 1.5 -> ~7.5.
+8. **ML training set** (Phase 3A) -- Harvest from PROXCEN OFF frames + synthetic injections.
+9. **CNN classifier** (Phase 3B) -- Train on PROXCEN waterfall tiles. Novel contribution.
 10. **Unsupervised anomaly detection** (Phase 3C) -- Catch what turbo_seti structurally cannot.
-11. **Automated multi-target survey** (Phase 4) -- Scale up.
+11. **Automated multi-target survey** (Phase 4) -- Scale beyond Proxima to full BL target list.
 
 ### Full-Band Processing Notes
 
