@@ -57,6 +57,7 @@ document.addEventListener('DOMContentLoaded', () => {
     updateBaryScanCheckboxes();
 
     logInterval = setInterval(pollScanStatus, 3000);
+    pollScanStatus();  // Fire immediately so button states sync on page load
     setInterval(pollDownloadStatus, 10000);
 
     // Waterfall modal close handlers
@@ -762,6 +763,10 @@ async function pollScanStatus() {
         var statusDiv = document.getElementById('scan-status');
         var progBar = document.getElementById('progress-bar-container');
         if (data.active) {
+            // Sync button states for active scan (handles page refresh during scan)
+            document.getElementById('btn-start-scan').disabled = true;
+            document.getElementById('btn-stop-scan').disabled = false;
+            document.getElementById('btn-resume-scan').disabled = true;
             // Build status line with real structured data
             var target = data.target || '---';
             var subDone = data.sub_bands_done || 0;
