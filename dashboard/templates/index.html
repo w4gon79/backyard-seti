@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>📡 Backyard SETI Dashboard</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=8">
-    <link rel="stylesheet" href="/static/css/style.css?v=28">>>
+    <link rel="stylesheet" href="/static/css/style.css?v=29">>>
     <link rel="stylesheet" href="/static/css/celestial.css?v=1">
     <!-- Plotly for charts -->
     <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
@@ -127,6 +127,102 @@
         </div>
     </div>
 
+    <!-- Barycentric Correction Panel -->
+    <div class="row">
+        <div class="panel panel-full">
+            <div class="panel-header">🛰️ Barycentric Correction & Cross-Epoch Search</div>
+            <div class="barycentric-content">
+                <div class="bary-controls-row">
+                    <div class="bary-target-group">
+                        <label>Target</label>
+                        <select id="bary-target-select" onchange="onBaryTargetSelected()">
+                            <option value="">Custom...</option>
+                        </select>
+                    </div>
+                    <div class="bary-coords-group">
+                        <label>RA (hours)</label>
+                        <input type="number" id="bary-ra" step="0.0001" placeholder="14.4953" style="width:100px;">
+                    </div>
+                    <div class="bary-coords-group">
+                        <label>Dec (deg)</label>
+                        <input type="number" id="bary-dec" step="0.0001" placeholder="-62.6795" style="width:100px;">
+                    </div>
+                    <div class="bary-coords-group">
+                        <label>Telescope</label>
+                        <select id="bary-telescope" style="width:110px;">
+                            <option value="parkes">Parkes</option>
+                            <option value="gbt">GBT</option>
+                            <option value="fast">FAST</option>
+                            <option value="meerkat">MeerKAT</option>
+                            <option value="effelsberg">Effelsberg</option>
+                        </select>
+                    </div>
+                    <button id="btn-bary-correct" class="btn-primary" onclick="runBarycentric()">Run Correction</button>
+                </div>
+                <div class="bary-cross-group">
+                    <label title="Select 2+ scans to find signals that appear in ON frames across multiple epochs but NOT in OFF frames. Requires barycentric correction to be run first.">Cross-Epoch Scans</label>
+                    <div id="bary-scan-checkboxes" class="bary-scan-list"></div>
+                    <label>Tolerance (Hz)</label>
+                    <input type="number" id="bary-tolerance-hz" value="10" min="1" max="1000" step="1" style="width:80px;">
+                    <label>Min Epochs</label>
+                    <input type="number" id="bary-min-epochs" value="2" min="2" max="10" step="1" style="width:60px;">
+                    <button id="btn-cross-epoch" class="btn-warning" onclick="runCrossEpoch()">Run Cross-Epoch Search</button>
+                </div>
+                <div id="bary-status" class="bary-status"></div>
+            </div>
+            <div id="bary-results-container" class="bary-results-container" style="display:none;">
+                <div class="bary-tabs">
+                    <button id="bary-tab-corrected" class="bary-tab active" onclick="switchBaryTab('corrected')">Corrected Hits</button>
+                    <button id="bary-tab-cross" class="bary-tab" onclick="switchBaryTab('cross')">Cross-Epoch Candidates</button>
+                </div>
+                <div id="bary-corrected-panel" class="bary-tab-panel">
+                    <div class="bary-summary" id="bary-corrected-summary"></div>
+                    <div id="bary-corrected-table-container">
+                        <table id="bary-corrected-table" class="bary-table">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Bary Freq (MHz)</th>
+                                    <th>Obs Freq (MHz)</th>
+                                    <th>ΔFreq (Hz)</th>
+                                    <th>Drift (Hz/s)</th>
+                                    <th>SNR</th>
+                                    <th>ON/OFF</th>
+                                    <th>File</th>
+                                </tr>
+                            </thead>
+                            <tbody id="bary-corrected-tbody">
+                                <tr><td colspan="8" class="empty">Run correction to see results.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div id="bary-corrected-pagination" class="bl-pagination" style="display:none;"></div>
+                </div>
+                <div id="bary-cross-panel" class="bary-tab-panel" style="display:none;">
+                    <div class="bary-summary" id="bary-cross-summary"></div>
+                    <div id="bary-cross-table-container">
+                        <table id="bary-cross-table" class="bary-table">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Bary Freq (MHz)</th>
+                                    <th>Epochs</th>
+                                    <th>Max SNR</th>
+                                    <th>Mean Drift</th>
+                                    <th>log₁₀(P_false)</th>
+                                    <th>Obs Freqs</th>
+                                </tr>
+                            </thead>
+                            <tbody id="bary-cross-tbody">
+                                <tr><td colspan="7" class="empty">Run cross-epoch search to see candidates.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Bottom Row: ON/OFF Rejection + Results -->
     <div class="row">
         <div class="panel panel-full">
@@ -206,6 +302,6 @@
     </div>
 </div>
 
-<script src="/static/js/dashboard.js?v=53"></script>
+<script src="/static/js/dashboard.js?v=54"></script>
 </body>
 </html>

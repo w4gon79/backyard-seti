@@ -1668,6 +1668,174 @@ def api_rejection_results():
     return jsonify({'error': 'No rejection results found'}), 404
 
 
+# ─── API: Barycentric Correction ─────────────────────────────────────
+
+@app.route('/api/barycentric/correct', methods=['POST'])
+def api_barycentric_correct():
+    """Run barycentric correction on a scan directory.
+    
+    Body: {scan_id, ra_hours?, dec_deg?, telescope?}
+    Auto-detects coordinates from target name and HDF5 headers if not provided.
+    """
+    params = request.json or {}
+    scan_id = params.get('scan_id', '')
+    ra_hours = params.get('ra_hours', None)
+    dec_deg = params.get('dec_deg', None)
+    telescope = params.get('telescope', 'parkes')
+    
+    if not scan_id:
+        return jsonify({'error': 'No scan_id specified'}), 400
+    
+    scan_dir = _get_scan_dir(scan_id)
+    if not scan_dir:
+        return jsonify({'error': f'Scan not found: {scan_id}'}), 404
+    
+    try:
+        from barycentric_correct import correct_scan, resolve_target_coords
+        
+        # Auto-detect target from scan meta
+        meta = _load_scan_meta(scan_dir) or {}
+        target_name = meta.get('target', params.get('target', ''))
+        
+        # Auto-detect coords if not provided
+        if ra_hours is not None:
+            ra_hours = float(ra_hours)
+        if dec_deg is not None:
+            dec_deg = float(dec_deg)
+        if ra_hours is None or dec_deg is None:
+            db_ra, db_dec, src = resolve_target_coords(target_name, ra_hours, dec_deg)
+            if db_ra is not None:
+                ra_hours = db_ra
+                dec_deg = db_dec
+        
+        result = correct_scan(
+            scan_dir, 
+            ra_hours=ra_hours, 
+            dec_deg=dec_deg,
+            telescope=telescope, 
+            target_name=target_name,
+        )
+        
+        return jsonify({
+            'status': 'complete',
+            'scan_id': scan_id,
+            'files_corrected': len(result['files_corrected']),
+            'total_hits': result['total_hits'],
+            'corrections': result['corrections'],
+            'barycentric_dir': result['barycentric_dir'],
+        })
+    except Exception as e:
+        import traceback
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()[-500:]}), 500
+
+
+@app.route('/api/barycentric/results/<scan_id>')
+def api_barycentric_results(scan_id):
+    """Get corrected hits for a scan."""
+    scan_dir = _get_scan_dir(scan_id)
+    if not scan_dir:
+        return jsonify({'error': f'Scan not found: {scan_id}'}), 404
+    
+    bary_dir = os.path.join(scan_dir, 'barycentric')
+    combined_path = os.path.join(bary_dir, 'combined_corrected.json')
+    
+    if not os.path.isfile(combined_path):
+        return jsonify({'error': 'No barycentric correction results found. Run correction first.'}), 404
+    
+    with open(combined_path) as f:
+        data = json.load(f)
+    
+    # Paginate hits for display (the combined file can be huge)
+    page = request.args.get('page', default=1, type=int)
+    per_page = request.args.get('per_page', default=200, type=int)
+    snr_min = request.args.get('snr_min', default=0, type=float)
+    
+    hits = data.get('hits', [])
+    # Filter by SNR
+    if snr_min > 0:
+        hits = [h for h in hits if h.get('snr', 0) >= snr_min]
+    
+    total = len(hits)
+    total_pages = max(1, (total + per_page - 1) // per_page)
+    page = max(1, min(page, total_pages))
+    start = (page - 1) * per_page
+    page_hits = hits[start:start + per_page]
+    
+    return jsonify({
+        'scan_id': scan_id,
+        'target': data.get('target', ''),
+        'ra_hours': data.get('ra_hours', 0),
+        'dec_deg': data.get('dec_deg', 0),
+        'telescope': data.get('telescope', ''),
+        'total_hits': data.get('total_hits', 0),
+        'files_corrected': data.get('files_corrected', 0),
+        'corrections': data.get('corrections', {}),
+        'hits': page_hits,
+        'page': page,
+        'per_page': per_page,
+        'total_filtered': total,
+        'total_pages': total_pages,
+    })
+
+
+@app.route('/api/barycentric/cross-epoch', methods=['POST'])
+def api_barycentric_cross_epoch():
+    """Run cross-epoch comparison across multiple scans.
+    
+    Body: {scan_ids, freq_tolerance_hz?, min_epochs?}
+    """
+    params = request.json or {}
+    scan_ids = params.get('scan_ids', [])
+    freq_tolerance_hz = params.get('freq_tolerance_hz', 10)
+    min_epochs = params.get('min_epochs', 2)
+    
+    if not scan_ids or len(scan_ids) < 2:
+        return jsonify({'error': 'Need at least 2 scan_ids for cross-epoch comparison'}), 400
+    
+    scan_dirs = []
+    for sid in scan_ids:
+        sd = _get_scan_dir(sid)
+        if not sd:
+            return jsonify({'error': f'Scan not found: {sid}'}), 404
+        scan_dirs.append(sd)
+    
+    try:
+        from barycentric_correct import cross_epoch_match
+        
+        result = cross_epoch_match(
+            scan_dirs,
+            freq_tolerance_hz=float(freq_tolerance_hz),
+            min_epochs=int(min_epochs),
+        )
+        
+        return jsonify(result)
+    except Exception as e:
+        import traceback
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()[-500:]}), 500
+
+
+@app.route('/api/barycentric/targets')
+def api_barycentric_targets():
+    """Return known target coordinates for the dropdown."""
+    from barycentric_correct import TARGET_COORDS, TELESCOPE_LOCATIONS
+    
+    targets = []
+    for name, (ra, dec) in sorted(TARGET_COORDS.items()):
+        targets.append({'name': name, 'ra_hours': ra, 'dec_deg': dec})
+    
+    telescopes = []
+    for name, info in sorted(TELESCOPE_LOCATIONS.items()):
+        telescopes.append({
+            'name': name,
+            'display_name': info['name'],
+            'lat': info['lat'],
+            'lon': info['lon'],
+            'elev': info['elev'],
+        })
+    
+    return jsonify({'targets': targets, 'telescopes': telescopes})
+
+
 # ─── API: Waterfall Data ─────────────────────────────────────────────
 
 @app.route('/api/waterfall')

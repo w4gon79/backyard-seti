@@ -52,6 +52,10 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('btn-run-rejection').onclick = runRejection;
     document.getElementById('scan-selector').onchange = onScanSelected;
 
+    // Barycentric init
+    loadBarycentricTargets();
+    updateBaryScanCheckboxes();
+
     logInterval = setInterval(pollScanStatus, 3000);
     setInterval(pollDownloadStatus, 10000);
 
@@ -837,6 +841,8 @@ async function loadScansList() {
             loadResults();
             loadStats();
         }
+        // Refresh barycentric scan checkboxes
+        updateBaryScanCheckboxes();
     } catch(e) {
         console.error('Error loading scans:', e);
         loadResults();  // Fallback to legacy
@@ -1584,4 +1590,291 @@ function closeWaterfallModal() {
     // Purge plot to free memory
     var plotDiv = document.getElementById('waterfall-plot');
     if (plotDiv) Plotly.purge(plotDiv);
+}
+
+// ─── Barycentric Correction ─────────────────────────────────────────
+
+var baryTargets = {};
+var baryCorrectedPage = 1;
+var baryCorrectedPerPage = 200;
+
+async function loadBarycentricTargets() {
+    try {
+        var resp = await fetch('/api/barycentric/targets');
+        var data = await resp.json();
+        var select = document.getElementById('bary-target-select');
+        var html = '<option value="">Custom...</option>';
+        baryTargets = {};
+        for (var i = 0; i < data.targets.length; i++) {
+            var t = data.targets[i];
+            baryTargets[t.name] = {ra: t.ra_hours, dec: t.dec_deg};
+            html += '<option value="' + t.name + '">' + t.name + '</option>';
+        }
+        select.innerHTML = html;
+    } catch(e) {
+        console.error('Error loading bary targets:', e);
+    }
+}
+
+function onBaryTargetSelected() {
+    var select = document.getElementById('bary-target-select');
+    var target = select.value;
+    if (target && baryTargets[target]) {
+        document.getElementById('bary-ra').value = baryTargets[target].ra;
+        document.getElementById('bary-dec').value = baryTargets[target].dec;
+    }
+}
+
+function updateBaryScanCheckboxes() {
+    var container = document.getElementById('bary-scan-checkboxes');
+    if (!container) return;
+    if (scansList.length === 0) {
+        container.innerHTML = '<span style="color:#546e7a;font-size:0.85em;">No scans available.</span>';
+        return;
+    }
+    var html = '';
+    for (var i = 0; i < scansList.length; i++) {
+        var s = scansList[i];
+        var sid = s.scan_id;
+        var label = sid;
+        if (label.length > 40) label = label.substring(0, 37) + '...';
+        html += '<label class="bary-scan-checkbox" data-scan-id="' + sid + '">';
+        html += '<input type="checkbox" value="' + sid + '"> ';
+        html += label + '</label>';
+    }
+    container.innerHTML = html;
+    // Auto-check the currently selected scan
+    if (currentScanId) {
+        var cb = container.querySelector('input[value="' + currentScanId + '"]');
+        if (cb) {
+            cb.checked = true;
+            cb.parentElement.classList.add('checked');
+        }
+    }
+    // Add change listeners
+    var checkboxes = container.querySelectorAll('input[type="checkbox"]');
+    for (var j = 0; j < checkboxes.length; j++) {
+        checkboxes[j].onchange = function() {
+            if (this.checked) {
+                this.parentElement.classList.add('checked');
+            } else {
+                this.parentElement.classList.remove('checked');
+            }
+        };
+    }
+}
+
+async function runBarycentric() {
+    var btn = document.getElementById('btn-bary-correct');
+    var statusDiv = document.getElementById('bary-status');
+    btn.disabled = true;
+    btn.textContent = 'Correcting...';
+    statusDiv.innerHTML = '<span style="color:#8ab4f8;">Computing barycentric correction...</span>';
+
+    var params = {
+        scan_id: currentScanId,
+        ra_hours: parseFloat(document.getElementById('bary-ra').value) || null,
+        dec_deg: parseFloat(document.getElementById('bary-dec').value) || null,
+        telescope: document.getElementById('bary-telescope').value,
+    };
+
+    try {
+        var resp = await fetch('/api/barycentric/correct', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(params),
+        });
+        var data = await resp.json();
+        if (data.error) {
+            statusDiv.innerHTML = '<span style="color:#ef5350;">Error: ' + escapeHtml(data.error) + '</span>';
+            return;
+        }
+        statusDiv.innerHTML = '<span style="color:#66bb6a;">✓ Corrected ' + data.files_corrected +
+            ' files, ' + data.total_hits.toLocaleString() + ' hits. Velocity corrections:</span>';
+        for (var fname in data.corrections) {
+            var v = data.corrections[fname];
+            var shift_mhz = (v / 299792458 * 3000).toFixed(4); // approx shift at 3 GHz
+            statusDiv.innerHTML += '<br><span style="color:#546e7a;font-size:0.85em;">' +
+                fname.substring(0, 40) + ': v=' + v.toFixed(1) + ' m/s (' + (v/1000).toFixed(2) +
+                ' km/s)</span>';
+        }
+        // Load results
+        document.getElementById('bary-results-container').style.display = 'block';
+        switchBaryTab('corrected');
+        baryCorrectedPage = 1;
+        loadBaryCorrectedResults(currentScanId);
+    } catch(e) {
+        statusDiv.innerHTML = '<span style="color:#ef5350;">Error: ' + escapeHtml(e.message) + '</span>';
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Run Correction';
+    }
+}
+
+async function loadBaryCorrectedResults(scanId, page) {
+    if (!page) page = baryCorrectedPage || 1;
+    var snrMin = 0;
+    try {
+        var resp = await fetch('/api/barycentric/results/' + encodeURIComponent(scanId) +
+            '?page=' + page + '&per_page=' + baryCorrectedPerPage + '&snr_min=' + snrMin);
+        var data = await resp.json();
+        if (data.error) {
+            document.getElementById('bary-corrected-tbody').innerHTML =
+                '<tr><td colspan="8" class="empty">' + escapeHtml(data.error) + '</td></tr>';
+            return;
+        }
+
+        // Render summary
+        var summaryHtml = '';
+        summaryHtml += '<div class="bs-item"><span class="bs-label">Target:</span><span class="bs-val">' + (data.target || '?') + '</span></div>';
+        summaryHtml += '<div class="bs-item"><span class="bs-label">Total hits:</span><span class="bs-val">' + data.total_hits.toLocaleString() + '</span></div>';
+        summaryHtml += '<div class="bs-item"><span class="bs-label">Files:</span><span class="bs-val">' + data.files_corrected + '</span></div>';
+        summaryHtml += '<div class="bs-item"><span class="bs-label">Showing:</span><span class="bs-val">' + data.total_filtered.toLocaleString() + '</span></div>';
+        document.getElementById('bary-corrected-summary').innerHTML = summaryHtml;
+
+        // Render table
+        var hits = data.hits || [];
+        if (hits.length === 0) {
+            document.getElementById('bary-corrected-tbody').innerHTML =
+                '<tr><td colspan="8" class="empty">No hits.</td></tr>';
+            document.getElementById('bary-corrected-pagination').style.display = 'none';
+            return;
+        }
+
+        var startIdx = (data.page - 1) * data.per_page;
+        var html = '';
+        for (var i = 0; i < hits.length; i++) {
+            var h = hits[i];
+            var rowNum = startIdx + i + 1;
+            var isOn = (h.source_file || '').indexOf('_S_') !== -1 || h.on_off === 'ON';
+            var obsFreq = h.freq || 0;
+            var baryFreq = h.barycentric_freq || 0;
+            var deltaHz = (baryFreq - obsFreq) * 1e6; // MHz to Hz
+            html += '<tr>' +
+                '<td>' + rowNum + '</td>' +
+                '<td style="color:#4fc3f7;">' + baryFreq.toFixed(8) + '</td>' +
+                '<td>' + obsFreq.toFixed(6) + '</td>' +
+                '<td style="color:' + (deltaHz > 0 ? '#66bb6a' : '#ef5350') + ';font-size:0.85em;">' +
+                    (deltaHz > 0 ? '+' : '') + deltaHz.toFixed(1) + '</td>' +
+                '<td>' + (h.drift_rate || 0).toFixed(4) + '</td>' +
+                '<td style="color:#66bb6a;font-weight:600;">' + (h.snr || 0).toFixed(2) + '</td>' +
+                '<td><span class="on-badge ' + (isOn ? 'on' : 'off') + '">' + (isOn ? 'ON' : 'OFF') + '</span></td>' +
+                '<td style="font-size:0.8em;color:#546e7a;">' + (h.source_file || h.file || '').substring(0, 30) + '</td>' +
+                '</tr>';
+        }
+        document.getElementById('bary-corrected-tbody').innerHTML = html;
+
+        // Pagination
+        var pagDiv = document.getElementById('bary-corrected-pagination');
+        if (data.total_pages > 1) {
+            pagDiv.style.display = 'flex';
+            var phtml = '';
+            phtml += '<button onclick="baryCorrectedPage=1;loadBaryCorrectedResults(\'' + scanId + '\')"' + (data.page === 1 ? ' disabled' : '') + '>« First</button>';
+            phtml += '<button onclick="baryCorrectedPage=Math.max(1,' + (data.page - 1) + ');loadBaryCorrectedResults(\'' + scanId + '\')"' + (data.page === 1 ? ' disabled' : '') + '>‹ Prev</button>';
+            phtml += '<span class="bl-page-info">Page ' + data.page + ' of ' + data.total_pages +
+                ' (' + (startIdx + 1) + '-' + Math.min(startIdx + data.per_page, data.total_filtered) +
+                ' of ' + data.total_filtered.toLocaleString() + ')</span>';
+            phtml += '<button onclick="baryCorrectedPage=Math.min(' + data.total_pages + ',' + (data.page + 1) + ');loadBaryCorrectedResults(\'' + scanId + '\')"' + (data.page >= data.total_pages ? ' disabled' : '') + '>Next ›</button>';
+            phtml += '<button onclick="baryCorrectedPage=' + data.total_pages + ';loadBaryCorrectedResults(\'' + scanId + '\')"' + (data.page >= data.total_pages ? ' disabled' : '') + '>Last »</button>';
+            pagDiv.innerHTML = phtml;
+        } else {
+            pagDiv.style.display = 'none';
+        }
+    } catch(e) {
+        console.error('Error loading bary results:', e);
+    }
+}
+
+async function runCrossEpoch() {
+    var btn = document.getElementById('btn-cross-epoch');
+    btn.disabled = true;
+    btn.textContent = 'Searching...';
+
+    // Get selected scans
+    var container = document.getElementById('bary-scan-checkboxes');
+    var checked = container.querySelectorAll('input[type="checkbox"]:checked');
+    var scanIds = [];
+    for (var i = 0; i < checked.length; i++) {
+        scanIds.push(checked[i].value);
+    }
+
+    if (scanIds.length < 2) {
+        alert('Select at least 2 scans for cross-epoch comparison.');
+        btn.disabled = false;
+        btn.textContent = 'Run Cross-Epoch Search';
+        return;
+    }
+
+    var params = {
+        scan_ids: scanIds,
+        freq_tolerance_hz: parseFloat(document.getElementById('bary-tolerance-hz').value) || 10,
+        min_epochs: parseInt(document.getElementById('bary-min-epochs').value) || 2,
+    };
+
+    try {
+        var resp = await fetch('/api/barycentric/cross-epoch', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(params),
+        });
+        var data = await resp.json();
+        if (data.error) {
+            alert(data.error);
+            return;
+        }
+
+        document.getElementById('bary-results-container').style.display = 'block';
+        switchBaryTab('cross');
+        renderCrossEpochResults(data);
+    } catch(e) {
+        alert('Error: ' + e.message);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Run Cross-Epoch Search';
+    }
+}
+
+function renderCrossEpochResults(data) {
+    var summary = data.summary || {};
+    var candidates = data.candidates || [];
+
+    // Render summary
+    var summaryHtml = '';
+    summaryHtml += '<div class="bs-item"><span class="bs-label">Scans:</span><span class="bs-val">' + summary.total_scans + '</span></div>';
+    summaryHtml += '<div class="bs-item"><span class="bs-label">ON freqs checked:</span><span class="bs-val">' + (summary.total_on_frequencies || 0).toLocaleString() + '</span></div>';
+    summaryHtml += '<div class="bs-item"><span class="bs-label">Candidates:</span><span class="bs-val ' + (candidates.length > 0 ? 'highlight' : '') + '">' + candidates.length + '</span></div>';
+    summaryHtml += '<div class="bs-item"><span class="bs-label">Tolerance:</span><span class="bs-val">' + (summary.freq_tolerance_hz || 10) + ' Hz</span></div>';
+    summaryHtml += '<div class="bs-item"><span class="bs-label">Min epochs:</span><span class="bs-val">' + (summary.min_epochs || 2) + '</span></div>';
+    document.getElementById('bary-cross-summary').innerHTML = summaryHtml;
+
+    // Render candidate table
+    var tbody = document.getElementById('bary-cross-tbody');
+    if (candidates.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" class="empty">No cross-epoch candidates found. ' +
+            'This is expected for RFI-dominated data. Try different tolerance or min_epochs settings.</td></tr>';
+        return;
+    }
+
+    var html = '';
+    for (var i = 0; i < candidates.length; i++) {
+        var c = candidates[i];
+        var obsFreqs = (c.observed_freqs_mhz || []).map(function(f) { return f.toFixed(4); }).join(', ');
+        var drifts = (c.drift_rates || []).map(function(d) { return d.toFixed(4); }).join(', ');
+        html += '<tr class="bary-candidate-row">' +
+            '<td>' + (i + 1) + '</td>' +
+            '<td style="color:#4fc3f7;font-weight:600;">' + c.barycentric_freq_mhz.toFixed(8) + '</td>' +
+            '<td style="color:#66bb6a;font-weight:bold;">' + c.epoch_count + '</td>' +
+            '<td style="color:#66bb6a;">' + (c.max_snr || 0).toFixed(2) + '</td>' +
+            '<td>' + (c.mean_drift_rate || 0).toFixed(6) + '</td>' +
+            '<td>' + (c.log_false_alarm_prob || 0).toFixed(2) + '</td>' +
+            '<td style="font-size:0.8em;color:#546e7a;">' + obsFreqs + '</td>' +
+            '</tr>';
+    }
+    tbody.innerHTML = html;
+}
+
+function switchBaryTab(tab) {
+    var tabs = document.querySelectorAll('.bary-tab');
+    for (var i = 0; i < tabs.length; i++) tabs[i].classList.remove('active');
+    document.getElementById('bary-tab-' + tab).classList.add('active');
+    document.getElementById('bary-corrected-panel').style.display = (tab === 'corrected') ? 'block' : 'none';
+    document.getElementById('bary-cross-panel').style.display = (tab === 'cross') ? 'block' : 'none';
 }

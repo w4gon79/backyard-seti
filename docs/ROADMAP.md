@@ -105,6 +105,8 @@ pointing.
 
 ### 2A. Barycentric Frequency Correction
 
+**Status:** In progress (2026-08-08).
+
 **Method:**
 1. For each observation epoch, compute the expected barycentric Doppler shift 
    for Proxima Centauri
@@ -113,7 +115,16 @@ pointing.
 3. A real signal now appears at the SAME frequency in all epochs
 4. RFI appears at different barycentric-corrected frequencies across epochs
 
-**Deliverable:** `barycentric_correct.py` + corrected frequency tables.
+**Deliverable:** `barycentric_correct.py` ✓ + corrected frequency tables. ✓
+
+**Implementation:** Module built using astropy `radial_velocity_correction` for
+accurate solar-system-barycenter velocity computation. Dashboard integration
+with API endpoints for running correction on scans and cross-epoch candidate
+search. Target coordinate database for common BL targets. Cross-epoch matcher
+uses frequency bucketing for O(N) complexity.
+
+**Next:** Run correction on all 6 PROXCEN epochs once full-band scans complete,
+then run cross-epoch search for candidates.
 
 ### 2B. Cross-Epoch Hit Stacking
 
@@ -304,7 +315,7 @@ after observation.
    by frequency proximity. Edge filter to suppress boundary artifacts 
    at sub-band edges (planned, not blocking).
 4. **RFI characterization** (Phase 1B) -- Catalog hits from OFF frames
-5. **Barycentric correction + cross-epoch** (Phase 2A-2B) -- Real signal hunting
+5. **Barycentric correction + cross-epoch** (Phase 2A-2B) -- Module built ✓, dashboard integrated ✓, awaiting multi-epoch scan completion
 6. **Incoherent stack** (Phase 2C) -- Sensitivity boost from multiple epochs
 7. **ML training set** (Phase 3A) -- Foundation for classifier
 8. **CNN classifier** (Phase 3B) -- Novel contribution
@@ -342,5 +353,5 @@ reduce sub-band count by 90%+ for initial reconnaissance.
 ---
 
 *Document created: 2026-08-06*
-*Last updated: 2026-08-07*
+*Last updated: 2026-08-08*
 *Authors: Carl & Joel*
