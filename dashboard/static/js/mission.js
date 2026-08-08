@@ -1,5 +1,6 @@
 /* ═══════════════════════════════════════════════════════════════════
-   SETI MISSION CONTROL - JAVASCRIPT
+   SETI MISSION CONTROL — JAVASCRIPT
+   Retro green-phosphor CRT terminal edition.
    All data is REAL from the pipeline. No simulations.
    ═══════════════════════════════════════════════════════════════════ */
 
@@ -28,7 +29,6 @@ let mcState = {
     spectraFreqs: [],
     spectraMeta: null,
     polling: false,
-    // Fix 2/7: file tracking
     currentFile: '',
     currentFileIndex: 0,
     fileTotal: 0,
@@ -37,6 +37,22 @@ let mcState = {
 
 const POLL_INTERVAL = 2000;
 const SPECTRUM_POLL = 3000;
+
+// ── Green phosphor color constants for canvas rendering ──
+const CRT = {
+    bg:          '#000800',
+    panelBg:     '#000c04',
+    phosBright:  '#33ff33',
+    phosMid:     '#00aa33',
+    phosDim:     '#006622',
+    phosDark:    '#003311',
+    amber:       '#ffaa00',
+    red:         '#ff3333',
+    whiteHot:    '#ccffcc',
+    gridLine:    'rgba(0, 102, 34, 0.25)',
+    borderDim:   '#004422',
+    borderBright:'#00aa33',
+};
 
 // ─── Init ─────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
@@ -49,7 +65,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setInterval(pollSpectrum, SPECTRUM_POLL);
 });
 
-// ─── Starfield Background ─────────────────────────────────────────────
+// ─── Starfield Background (green-tinted CRT noise) ───────────────────
 function initStarfield() {
     const canvas = document.getElementById('starfield');
     const ctx = canvas.getContext('2d');
@@ -57,25 +73,26 @@ function initStarfield() {
     canvas.height = window.innerHeight;
 
     const stars = [];
-    const numStars = 200;
+    const numStars = 150;
     for (let i = 0; i < numStars; i++) {
         stars.push({
             x: Math.random() * canvas.width,
             y: Math.random() * canvas.height,
-            r: Math.random() * 1.2 + 0.3,
-            opacity: Math.random() * 0.5 + 0.2,
+            r: Math.random() * 1.0 + 0.3,
+            opacity: Math.random() * 0.4 + 0.1,
             twinkleSpeed: Math.random() * 0.02 + 0.005,
             phase: Math.random() * Math.PI * 2,
         });
     }
 
     function drawStars() {
-        ctx.fillStyle = '#000510';
+        ctx.fillStyle = CRT.bg;
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         for (const s of stars) {
             s.phase += s.twinkleSpeed;
             const alpha = s.opacity * (0.5 + 0.5 * Math.sin(s.phase));
-            ctx.fillStyle = `rgba(200,220,255,${alpha})`;
+            // Green-tinted stars
+            ctx.fillStyle = `rgba(51,255,51,${alpha})`;
             ctx.beginPath();
             ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
             ctx.fill();
@@ -133,7 +150,7 @@ function drawFreqMap() {
     const barW = w - padX * 2;
 
     // Background
-    ctx.fillStyle = '#020812';
+    ctx.fillStyle = CRT.panelBg;
     ctx.fillRect(padX, barY, barW, barH);
 
     const total = mcState.subBandsTotal || 1;
@@ -147,27 +164,30 @@ function drawFreqMap() {
         const segW = Math.max(subBandWidth - 1, 0.5);
 
         if (i < done) {
-            ctx.fillStyle = 'rgba(0,255,0,0.35)';
+            // Completed: medium green fill
+            ctx.fillStyle = 'rgba(0,170,51,0.35)';
             ctx.fillRect(x, barY, segW, barH);
-            ctx.fillStyle = 'rgba(0,255,0,0.6)';
+            ctx.fillStyle = 'rgba(51,255,51,0.5)';
             ctx.fillRect(x, barY, segW, 2);
         } else if (i === current && mcState.active) {
+            // Current: bright pulsing green
             const pulse = 0.3 + 0.3 * Math.sin(Date.now() * 0.005);
-            ctx.fillStyle = `rgba(0,255,255,${pulse})`;
+            ctx.fillStyle = `rgba(51,255,51,${pulse})`;
             ctx.fillRect(x, barY, segW, barH);
-            ctx.strokeStyle = `rgba(0,255,255,${0.5 + pulse * 0.5})`;
+            ctx.strokeStyle = `rgba(51,255,51,${0.5 + pulse * 0.5})`;
             ctx.lineWidth = 1;
             ctx.strokeRect(x + 0.5, barY + 0.5, segW - 1, barH - 1);
         } else {
-            ctx.fillStyle = 'rgba(10,30,50,0.4)';
+            // Pending: dark green
+            ctx.fillStyle = 'rgba(0,51,17,0.5)';
             ctx.fillRect(x, barY, segW, barH);
         }
     }
 
-    // Frequency tick marks every 50 MHz
-    ctx.strokeStyle = '#1a3050';
-    ctx.fillStyle = '#446677';
-    ctx.font = '10px Consolas, monospace';
+    // Frequency tick marks every 50 MHz — dim green grid
+    ctx.strokeStyle = CRT.phosDim;
+    ctx.fillStyle = CRT.phosDim;
+    ctx.font = "10px 'Share Tech Mono', Consolas, monospace";
     ctx.textAlign = 'center';
     const tickInterval = 50;
     const startTick = Math.ceil(fStart / tickInterval) * tickInterval;
@@ -180,34 +200,34 @@ function drawFreqMap() {
         ctx.fillText(f.toFixed(0), x, barY + barH + 18);
     }
 
-    // Border
-    ctx.strokeStyle = '#0a2a4e';
+    // Border — green
+    ctx.strokeStyle = CRT.borderBright;
     ctx.lineWidth = 1;
     ctx.strokeRect(padX, barY, barW, barH);
 
-    // Labels
-    ctx.fillStyle = '#6699aa';
-    ctx.font = '10px Consolas, monospace';
+    // Labels — green monospace
+    ctx.fillStyle = CRT.phosMid;
+    ctx.font = "10px 'Share Tech Mono', Consolas, monospace";
     ctx.textAlign = 'left';
     ctx.fillText('FREQUENCY COVERAGE (' + fStart.toFixed(0) + '\u2013' + fEnd.toFixed(0) + ' MHz)', padX, 14);
 
     if (total > 1) {
         ctx.textAlign = 'right';
-        ctx.fillStyle = '#00ffff';
+        ctx.fillStyle = CRT.phosBright;
         ctx.fillText(done + '/' + total + ' (' + ((done / total) * 100).toFixed(1) + '%)', padX + barW, 14);
     }
 
-    // Current frequency marker
+    // Current frequency marker — amber
     if (mcState.currentFreq > 0 && mcState.active) {
         const fx = padX + ((mcState.currentFreq - fStart) / fRange) * barW;
         if (fx >= padX && fx <= padX + barW) {
-            ctx.strokeStyle = '#ffaa00';
+            ctx.strokeStyle = CRT.amber;
             ctx.lineWidth = 2;
             ctx.beginPath();
             ctx.moveTo(fx, barY - 3);
             ctx.lineTo(fx, barY + barH + 3);
             ctx.stroke();
-            ctx.fillStyle = '#ffaa00';
+            ctx.fillStyle = CRT.amber;
             ctx.beginPath();
             ctx.moveTo(fx - 5, barY - 3);
             ctx.lineTo(fx + 5, barY - 3);
@@ -220,10 +240,10 @@ function drawFreqMap() {
 
 // ─── Live Spectrum (canvas waterfall with REAL data) ───────────────
 let spectrumCanvas, spectrumCtx;
-let spectrumScrollRows = [];  // accumulated rows: {data, subband, fStart, fStop}
-const MAX_SCROLL_ROWS = 1000;  // Enough for all 794 sub-bands per file
+let spectrumScrollRows = [];
+const MAX_SCROLL_ROWS = 1000;
 let spectrumCurrentFreqs = null;
-let spectrumBandStart = 2744;  // full scan band
+let spectrumBandStart = 2744;
 let spectrumBandEnd = 3324;
 
 function initSpectrum() {
@@ -243,27 +263,37 @@ function resizeSpectrumCanvas() {
     drawSpectrum();
 }
 
-// Viridis-like color map: 0=dark purple, 0.25=blue, 0.5=teal, 0.75=green-yellow, 1=yellow
+/**
+ * Green phosphor color map.
+ * 0.0 = near-black green, 0.3 = dark green, 0.5 = medium green,
+ * 0.7 = bright green, 0.85 = very bright green, 1.0 = white-hot
+ */
 function powerToColor(norm) {
     norm = Math.max(0, Math.min(1, norm));
-    if (norm < 0.1) {
-        const t = norm / 0.1;
-        return [Math.round(t * 68), Math.round(t * 1), Math.round(t * 84)];
-    } else if (norm < 0.25) {
-        const t = (norm - 0.1) / 0.15;
-        return [Math.round(68 + t * 5), Math.round(1 + t * 70), Math.round(84 + t * 110)];
-    } else if (norm < 0.45) {
-        const t = (norm - 0.25) / 0.20;
-        return [Math.round(73 - t * 30), Math.round(71 + t * 100), Math.round(194 - t * 10)];
-    } else if (norm < 0.65) {
-        const t = (norm - 0.45) / 0.20;
-        return [Math.round(43 + t * 60), Math.round(171 + t * 70), Math.round(184 - t * 110)];
-    } else if (norm < 0.85) {
-        const t = (norm - 0.65) / 0.20;
-        return [Math.round(103 + t * 150), Math.round(241 - t * 20), Math.round(74 - t * 40)];
+    if (norm < 0.08) {
+        // Near-black with slight green
+        const t = norm / 0.08;
+        return [Math.round(t * 5), Math.round(t * 20), Math.round(t * 2)];
+    } else if (norm < 0.20) {
+        // Dark green
+        const t = (norm - 0.08) / 0.12;
+        return [0, Math.round(20 + t * 60), Math.round(2 + t * 10)];
+    } else if (norm < 0.40) {
+        // Medium green
+        const t = (norm - 0.20) / 0.20;
+        return [0, Math.round(80 + t * 90), Math.round(12 + t * 20)];
+    } else if (norm < 0.60) {
+        // Bright green
+        const t = (norm - 0.40) / 0.20;
+        return [Math.round(t * 40), Math.round(170 + t * 70), Math.round(32 + t * 30)];
+    } else if (norm < 0.80) {
+        // Very bright green / yellow-green
+        const t = (norm - 0.60) / 0.20;
+        return [Math.round(40 + t * 120), Math.round(240 + t * 15), Math.round(62 + t * 40)];
     } else {
-        const t = (norm - 0.85) / 0.15;
-        return [253, Math.round(221 + t * 30), Math.round(34 + t * 20)];
+        // White-hot (strong signal)
+        const t = (norm - 0.80) / 0.20;
+        return [Math.round(160 + t * 95), 255, Math.round(102 + t * 153)];
     }
 }
 
@@ -274,7 +304,7 @@ function drawSpectrum() {
     const h = spectrumCanvas.height;
     if (w === 0 || h === 0) return;
 
-    ctx.fillStyle = '#020812';
+    ctx.fillStyle = CRT.bg;
     ctx.fillRect(0, 0, w, h);
 
     if (!spectrumScrollRows || spectrumScrollRows.length === 0) return;
@@ -285,14 +315,34 @@ function drawSpectrum() {
     const plotW = w - padL - padR;
     const plotH = h - padT - padB;
 
-    // Full band range
+    if (plotW <= 0 || plotH <= 0) return;
+
     const bandStart = spectrumBandStart;
     const bandEnd = spectrumBandEnd;
     const bandRange = bandEnd - bandStart;
 
-    // Each subband row covers its own freq slice mapped onto the full band x-axis
-    // We render at full plotW resolution for smooth horizontal interpolation
-    const nXPixels = Math.floor(plotW);
+    // Draw grid lines (dim green)
+    ctx.strokeStyle = CRT.gridLine;
+    ctx.lineWidth = 1;
+
+    // Horizontal grid lines
+    for (let i = 0; i <= 4; i++) {
+        const y = padT + (plotH * i / 4);
+        ctx.beginPath();
+        ctx.moveTo(padL, y);
+        ctx.lineTo(padL + plotW, y);
+        ctx.stroke();
+    }
+    // Vertical grid lines
+    const tickInterval = bandRange > 400 ? 100 : 50;
+    const startTick = Math.ceil(bandStart / tickInterval) * tickInterval;
+    for (let f = startTick; f <= bandEnd; f += tickInterval) {
+        const x = padL + ((f - bandStart) / bandRange) * plotW;
+        ctx.beginPath();
+        ctx.moveTo(x, padT);
+        ctx.lineTo(x, padT + plotH);
+        ctx.stroke();
+    }
 
     for (let row = 0; row < nRows; row++) {
         const rowData = rows[row];
@@ -302,9 +352,6 @@ function drawSpectrum() {
         const y = padT + row * (plotH / nRows);
         const rowH = Math.ceil(plotH / nRows) + 1;
 
-        // Stretch each subband's data across the FULL band width
-        // so every row fills 100% of the x-axis. RFI at a given frequency
-        // will show as vertical streaks across rows.
         for (let px = 0; px < plotW; px++) {
             const frac = px / plotW;
             const dataIdx = Math.min(nCols - 1, Math.floor(frac * nCols));
@@ -316,43 +363,31 @@ function drawSpectrum() {
         }
     }
 
-    // Axis labels
-    ctx.fillStyle = '#446677';
-    ctx.font = '9px Consolas, monospace';
+    // Axis labels — green monospace
+    ctx.fillStyle = CRT.phosDim;
+    ctx.font = "9px 'Share Tech Mono', Consolas, monospace";
 
-    // Y-axis (subband number, newest at top)
+    // Y-axis (subband number)
     ctx.textAlign = 'right';
     for (let i = 0; i <= 4; i++) {
         const rowIdx = Math.round((nRows - 1) * i / 4);
         const sbNum = rows[rowIdx] ? rows[rowIdx].subband : 0;
         const y = padT + (plotH * i / 4);
         ctx.fillText('sub ' + sbNum, padL - 4, y + 3);
-        ctx.strokeStyle = '#0a1a2e';
-        ctx.beginPath();
-        ctx.moveTo(padL - 2, y);
-        ctx.lineTo(padL, y);
-        ctx.stroke();
     }
 
-    // X-axis (full band frequency)
+    // X-axis (frequency)
     ctx.textAlign = 'center';
-    const tickInterval = bandRange > 400 ? 100 : 50;
-    const startTick = Math.ceil(bandStart / tickInterval) * tickInterval;
     for (let f = startTick; f <= bandEnd; f += tickInterval) {
         const x = padL + ((f - bandStart) / bandRange) * plotW;
         if (x < padL || x > padL + plotW) continue;
         ctx.fillText(f.toFixed(0), x, padT + plotH + 14);
-        ctx.strokeStyle = '#0a1a2e';
-        ctx.beginPath();
-        ctx.moveTo(x, padT + plotH);
-        ctx.lineTo(x, padT + plotH + 3);
-        ctx.stroke();
     }
-    ctx.fillStyle = '#6699aa';
-    ctx.fillText('Frequency (MHz)', padL + plotW / 2, padT + plotH + 26);
+    ctx.fillStyle = CRT.phosMid;
+    ctx.fillText('FREQUENCY (MHz)', padL + plotW / 2, padT + plotH + 26);
 
-    // Border
-    ctx.strokeStyle = '#0a2a4e';
+    // Border — green
+    ctx.strokeStyle = CRT.borderBright;
     ctx.lineWidth = 1;
     ctx.strokeRect(padL, padT, plotW, plotH);
 }
@@ -363,7 +398,6 @@ function updateSpectrum(spectra, freqs, subbandIdx) {
     if (placeholder) placeholder.style.display = 'none';
     if (!spectrumCanvas) initSpectrum();
 
-    // Compute mean spectrum across all time rows
     const nTimes = spectra.length;
     const nFreqs = spectra[0].length;
     const meanRow = new Array(nFreqs);
@@ -375,13 +409,11 @@ function updateSpectrum(spectra, freqs, subbandIdx) {
         meanRow[c] = sum / nTimes;
     }
 
-    // Track frequency range for this subband
     const fStart = freqs[0];
     const fStop = freqs[freqs.length - 1];
 
     spectrumCurrentFreqs = freqs;
 
-    // Add new row at top, cap at MAX_SCROLL_ROWS
     spectrumScrollRows.unshift({ data: meanRow, subband: subbandIdx || 0, fStart: fStart, fStop: fStop });
     if (spectrumScrollRows.length > MAX_SCROLL_ROWS) {
         spectrumScrollRows.pop();
@@ -390,7 +422,7 @@ function updateSpectrum(spectra, freqs, subbandIdx) {
     drawSpectrum();
 }
 
-// ─── Spectrum Polling (REAL data from API) ───────────────────────────
+// ─── Spectrum Polling ───────────────────────────────────────────────
 async function pollSpectrum() {
     if (!mcState.active) return;
     try {
@@ -403,7 +435,7 @@ async function pollSpectrum() {
             updateSpectrum(data.spectra, data.freqs, data.subband_index);
         }
     } catch(e) {
-        // Spectrum not available yet, will retry
+        // Spectrum not available yet
     }
 }
 
@@ -422,17 +454,25 @@ function addTickerEntry(hit) {
     const drift = hit.drift_rate || 0;
     const cc = hit.coarse_chan !== null && hit.coarse_chan !== undefined ? hit.coarse_chan : '';
     const highSnr = snr > 25;
-    const star = highSnr ? '\u2605' : '  ';
+
+    // Serial console prefix: > for normal, >>> for high-SNR
+    const prefix = highSnr ? '>>>' : '>';
+
+    // Build the line in terminal style
+    let html = '<span class="timestamp">[' + ts + ']</span> ' +
+               '<span class="prefix">' + prefix + '</span> ' +
+               'SNR:<span class="snr">' + snr.toFixed(1) + '</span> ' +
+               'DRIFT:<span class="drift">' + (drift >= 0 ? '+' : '') + drift.toFixed(3) + ' Hz/s</span>';
+    if (cc !== '') html += ' CC:<span class="cadence">' + cc + '</span>';
 
     const line = document.createElement('div');
     line.className = 'ticker-line ' + (highSnr ? 'on' : 'off');
     if (highSnr) line.classList.add('flash');
-    line.innerHTML =
-        '<span class="timestamp">[' + ts + ']</span> ' +
-        '<span class="star">' + star + '</span> ' +
-        'SNR: <span class="snr">' + snr.toFixed(1) + '</span> | ' +
-        'drift: <span class="drift">' + (drift >= 0 ? '+' : '') + drift.toFixed(3) + ' Hz/s</span>' +
-        (cc !== '' ? ' | cc ' + cc : '');
+    line.innerHTML = html;
+
+    // Remove empty placeholder if present
+    const empty = ticker.querySelector('.ticker-empty');
+    if (empty) empty.remove();
 
     if (ticker.firstChild) {
         ticker.insertBefore(line, ticker.firstChild);
@@ -447,7 +487,7 @@ function addTickerEntry(hit) {
 
 function clearTicker() {
     const ticker = document.getElementById('hit-ticker');
-    if (ticker) ticker.innerHTML = '<div class="ticker-empty">Awaiting detections...</div>';
+    if (ticker) ticker.innerHTML = '<div class="ticker-empty">AWAITING DETECTIONS...</div>';
 }
 
 // ─── Stats Panel ─────────────────────────────────────────────────────
@@ -455,11 +495,11 @@ function updateStats() {
     const s = mcState;
 
     document.getElementById('stat-subbands').textContent = s.subBandsDone + ' / ' + (s.subBandsTotal || '?');
-    document.getElementById('stat-subbands').className = 'stat-value ' + (s.subBandsTotal > 0 ? 'cyan' : 'dim');
+    document.getElementById('stat-subbands').className = 'stat-value ' + (s.subBandsTotal > 0 ? 'bright' : 'dim');
 
     const pct = s.subBandsTotal > 0 ? (s.subBandsDone / s.subBandsTotal * 100) : 0;
     document.getElementById('stat-progress').textContent = pct.toFixed(1) + '%';
-    document.getElementById('stat-progress').className = 'stat-value ' + (pct > 0 ? 'cyan' : 'dim');
+    document.getElementById('stat-progress').className = 'stat-value ' + (pct > 0 ? 'bright' : 'dim');
 
     document.getElementById('stat-speed').textContent = s.speed > 0 ? s.speed.toFixed(1) + '/min' : '---';
     document.getElementById('stat-speed').className = 'stat-value ' + (s.speed > 0 ? 'amber' : 'dim');
@@ -472,19 +512,17 @@ function updateStats() {
     document.getElementById('stat-off').textContent = s.offHits.toLocaleString();
     document.getElementById('stat-off').className = 'stat-value ' + (s.offHits > 0 ? 'red' : 'dim');
 
-    // Fix 2/7: Show current file info
     var fileEl = document.getElementById('stat-file');
     if (fileEl) {
         if (s.currentFile) {
             var fileIdxStr = s.fileTotal > 0 ? 'File ' + s.currentFileIndex + '/' + s.fileTotal : 'File ' + s.currentFileIndex;
             fileEl.textContent = fileIdxStr + ': ' + s.currentFile;
-            fileEl.className = 'stat-value cyan';
+            fileEl.className = 'stat-value bright';
         } else {
             fileEl.textContent = '---';
             fileEl.className = 'stat-value dim';
         }
     }
-    // Fix 8: Show per-file hits
     var fileHitsEl = document.getElementById('stat-file-hits');
     if (fileHitsEl) {
         fileHitsEl.textContent = s.fileHits > 0 ? s.fileHits.toLocaleString() : '0';
@@ -500,7 +538,7 @@ function updateStats() {
         const h = Math.floor(etaMin / 60);
         const m = Math.round(etaMin % 60);
         document.getElementById('stat-eta').textContent = h > 0 ? h + 'h ' + m + 'm' : m + 'm';
-        document.getElementById('stat-eta').className = 'stat-value blue';
+        document.getElementById('stat-eta').className = 'stat-value bright';
     } else {
         document.getElementById('stat-eta').textContent = '---';
         document.getElementById('stat-eta').className = 'stat-value dim';
@@ -518,7 +556,7 @@ function updateStats() {
         dotEl.className = 'status-dot scanning';
     } else if (s.status === 'complete') {
         statusEl.textContent = 'COMPLETE';
-        statusEl.className = 'value cyan';
+        statusEl.className = 'value bright';
         dotEl.className = 'status-dot complete';
     } else {
         statusEl.textContent = 'IDLE';
@@ -531,10 +569,10 @@ function updateStats() {
     const textEl = document.getElementById('mc-progress-text');
     if (s.subBandsTotal > 0) {
         fillEl.style.width = pct + '%';
-        textEl.textContent = s.subBandsDone + '/' + s.subBandsTotal + ' sub-bands (' + pct.toFixed(1) + '%)';
+        textEl.textContent = s.subBandsDone + '/' + s.subBandsTotal + ' SUB-BANDS (' + pct.toFixed(1) + '%)';
     } else {
         fillEl.style.width = '0%';
-        textEl.textContent = 'Awaiting scan...';
+        textEl.textContent = 'AWAITING SCAN...';
     }
 }
 
@@ -567,13 +605,11 @@ function updateLog(logLines) {
     const logEl = document.getElementById('mc-log');
     if (!logEl) return;
     if (!logLines || logLines.length === 0) {
-        logEl.innerHTML = '<div class="mc-log-line info">No scan log output yet.</div>';
+        logEl.innerHTML = '<div class="mc-log-line info">NO SCAN LOG OUTPUT YET.</div>';
         return;
     }
-    // Show all lines from backend (now 500), preserve scroll position
     const wasNearBottom = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 50;
     const prevScrollTop = logEl.scrollTop;
-    // Rebuild from backend log_tail (now 500 lines)
     logEl.innerHTML = '';
     for (let i = 0; i < logLines.length; i++) {
         let cls = 'mc-log-line info';
@@ -613,7 +649,7 @@ function calcSpeed() {
     }
 }
 
-// ─── Polling (REAL data from enhanced API) ───────────────────────────
+// ─── Polling ────────────────────────────────────────────────────────
 async function pollMissionData() {
     if (mcState.polling) return;
     mcState.polling = true;
@@ -631,7 +667,6 @@ async function pollMissionData() {
             mcState.status = 'complete';
         }
 
-        // Use structured fields from enhanced API
         if (statusData.target) mcState.target = statusData.target;
         if (statusData.freq_start) mcState.freqStart = statusData.freq_start;
         if (statusData.freq_end) mcState.freqEnd = statusData.freq_end;
@@ -649,9 +684,7 @@ async function pollMissionData() {
         if (statusData.current_freq_stop) mcState.currentFreqStop = statusData.current_freq_stop;
         if (statusData.total_hits !== undefined) mcState.totalHits = statusData.total_hits;
 
-        // Fix 2/3/7/8: Pick up new structured fields from enhanced API
         if (statusData.current_file !== undefined) {
-            // File transition: clear waterfall so new file builds up fresh
             if (mcState.currentFile && statusData.current_file !== mcState.currentFile) {
                 spectrumScrollRows = [];
                 seenHits.clear();
@@ -665,7 +698,6 @@ async function pollMissionData() {
         if (statusData.off_hits !== undefined) mcState.offHits = statusData.off_hits;
         if (statusData.file_hits !== undefined) mcState.fileHits = statusData.file_hits;
 
-        // Process recent hits from structured API
         if (statusData.recent_hits) {
             for (const hit of statusData.recent_hits) {
                 const hitKey = (hit.snr || 0) + '_' + (hit.drift_rate || 0) + '_' + (hit.coarse_chan || 0) + '_' + (hit.index || 0);
@@ -676,13 +708,10 @@ async function pollMissionData() {
             }
         }
 
-        // Fallback: parse log lines for any data the structured fields missed
         const logLines = statusData.log_tail || [];
         parseLogFallback(logLines);
         updateLog(logLines);
 
-        // Fetch hit counts from stats API (only when scan is NOT active, since
-        // Fix 3 now tracks ON/OFF hits in real-time from the pipeline parser)
         if (!mcState.active) {
             let statsUrl = '/api/stats';
             if (mcState.scanId) statsUrl += '?scan_id=' + encodeURIComponent(mcState.scanId);
@@ -698,8 +727,6 @@ async function pollMissionData() {
         calcSpeed();
         updateStats();
 
-        // Spectrum canvas inits on first data arrival
-
     } catch(e) {
         console.error('Mission Control poll error:', e);
     } finally {
@@ -710,11 +737,9 @@ async function pollMissionData() {
 // ─── Log Fallback Parser ─────────────────────────────────────────────
 function parseLogFallback(lines) {
     for (const line of lines) {
-        // Subband progress: [X/Y] FFFF-FFFF MHz
         const subMatch = line.match(/\[(\d+)\/(\d+)\]\s+([\d.]+)-([\d.]+)\s+MHz/);
         if (subMatch) {
             mcState.subBandsTotal = parseInt(subMatch[1]) > mcState.subBandsTotal ? parseInt(subMatch[1]) : mcState.subBandsTotal;
-            // Actually [X/Y] means X out of Y, so total is Y
             mcState.subBandsTotal = parseInt(subMatch[2]);
             const subNum = parseInt(subMatch[1]);
             if (subNum > mcState.subBandsDone) {
@@ -727,7 +752,6 @@ function parseLogFallback(lines) {
             mcState.currentFreq = (mcState.currentFreqStart + mcState.currentFreqStop) / 2;
         }
 
-        // Top hit from turbo_seti: find_doppler.N INFO     Top hit found! SNR X, Drift Rate Y, index Z
         const topMatch = line.match(/find_doppler\.(\d+)\s+INFO\s+Top hit found!.*SNR\s+([\d.]+).*Drift Rate\s+([-\d.]+).*index\s+(\d+)/);
         if (topMatch) {
             const hit = {
@@ -743,7 +767,6 @@ function parseLogFallback(lines) {
             }
         }
 
-        // Target name from various log formats
         const targetMatch = line.match(/(?:target|Target)[:\s]+([A-Z][A-Z0-9_]+)/i);
         if (targetMatch) {
             mcState.target = targetMatch[1];

@@ -3,38 +3,42 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>📡 SETI Mission Control</title>
+    <title>SETI MISSION CONTROL</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=8">
-    <link rel="stylesheet" href="/static/css/mission.css?v=9">
-    <!-- No Plotly needed: spectrum rendered via canvas
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=VT323&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/mission.css?v=10">
 </head>
 <body>
 
-<!-- Star field background -->
+<!-- Star field background (green-tinted) -->
 <canvas id="starfield"></canvas>
 
 <!-- CRT scan line overlays -->
 <div id="scanline-overlay"></div>
 <div id="scanline-bar"></div>
+<div id="crt-vignette"></div>
+<div id="crt-flicker"></div>
 
 <!-- Main Mission Control Layout -->
 <div id="mission-control">
 
     <!-- ═══ Header Bar ═══ -->
     <div class="mc-header">
-        <div class="mc-title">📡 SETI MISSION CONTROL</div>
+        <div class="mc-title">[ SETI MISSION CONTROL ]</div>
         <div class="mc-header-info">
             <div class="mc-info-badge">
-                <span class="label">Target</span>
-                <span id="mc-target" class="value cyan">---</span>
+                <span class="label">TARGET</span>
+                <span id="mc-target" class="value bright">---</span>
             </div>
             <div class="mc-info-badge">
                 <span id="mc-status-dot" class="status-dot idle"></span>
-                <span class="label">Status</span>
+                <span class="label">STATUS</span>
                 <span id="mc-status" class="value dim">IDLE</span>
             </div>
             <div class="mc-info-badge">
-                <span class="label">Elapsed</span>
+                <span class="label">ELAPSED</span>
                 <span id="mc-elapsed" class="value amber">0s</span>
             </div>
         </div>
@@ -48,21 +52,21 @@
             <!-- Frequency Coverage Map -->
             <div class="mc-panel">
                 <div class="mc-panel-title">
-                    <span class="icon">📊</span> Frequency Coverage Map
+                    [ FREQUENCY COVERAGE ]
                 </div>
                 <div class="mc-panel-body">
                     <canvas id="freq-map-canvas"></canvas>
                 </div>
             </div>
 
-            <!-- Live Spectrum (canvas, no Plotly) -->
+            <!-- Live Spectrum (canvas waterfall) -->
             <div class="mc-panel">
                 <div class="mc-panel-title">
-                    <span class="icon">🌊</span> Live Spectrum
+                    [ LIVE SPECTRUM ]
                 </div>
                 <div class="mc-panel-body" style="position:relative;">
                     <canvas id="spectrum-canvas" style="width:100%;height:100%;display:block;"></canvas>
-                    <div id="spectrum-placeholder" class="spectrum-placeholder">Awaiting scan data...</div>
+                    <div id="spectrum-placeholder" class="spectrum-placeholder">AWAITING SCAN DATA...</div>
                 </div>
             </div>
         </div>
@@ -72,7 +76,7 @@
             <!-- Live Hit Ticker -->
             <div class="mc-panel mc-ticker">
                 <div class="mc-panel-title">
-                    <span class="icon">🎯</span> Live Hit Ticker
+                    [ HIT TICKER ]
                 </div>
                 <div class="mc-panel-body">
                     <div id="hit-ticker"></div>
@@ -82,36 +86,36 @@
             <!-- Live Stats -->
             <div class="mc-panel">
                 <div class="mc-panel-title">
-                    <span class="icon">📈</span> Live Stats
+                    [ TELEMETRY ]
                 </div>
                 <div class="mc-panel-body">
                     <div class="mc-stats">
                         <div class="stat-cell">
-                            <span class="stat-label">Sub-bands</span>
+                            <span class="stat-label">SUB-BANDS</span>
                             <span id="stat-subbands" class="stat-value dim">0 / 0</span>
                         </div>
                         <div class="stat-cell">
-                            <span class="stat-label">Progress</span>
+                            <span class="stat-label">PROGRESS</span>
                             <span id="stat-progress" class="stat-value dim">0.0%</span>
                         </div>
                         <div class="stat-cell">
-                            <span class="stat-label">Speed</span>
+                            <span class="stat-label">SPEED</span>
                             <span id="stat-speed" class="stat-value dim">---/min</span>
                         </div>
                         <div class="stat-cell">
-                            <span class="stat-label">Total Hits</span>
+                            <span class="stat-label">TOTAL HITS</span>
                             <span id="stat-hits" class="stat-value dim">0</span>
                         </div>
                         <div class="stat-cell">
-                            <span class="stat-label">ON Hits</span>
+                            <span class="stat-label">ON HITS</span>
                             <span id="stat-on" class="stat-value dim">0</span>
                         </div>
                         <div class="stat-cell">
-                            <span class="stat-label">OFF Hits</span>
+                            <span class="stat-label">OFF HITS</span>
                             <span id="stat-off" class="stat-value dim">0</span>
                         </div>
                         <div class="stat-cell">
-                            <span class="stat-label">Current Freq</span>
+                            <span class="stat-label">CURRENT FREQ</span>
                             <span id="stat-freq" class="stat-value dim">---</span>
                         </div>
                         <div class="stat-cell">
@@ -119,15 +123,15 @@
                             <span id="stat-eta" class="stat-value dim">---</span>
                         </div>
                         <div class="stat-cell wide">
-                            <span class="stat-label">Elapsed Time</span>
+                            <span class="stat-label">ELAPSED TIME</span>
                             <span id="stat-elapsed" class="stat-value dim">0s</span>
                         </div>
                         <div class="stat-cell wide">
-                            <span class="stat-label">Current File</span>
+                            <span class="stat-label">CURRENT FILE</span>
                             <span id="stat-file" class="stat-value dim">---</span>
                         </div>
                         <div class="stat-cell">
-                            <span class="stat-label">File Hits</span>
+                            <span class="stat-label">FILE HITS</span>
                             <span id="stat-file-hits" class="stat-value dim">0</span>
                         </div>
                     </div>
@@ -142,13 +146,13 @@
             <div class="mc-progress-bar">
                 <div id="mc-progress-fill" class="mc-progress-fill" style="width:0%"></div>
             </div>
-            <span id="mc-progress-text" class="mc-progress-text">Awaiting scan...</span>
+            <span id="mc-progress-text" class="mc-progress-text">AWAITING SCAN...</span>
         </div>
         <div id="mc-log"></div>
     </div>
 
 </div>
 
-<script src="/static/js/mission.js?v=11"></script>
+<script src="/static/js/mission.js?v=12"></script>
 </body>
 </html>
