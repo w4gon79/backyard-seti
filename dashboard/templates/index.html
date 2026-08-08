@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>📡 Backyard SETI Dashboard</title>
+    <title>Backyard SETI Dashboard</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=8">
     <link rel="stylesheet" href="/static/css/style.css?v=29">>>
     <link rel="stylesheet" href="/static/css/celestial.css?v=1">
@@ -18,7 +18,7 @@
 <div id="app">
     <!-- Header -->
     <header class="dashboard-header">
-        <h1>📡 Backyard SETI</h1>
+        <h1>Backyard SETI</h1>
         <div class="header-stats">
             <span id="stat-total" class="stat-badge">Total Hits: --</span>
             <span id="stat-on" class="stat-badge on">ON: --</span>
@@ -30,7 +30,7 @@
     <!-- Top Row: Sky Map + Target Search -->
     <div class="row">
         <div class="panel panel-half">
-            <div class="panel-header">🌌 Sky Map</div>
+            <div class="panel-header">Sky Map</div>
             <div id="sky-map-container">
                 <div id="celestial-map"></div>
                 <div id="sky-map-info">
@@ -40,7 +40,7 @@
         </div>
 
         <div class="panel panel-half">
-            <div class="panel-header">🎯 Target Search</div>
+            <div class="panel-header">Target Search</div>
             <div class="target-search-content">
                 <div class="search-box">
                     <input type="text" id="target-input" placeholder="Enter target name (e.g. PROXCEN, KIC8462852)...">
@@ -55,7 +55,7 @@
                     <span id="file-selection-count" class="selection-count-badge">0 files selected</span>
                 </div>
                 <div id="file-detail-panel" class="file-detail-panel" style="display:none;">
-                    <div class="panel-header" style="font-size:0.85em;">📋 File Details</div>
+                    <div class="panel-header" style="font-size:0.85em;">File Details</div>
                     <div id="file-detail-content" class="file-detail-content"></div>
                 </div>
             </div>
@@ -68,7 +68,7 @@
     <!-- Middle Row: Scan Controls + Progress -->
     <div class="row">
         <div class="panel panel-half">
-            <div class="panel-header">⚙️ Scan Controls</div>
+            <div class="panel-header">Scan Controls</div>
             <div class="controls-content">
                 <div class="control-grid">
                     <label title="Number of frequency channels processed per turbo_seti run. Does NOT affect frequency resolution or sensitivity, which are fixed by the data format. Only affects processing speed and memory: smaller sub-bands = more runs = slower total scan. Larger = fewer runs = faster. Default 262,144 is the fastest option.">Sub-band Width (channels)</label>
@@ -99,18 +99,18 @@
                 </div>
                 <div id="scan-target-badge" class="scan-target-badge">Scanning: All files</div>
                 <div class="scan-buttons">
-                    <button id="btn-start-scan" class="btn-primary">▶ Start Scan</button>
-                    <button id="btn-resume-scan" class="btn-warning" disabled>⏯ Resume</button>
-                    <button id="btn-stop-scan" class="btn-danger" disabled>⏹ Stop</button>
-                    <button id="btn-refresh" class="btn-secondary">↻ Refresh Results</button>
+                    <button id="btn-start-scan" class="btn-primary">Start Scan</button>
+                    <button id="btn-resume-scan" class="btn-warning" disabled>Resume</button>
+                    <button id="btn-stop-scan" class="btn-danger" disabled>Stop</button>
+                    <button id="btn-refresh" class="btn-secondary">Refresh Results</button>
                 </div>
             </div>
         </div>
 
         <div class="panel panel-half">
             <div class="panel-header">
-                📊 Progress
-                <button onclick="window.open('/mission', 'mission', 'width=1920,height=1080')" class="btn-mission" title="Open full-screen Mission Control visualization">🚀 Mission Control</button>
+                Progress
+                <button onclick="window.open('/mission', 'mission', 'width=1920,height=1080')" class="btn-mission" title="Open full-screen Mission Control visualization">Mission Control</button>
             </div>
             <div class="progress-content">
                 <div id="scan-status">
@@ -130,7 +130,7 @@
     <!-- Barycentric Correction Panel -->
     <div class="row">
         <div class="panel panel-full">
-            <div class="panel-header">🛰️ Barycentric Correction & Cross-Epoch Search</div>
+            <div class="panel-header">Barycentric Correction & Cross-Epoch Search</div>
             <div class="barycentric-content">
                 <div class="bary-controls-row">
                     <div class="bary-target-group">
@@ -227,7 +227,7 @@
     <div class="row">
         <div class="panel panel-full">
             <div class="panel-header">
-                📋 Results
+                Results
                 <div class="results-controls">
                     <select id="results-filter">
                         <option value="all">All Hits</option>
