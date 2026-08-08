@@ -333,11 +333,9 @@ function drawSpectrum() {
         ctx.lineTo(padL + plotW, y);
         ctx.stroke();
     }
-    // Vertical grid lines
-    const tickInterval = bandRange > 400 ? 100 : 50;
-    const startTick = Math.ceil(bandStart / tickInterval) * tickInterval;
-    for (let f = startTick; f <= bandEnd; f += tickInterval) {
-        const x = padL + ((f - bandStart) / bandRange) * plotW;
+    // Vertical grid lines (relative position, matching new x-axis)
+    for (let xi = 0; xi <= 4; xi++) {
+        const x = padL + (plotW * xi / 4);
         ctx.beginPath();
         ctx.moveTo(x, padT);
         ctx.lineTo(x, padT + plotH);
@@ -376,15 +374,15 @@ function drawSpectrum() {
         ctx.fillText('sub ' + sbNum, padL - 4, y + 3);
     }
 
-    // X-axis (frequency)
+    // X-axis (relative position within each sub-band, since each row is a different freq)
     ctx.textAlign = 'center';
-    for (let f = startTick; f <= bandEnd; f += tickInterval) {
-        const x = padL + ((f - bandStart) / bandRange) * plotW;
-        if (x < padL || x > padL + plotW) continue;
-        ctx.fillText(f.toFixed(0), x, padT + plotH + 14);
+    const xLabels = ['0%', '25%', '50%', '75%', '100%'];
+    for (let xi = 0; xi <= 4; xi++) {
+        const x = padL + (plotW * xi / 4);
+        ctx.fillText(xLabels[xi], x, padT + plotH + 14);
     }
     ctx.fillStyle = CRT.phosMid;
-    ctx.fillText('FREQUENCY (MHz)', padL + plotW / 2, padT + plotH + 26);
+    ctx.fillText('SUB-BAND POSITION', padL + plotW / 2, padT + plotH + 26);
 
     // Border — green
     ctx.strokeStyle = CRT.borderBright;
@@ -413,6 +411,12 @@ function updateSpectrum(spectra, freqs, subbandIdx) {
     const fStop = freqs[freqs.length - 1];
 
     spectrumCurrentFreqs = freqs;
+
+    // Dedup: don't add if same sub-band as last row
+    if (spectrumScrollRows.length > 0 && spectrumScrollRows[0].subband === (subbandIdx || 0)) {
+        // Same sub-band, skip (avoid duplicate rows from 3s polling)
+        return;
+    }
 
     spectrumScrollRows.unshift({ data: meanRow, subband: subbandIdx || 0, fStart: fStart, fStop: fStop });
     if (spectrumScrollRows.length > MAX_SCROLL_ROWS) {
