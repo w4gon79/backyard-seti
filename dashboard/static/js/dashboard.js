@@ -46,6 +46,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     document.getElementById('results-filter').onchange = applyFilters;
     document.getElementById('results-snr-min').oninput = applyFilters;
+    document.getElementById('results-drift-min').oninput = applyFilters;
     document.getElementById('results-drift-max').oninput = applyFilters;
     document.getElementById('results-freq-min').oninput = applyFilters;
     document.getElementById('results-freq-max').oninput = applyFilters;
@@ -1061,6 +1062,7 @@ async function loadResults() {
 function getFilteredHits() {
     var filter = document.getElementById('results-filter').value;
     var snrMin = parseFloat(document.getElementById('results-snr-min').value);
+    var driftMin = parseFloat(document.getElementById('results-drift-min').value);
     var driftMax = parseFloat(document.getElementById('results-drift-max').value);
     var freqMin = parseFloat(document.getElementById('results-freq-min').value);
     var freqMax = parseFloat(document.getElementById('results-freq-max').value);
@@ -1071,6 +1073,7 @@ function getFilteredHits() {
     else if (filter === 'candidates') hits = rejectionCandidates.slice();
 
     if (!isNaN(snrMin)) hits = hits.filter(function(h) { return (h.snr || 0) >= snrMin; });
+    if (!isNaN(driftMin)) hits = hits.filter(function(h) { return Math.abs(h.drift_rate || 0) >= driftMin; });
     if (!isNaN(driftMax)) hits = hits.filter(function(h) { return Math.abs(h.drift_rate || 0) <= driftMax; });
     if (!isNaN(freqMin)) hits = hits.filter(function(h) { return (h.freq || 0) >= freqMin; });
     if (!isNaN(freqMax)) hits = hits.filter(function(h) { return (h.freq || 0) <= freqMax; });

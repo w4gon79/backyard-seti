@@ -236,6 +236,7 @@
                         <option value="candidates">Candidates (ON-only after rejection)</option>
                     </select>
                     <input type="number" id="results-snr-min" placeholder="Min SNR" min="0" step="0.5" style="width:80px;" title="Minimum SNR">
+                    <input type="number" id="results-drift-min" placeholder="Min |drift|" min="0" step="0.01" style="width:100px;" title="Minimum absolute drift rate (Hz/s). Set to 0.1 to exclude near-zero-drift terrestrial RFI. Real signals from orbiting transmitters drift at 0.01-5 Hz/s. Persistent RFI typically shows near-zero drift (< 0.05 Hz/s) because it is not moving relative to the telescope.">
                     <input type="number" id="results-drift-max" placeholder="Max |drift|" min="0" step="0.1" style="width:100px;" title="Maximum absolute drift rate (Hz/s)">
                     <input type="number" id="results-freq-min" placeholder="Freq min" step="0.1" style="width:90px;" title="Minimum frequency (MHz)">
                     <input type="number" id="results-freq-max" placeholder="Freq max" step="0.1" style="width:90px;" title="Maximum frequency (MHz)">
@@ -302,6 +303,6 @@
     </div>
 </div>
 
-<script src="/static/js/dashboard.js?v=57"></script>
+<script src="/static/js/dashboard.js?v=58"></script>
 </body>
 </html>
