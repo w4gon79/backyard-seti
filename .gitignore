@@ -11,6 +11,7 @@ results/*.png
 results/*.pdf
 results/*.csv
 results/*.dat
+results/**/barycentric/
 
 # Cloned upstream repos (referenced, not ours)
 blimpy/
