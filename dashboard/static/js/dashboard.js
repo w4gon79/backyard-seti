@@ -1066,8 +1066,8 @@ function getFilteredHits() {
     var freqMax = parseFloat(document.getElementById('results-freq-max').value);
 
     var hits = allHits.slice();
-    if (filter === 'on') hits = hits.filter(function(h) { return h.on_off === 'ON' || (h._source || '').indexOf('_S_') !== -1; });
-    else if (filter === 'off') hits = hits.filter(function(h) { return h.on_off === 'OFF' || (h._source || '').indexOf('_R_') !== -1; });
+    if (filter === 'on') hits = hits.filter(function(h) { return h.on_off === 'ON' || (h._source || '').indexOf('_S_') !== -1 || (h.source_file || '').indexOf('_S_') !== -1 || (h.file || '').indexOf('_S_') !== -1; });
+    else if (filter === 'off') hits = hits.filter(function(h) { return h.on_off === 'OFF' || (h._source || '').indexOf('_R_') !== -1 || (h.source_file || '').indexOf('_R_') !== -1 || (h.file || '').indexOf('_R_') !== -1; });
     else if (filter === 'candidates') hits = rejectionCandidates.slice();
 
     if (!isNaN(snrMin)) hits = hits.filter(function(h) { return (h.snr || 0) >= snrMin; });
@@ -1422,7 +1422,7 @@ function showWaterfall(rowEl) {
     var freq = h.freq || 0;
     var snr = h.snr || 0;
     var drift = h.drift_rate || 0;
-    var isOn = h.on_off === 'ON' || (h._source || '').indexOf('_S_') !== -1;
+    var isOn = h.on_off === 'ON' || (h._source || '').indexOf('_S_') !== -1 || (h.source_file || '').indexOf('_S_') !== -1 || (h.file || '').indexOf('_S_') !== -1;
     var sourceFile = h._source || h.source_file || h.file || '?';
 
     // Set title
