@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>📡 Backyard SETI Dashboard</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=8">
-    <link rel="stylesheet" href="/static/css/style.css?v=26">>>
+    <link rel="stylesheet" href="/static/css/style.css?v=28">>>
     <link rel="stylesheet" href="/static/css/celestial.css?v=1">
     <!-- Plotly for charts -->
     <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
@@ -100,6 +100,7 @@
                 <div id="scan-target-badge" class="scan-target-badge">Scanning: All files</div>
                 <div class="scan-buttons">
                     <button id="btn-start-scan" class="btn-primary">▶ Start Scan</button>
+                    <button id="btn-resume-scan" class="btn-warning" disabled>⏯ Resume</button>
                     <button id="btn-stop-scan" class="btn-danger" disabled>⏹ Stop</button>
                     <button id="btn-refresh" class="btn-secondary">↻ Refresh Results</button>
                 </div>
@@ -107,7 +108,10 @@
         </div>
 
         <div class="panel panel-half">
-            <div class="panel-header">📊 Progress</div>
+            <div class="panel-header">
+                📊 Progress
+                <button onclick="window.open('/mission', 'mission', 'width=1920,height=1080')" class="btn-mission" title="Open full-screen Mission Control visualization">🚀 Mission Control</button>
+            </div>
             <div class="progress-content">
                 <div id="scan-status">
                     <p class="status-idle">No scan running.</p>
@@ -202,6 +206,6 @@
     </div>
 </div>
 
-<script src="/static/js/dashboard.js?v=50"></script>
+<script src="/static/js/dashboard.js?v=53"></script>
 </body>
 </html>

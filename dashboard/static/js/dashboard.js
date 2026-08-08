@@ -11,6 +11,7 @@ let localDataCache = {};
 let fileHeaderCache = {};
 let scansList = [];       // Array of scan metadata objects
 let currentScanId = null; // Currently selected scan_id
+let scanStateActive = false; // Tracks whether a scan is currently running
 
 // Results pagination state
 let resultsPage = 0;
@@ -34,6 +35,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('btn-search-bl').onclick = searchBL;
     document.getElementById('btn-search-local').onclick = loadLocalData;
     document.getElementById('btn-start-scan').onclick = startScan;
+    document.getElementById('btn-resume-scan').onclick = resumeScan;
     document.getElementById('btn-stop-scan').onclick = stopScan;
     document.getElementById('btn-refresh').onclick = () => { loadResults(); loadStats(); loadScansList(); };
     document.getElementById('btn-select-all').onclick = selectAllFiles;
@@ -51,7 +53,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('scan-selector').onchange = onScanSelected;
 
     logInterval = setInterval(pollScanStatus, 3000);
-    setInterval(pollDownloadStatus, 2000);
+    setInterval(pollDownloadStatus, 10000);
 
     // Waterfall modal close handlers
     document.getElementById('waterfall-close').onclick = closeWaterfallModal;
@@ -461,9 +463,10 @@ async function loadLocalData() {
                     var isOn = f.name.indexOf('_S_') !== -1;
                     var isSelected = selectedFiles.has(f.path);
                     var sizeStr = f.size_gb < 1 ? (f.size_gb * 1000).toFixed(0) + ' MB' : f.size_gb + ' GB';
+                    var dateStr = f.date ? ' <span style="color:#546e7a;font-size:0.85em;">' + f.date + '</span>' : '';
                     html += '<div class="data-file-row' + (isSelected ? ' selected' : '') + '" data-path="' + f.path + '">';
                     html += '<span class="file-name-click" onclick="toggleFileSelection(\'' + f.path + '\')">' + f.name + '</span>';
-                    html += '<span><span class="file-type ' + labelClass.replace('-label','') + '">' + (isOn ? 'ON' : 'OFF') + '</span> ' + sizeStr + ' <button class="btn-del" onclick="event.stopPropagation();deleteFile(\'' + f.path + '\',\'' + f.name + '\')" title="Delete">\u2715</button></span>';
+                    html += '<span><span class="file-type ' + labelClass.replace('-label','') + '">' + (isOn ? 'ON' : 'OFF') + '</span> ' + sizeStr + dateStr + ' <button class="btn-del" onclick="event.stopPropagation();deleteFile(\'' + f.path + '\',\'' + f.name + '\')" title="Delete">\u2715</button></span>';
                     html += '</div>';
                     totalFiles++;
                 }
@@ -687,6 +690,7 @@ async function startScan() {
     if (fStop) params.f_stop = parseFloat(fStop);
     document.getElementById('btn-start-scan').disabled = true;
     document.getElementById('btn-stop-scan').disabled = false;
+    document.getElementById('btn-resume-scan').disabled = true;
     try {
         var resp = await fetch('/api/scan/start', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -697,6 +701,7 @@ async function startScan() {
             alert(data.error);
             document.getElementById('btn-start-scan').disabled = false;
             document.getElementById('btn-stop-scan').disabled = true;
+            document.getElementById('btn-resume-scan').disabled = false;
         } else if (data.scan_id) {
             currentScanId = data.scan_id;
         }
@@ -704,6 +709,7 @@ async function startScan() {
         alert('Error: ' + e.message);
         document.getElementById('btn-start-scan').disabled = false;
         document.getElementById('btn-stop-scan').disabled = true;
+        document.getElementById('btn-resume-scan').disabled = false;
     }
 }
 
@@ -711,36 +717,103 @@ async function stopScan() {
     try { await fetch('/api/scan/stop', { method: 'POST' }); } catch(e) {}
     document.getElementById('btn-start-scan').disabled = false;
     document.getElementById('btn-stop-scan').disabled = true;
+    document.getElementById('btn-resume-scan').disabled = false;
+}
+
+async function resumeScan() {
+    document.getElementById('btn-resume-scan').disabled = true;
+    document.getElementById('btn-start-scan').disabled = true;
+    document.getElementById('btn-stop-scan').disabled = false;
+    try {
+        var resp = await fetch('/api/scan/resume', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({scan_id: currentScanId}),
+        });
+        var data = await resp.json();
+        if (data.error) {
+            alert(data.error);
+            document.getElementById('btn-resume-scan').disabled = false;
+            document.getElementById('btn-start-scan').disabled = false;
+            document.getElementById('btn-stop-scan').disabled = true;
+        } else if (data.scan_id) {
+            currentScanId = data.scan_id;
+            var cp = data.checkpoint || {};
+            console.log('Resumed scan ' + data.scan_id + ' from file ' +
+                        (cp.file_index || '?') + '/' + (cp.file_total || '?') +
+                        ' sub-band ' + (cp.sub_band_index || 0) + '/' + (cp.sub_band_total || 0));
+        }
+    } catch(e) {
+        alert('Error: ' + e.message);
+        document.getElementById('btn-resume-scan').disabled = false;
+        document.getElementById('btn-start-scan').disabled = false;
+        document.getElementById('btn-stop-scan').disabled = true;
+    }
 }
 
 async function pollScanStatus() {
     try {
-        var resp = await fetch('/api/scan/status');
+        var resp = await fetch('/api/scan/status' + (currentScanId ? '?scan_id=' + encodeURIComponent(currentScanId) : ''));
         var data = await resp.json();
+        scanStateActive = data.active;
         var statusDiv = document.getElementById('scan-status');
         var progBar = document.getElementById('progress-bar-container');
         if (data.active) {
-            statusDiv.innerHTML = '<p class="status-running">Scan running...</p>';
+            // Build status line with real structured data
+            var target = data.target || '---';
+            var subDone = data.sub_bands_done || 0;
+            var subTotal = data.sub_bands_total || 0;
+            var totalHits = data.total_hits || 0;
+            var currentFreq = data.current_freq || 0;
+            statusDiv.innerHTML = '<p class="status-running">Scanning ' + target + '</p>';
             progBar.style.display = 'block';
             var logDiv = document.getElementById('scan-log');
             var lines = data.log_tail || [];
-            logDiv.innerHTML = lines.slice(-30).map(function(l) { return '<div>' + escapeHtml(l) + '</div>'; }).join('');
-            logDiv.scrollTop = logDiv.scrollHeight;
-            var lastLine = (data.progress && data.progress.last_line) || '';
-            var match = lastLine.match(/\[(\d+)\/(\d+)\]/);
-            if (match) {
-                var pct = (parseInt(match[1]) / parseInt(match[2])) * 100;
+            // Accumulate logs: track what we've already rendered and only append new lines
+            if (!window._lastLogCount) window._lastLogCount = 0;
+            if (!window._logLineSet) window._logLineSet = new Set();
+            var newLines = lines.filter(function(l) {
+                var key = l;
+                // Use line content + position in stream as dedup key
+                // Lines repeat across polls, so track by index offset from end
+                return true;
+            });
+            // Simpler approach: rebuild from backend log_tail (now 500 lines) but preserve scroll position
+            var wasNearBottom = logDiv.scrollHeight - logDiv.scrollTop - logDiv.clientHeight < 50;
+            var prevScrollTop = logDiv.scrollTop;
+            logDiv.innerHTML = lines.map(function(l) { return '<div>' + escapeHtml(l) + '</div>'; }).join('');
+            if (wasNearBottom) {
+                logDiv.scrollTop = logDiv.scrollHeight;
+            } else {
+                logDiv.scrollTop = prevScrollTop;
+            }
+            // Use structured progress if available, fall back to log parsing
+            if (subTotal > 0) {
+                var pct = (subDone / subTotal) * 100;
                 document.getElementById('progress-fill').style.width = pct + '%';
-                document.getElementById('progress-text').textContent = match[1] + '/' + match[2] + ' sub-bands (' + pct.toFixed(1) + '%)';
+                document.getElementById('progress-text').textContent = subDone + '/' + subTotal + ' sub-bands (' + pct.toFixed(1) + '%) | ' + totalHits + ' hits' + (currentFreq > 0 ? ' | ' + currentFreq.toFixed(3) + ' MHz' : '');
+            } else {
+                var lastLine = (data.progress && data.progress.last_line) || '';
+                var match = lastLine.match(/\[(\d+)\/(\d+)\]/);
+                if (match) {
+                    var pct = (parseInt(match[1]) / parseInt(match[2])) * 100;
+                    document.getElementById('progress-fill').style.width = pct + '%';
+                    document.getElementById('progress-text').textContent = match[1] + '/' + match[2] + ' sub-bands (' + pct.toFixed(1) + '%)';
+                }
             }
         } else {
             if (statusDiv.querySelector('.status-running')) {
                 statusDiv.innerHTML = '<p class="status-idle">Scan complete.</p>';
                 document.getElementById('btn-start-scan').disabled = false;
                 document.getElementById('btn-stop-scan').disabled = true;
+                document.getElementById('btn-resume-scan').disabled = true;
                 // Reload scan list to pick up the new/updated scan
                 loadScansList();
                 loadResults(); loadStats();
+                // After reload, check if selected scan has checkpoint
+                setTimeout(updateResumeButton, 500);
+            } else {
+                // Not running, not just completed: sync resume button with selected scan
+                document.getElementById('btn-resume-scan').disabled = !data.can_resume;
             }
         }
     } catch(e) {}
@@ -800,10 +873,28 @@ function onScanSelected() {
         loadResults();
         loadStats();
         document.getElementById('scan-meta-display').innerHTML = '';
+        document.getElementById('btn-resume-scan').disabled = true;
         return;
     }
     loadScanResults(currentScanId);
     loadScanStats(currentScanId);
+    updateResumeButton();
+}
+
+async function updateResumeButton() {
+    // Enable Resume button only if the selected scan has a checkpoint
+    var btn = document.getElementById('btn-resume-scan');
+    if (!currentScanId || scanStateActive) {
+        btn.disabled = true;
+        return;
+    }
+    try {
+        var resp = await fetch('/api/scan/status?scan_id=' + encodeURIComponent(currentScanId));
+        var data = await resp.json();
+        btn.disabled = !data.can_resume;
+    } catch(e) {
+        btn.disabled = true;
+    }
 }
 
 async function loadScanResults(scanId) {
@@ -1173,13 +1264,33 @@ function showDownloadPanel() {
     if (panel) panel.style.display = 'block';
 }
 
+var lastDownloadCount = -1;
+var lastDownloadActive = false;
+
 async function pollDownloadStatus() {
     try {
         var resp = await fetch('/api/download/status');
         var data = await resp.json();
         var panel = document.getElementById('download-panel');
         if (!panel) return;
-        if (data.queue.length === 0) { panel.style.display = 'none'; return; }
+        
+        // Fix 9: Only reload local data if something actually changed
+        var currentCount = data.queue.length;
+        var wasActive = lastDownloadActive;
+        var nowActive = data.active;
+        var countChanged = currentCount !== lastDownloadCount;
+        var transitionedToInactive = wasActive && !nowActive;
+        
+        if (data.queue.length === 0) { panel.style.display = 'none'; 
+            if (countChanged && lastDownloadCount > 0) {
+                lastDownloadCount = currentCount;
+                lastDownloadActive = nowActive;
+                loadLocalData();
+            }
+            lastDownloadCount = currentCount;
+            lastDownloadActive = nowActive;
+            return;
+        }
         panel.style.display = 'block';
         var activeDl = data.queue.filter(function(q) { return q.status === 'downloading' || q.status === 'queued'; });
         var completedDl = data.queue.filter(function(q) { return q.status === 'complete'; });
@@ -1206,11 +1317,12 @@ async function pollDownloadStatus() {
             html += '</div>';
         }
         panel.innerHTML = html + '</div>';
-        var newComp = completedDl.filter(function(q) { return !q._refreshed; });
-        if (newComp.length > 0 && activeDl.length === 0) {
-            for (var j = 0; j < data.queue.length; j++) { if (data.queue[j].status === 'complete') data.queue[j]._refreshed = true; }
+        // Fix 9: Only reload local data when a download just completed or count changed
+        if (transitionedToInactive || (countChanged && !nowActive && currentCount < lastDownloadCount)) {
             loadLocalData();
         }
+        lastDownloadCount = currentCount;
+        lastDownloadActive = nowActive;
     } catch(e) {}
 }
 
@@ -1402,15 +1514,34 @@ function renderWaterfallPlot(data, centerFreq, driftRate) {
         showlegend: false
     });
 
+    // Determine bandwidth and pick appropriate units
+    var bw = Math.abs(freqs[freqs.length - 1] - freqs[0]);
+    var usekHz = bw < 1.0;  // Under 1 MHz, use kHz
+
+    var xaxisConfig;
+    if (usekHz) {
+        // Convert freqs to kHz for display
+        var freqs_kHz = freqs.map(function(f) { return (f - freqs[0]) * 1000; });
+        // Override traces x data to kHz relative offset
+        // Actually, easier: just change the tickformat and title
+        xaxisConfig = {
+            title: 'Frequency (kHz, offset from ' + freqs[0].toFixed(6) + ' MHz)',
+            gridcolor: '#1e3a5f',
+            tickformat: '.1f',
+        };
+    } else {
+        xaxisConfig = {
+            title: 'Frequency (MHz)',
+            gridcolor: '#1e3a5f',
+            tickformat: '.4f',
+        };
+    }
+
     var layout = {
         paper_bgcolor: 'transparent',
         plot_bgcolor: '#0a0a1a',
         font: { color: '#c8c8e0', size: 11 },
-        xaxis: {
-            title: 'Frequency (MHz)',
-            gridcolor: '#1e3a5f',
-            tickformat: '.4f',
-        },
+        xaxis: xaxisConfig,
         yaxis: {
             title: 'Time (s)',
             gridcolor: '#1e3a5f',

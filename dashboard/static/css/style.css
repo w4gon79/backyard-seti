@@ -188,6 +188,11 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
     color: #b0bec5;
 }
 .btn-secondary:hover:not(:disabled) { background: #455a64; }
+.btn-warning {
+    background: #e65100;
+    color: white;
+}
+.btn-warning:hover:not(:disabled) { background: #ef6c00; }
 .btn-small {
     padding: 4px 10px;
     font-size: 0.8em;
@@ -222,7 +227,7 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .scan-log {
     margin-top: 12px;
-    max-height: 200px;
+    max-height: 400px;
     overflow-y: auto;
     background: #0a0a1a;
     border: 1px solid #1a2332;
@@ -678,6 +683,27 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
     .row { flex-direction: column; }
     .panel-half { width: 100%; }
 }
+/* Mission Control pop-out button */
+.btn-mission {
+    padding: 6px 16px;
+    background: linear-gradient(135deg, #0a1428, #050a18);
+    border: 1px solid #00ffff;
+    border-radius: 4px;
+    color: #00ffff;
+    font-size: 0.8em;
+    font-weight: 600;
+    cursor: pointer;
+    text-shadow: 0 0 8px rgba(0,255,255,0.5);
+    box-shadow: 0 0 12px rgba(0,255,255,0.2);
+    transition: all 0.3s;
+    letter-spacing: 0.5px;
+}
+.btn-mission:hover {
+    background: linear-gradient(135deg, #0a2a4e, #0a1428);
+    box-shadow: 0 0 20px rgba(0,255,255,0.4);
+    transform: scale(1.05);
+}
+
 @media (max-width: 768px) {
     .dashboard-header { flex-direction: column; gap: 8px; }
     .control-grid { grid-template-columns: 1fr; }

@@ -30,6 +30,34 @@ import numpy as np
 from pathlib import Path
 
 
+def load_checkpoint(out_dir):
+    """Load checkpoint.json from output dir if it exists."""
+    cp_path = os.path.join(out_dir, 'checkpoint.json')
+    if os.path.isfile(cp_path):
+        with open(cp_path) as f:
+            return json.load(f)
+    return None
+
+
+def save_checkpoint(out_dir, file_index, file_total, file_name,
+                    sub_band_index=None, sub_band_total=None,
+                    completed_files=None):
+    """Write checkpoint.json so resume can pick up from here."""
+    cp = {
+        'file_index': file_index,
+        'file_total': file_total,
+        'file_name': file_name,
+        'sub_band_index': sub_band_index,
+        'sub_band_total': sub_band_total,
+        'completed_files': completed_files or [],
+        'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S'),
+    }
+    cp_path = os.path.join(out_dir, 'checkpoint.json')
+    with open(cp_path, 'w') as f:
+        json.dump(cp, f, indent=2)
+    return cp
+
+
 def extract_sub_band(filepath, f_start_mhz, f_stop_mhz, out_path):
     """Extract a sub-band from a fine-res file, write clean HDF5.
 
@@ -156,7 +184,8 @@ def compute_sub_bands(fch1, foff, nchans, sub_band_chans=8192, overlap_chans=512
 
 
 def process_file(filepath, out_dir, sub_band_chans=8192, overlap_chans=512,
-                 max_drift=5.0, snr=5.0, verbose=True):
+                 max_drift=5.0, snr=5.0, verbose=True,
+                 start_sub_band=0, file_index=0, file_total=1):
     """Process a single fine-res file through the pipeline."""
     from blimpy import Waterfall
 
@@ -205,7 +234,18 @@ def process_file(filepath, out_dir, sub_band_chans=8192, overlap_chans=512,
     all_hits = []
     t0 = time.time()
 
+    # Load any partial hits from a previous run of this file
+    partial_hits_path = os.path.join(subdir, f'{stem}_partial_hits.json')
+    if start_sub_band > 0 and os.path.isfile(partial_hits_path):
+        with open(partial_hits_path) as f:
+            partial = json.load(f)
+            all_hits = partial.get('hits', [])
+            if verbose:
+                print(f"  Resuming with {len(all_hits)} hits from sub-bands 0-{start_sub_band-1}")
+
     for i, (f_start, f_stop, ch_start, ch_stop) in enumerate(sub_bands):
+        if i < start_sub_band:
+            continue
         sub_name = f"{stem}_sub{i:05d}.h5"
         sub_path = os.path.join(subband_dir, sub_name)
         subband_res_dir = os.path.join(subdir, 'turbo_seti')
@@ -226,6 +266,31 @@ def process_file(filepath, out_dir, sub_band_chans=8192, overlap_chans=512,
             nch, sub_fch1, sub_foff = extract_sub_band(
                 filepath, f_start, f_stop, sub_path)
 
+            # Save spectra snapshot for Mission Control dashboard
+            try:
+                with h5py.File(sub_path, 'r') as hf:
+                    snap_data = hf['data'][:]
+                # Downsample frequency axis to 1024 bins
+                n_chans = snap_data.shape[-1]
+                target_cols = 1024
+                if n_chans > target_cols:
+                    factor = n_chans // target_cols
+                    snap_data = snap_data[:, :, :factor*target_cols].reshape(
+                        snap_data.shape[0], 1, target_cols, factor).mean(axis=-1)
+                spectra_db = 10 * np.log10(np.abs(snap_data) + 1e-10)
+                # Downsample time axis to max 60 rows
+                if spectra_db.shape[0] > 60:
+                    step = spectra_db.shape[0] // 60
+                    spectra_db = spectra_db[::step][:60]
+                np.savez_compressed(
+                    os.path.join(out_dir, 'last_spectra.npz'),
+                    spectra=spectra_db.squeeze(),
+                    f_start=f_start, f_stop=f_stop,
+                    subband_index=i,
+                )
+            except Exception:
+                pass
+
             hits = run_turbo_seti(sub_path, subband_res_dir,
                                   max_drift=max_drift, snr=snr)
 
@@ -242,6 +307,14 @@ def process_file(filepath, out_dir, sub_band_chans=8192, overlap_chans=512,
             if verbose:
                 print(f" ERROR: {e}")
 
+        # Checkpoint: save progress after each sub-band
+        save_checkpoint(out_dir, file_index, file_total, filename,
+                        sub_band_index=i + 1, sub_band_total=len(sub_bands),
+                        completed_files=None)
+        # Save partial hits for this file so resume can reload them
+        with open(partial_hits_path, 'w') as f:
+            json.dump({'hits': all_hits, 'last_sub_band': i}, f)
+
         # Clean up sub-band file AND turbo_seti intermediate files
         # to keep results directory tidy
         import gc
@@ -253,21 +326,21 @@ def process_file(filepath, out_dir, sub_band_chans=8192, overlap_chans=512,
             except (PermissionError, OSError):
                 pass
         # Remove turbo_seti .dat and .log files for this sub-band
-        stem = os.path.splitext(os.path.basename(sub_path))[0]
+        sub_stem = os.path.splitext(os.path.basename(sub_path))[0]
         for ext in ['.dat', '.log']:
-            ts_file = os.path.join(subdir, 'turbo_seti', stem + ext)
+            ts_file = os.path.join(subdir, 'turbo_seti', sub_stem + ext)
             if os.path.exists(ts_file):
                 try:
                     os.remove(ts_file)
                 except (PermissionError, OSError):
                     pass
-        # Remove empty subbands directory
-        sb_dir = os.path.join(subdir, 'subbands')
-        if os.path.isdir(sb_dir) and not os.listdir(sb_dir):
-            try:
-                os.rmdir(sb_dir)
-            except (PermissionError, OSError):
-                pass
+    # Clean up empty subbands directory after loop (not inside it)
+    sb_dir = os.path.join(subdir, 'subbands')
+    if os.path.isdir(sb_dir) and not os.listdir(sb_dir):
+        try:
+            os.rmdir(sb_dir)
+        except (PermissionError, OSError):
+            pass
 
     elapsed = time.time() - t0
 
@@ -318,6 +391,8 @@ def main():
                         help='SNR threshold (default 5.0)')
     parser.add_argument('--limit', type=int, default=None,
                         help='Limit number of sub-bands (for testing)')
+    parser.add_argument('--resume', action='store_true',
+                        help='Resume from checkpoint in output directory')
     args = parser.parse_args()
 
     os.makedirs(args.out, exist_ok=True)
@@ -334,21 +409,89 @@ def main():
     else:
         parser.error('Provide --file or --data-dir')
 
-    print(f"Fine-res SETI Pipeline")
+    # ── Resume logic ──
+    resume_cp = None
+    if args.resume:
+        resume_cp = load_checkpoint(args.out)
+        if resume_cp:
+            print(f"RESUME: Found checkpoint from {resume_cp.get('timestamp', '?')}")
+            print(f"  Last file: {resume_cp.get('file_index', 0)}/{resume_cp.get('file_total', 0)} "
+                  f"({resume_cp.get('file_name', '?')})")
+            print(f"  Sub-band: {resume_cp.get('sub_band_index', 0)}/{resume_cp.get('sub_band_total', 0)}")
+        else:
+            print("RESUME: No checkpoint found, starting from scratch")
+
+    # Determine which files to skip and where to resume sub-bands
+    completed_files = []
+    start_file_index = 0
+    start_sub_band = 0
+
+    if resume_cp:
+        # Check which files already have their hits.json written
+        for i, filepath in enumerate(files):
+            fname = os.path.basename(filepath)
+            stem = os.path.splitext(fname)[0]
+            hits_path = os.path.join(args.out, stem, f'{stem}_hits.json')
+            if os.path.isfile(hits_path):
+                completed_files.append(fname)
+                print(f"  SKIP (complete): {fname}")
+            else:
+                start_file_index = i
+                start_sub_band = resume_cp.get('sub_band_index', 0) if resume_cp.get('file_name', '') == fname else 0
+                break
+
+    print(f"\nFine-res SETI Pipeline")
     print(f"  Files: {len(files)}")
+    if completed_files:
+        print(f"  Resuming from file {start_file_index + 1}/{len(files)}, sub-band {start_sub_band}")
     print(f"  Sub-band: {args.sub_band_width} chans, overlap {args.overlap}")
     print(f"  Drift search: -{args.max_drift} to +{args.max_drift} Hz/s, SNR >= {args.snr}")
 
     all_results = {}
-    for filepath in files:
+
+    # Record results from already-completed files
+    for fname in completed_files:
+        stem = os.path.splitext(fname)[0]
+        hits_path = os.path.join(args.out, stem, f'{stem}_hits.json')
+        with open(hits_path) as f:
+            data = json.load(f)
+            all_results[fname] = data['total_hits']
+
+    # Process remaining files
+    for i, filepath in enumerate(files):
+        if i < start_file_index:
+            continue
+        fname = os.path.basename(filepath)
+        sb_start = start_sub_band if i == start_file_index else 0
+
         hits = process_file(
             filepath, args.out,
             sub_band_chans=args.sub_band_width,
             overlap_chans=args.overlap,
             max_drift=args.max_drift,
             snr=args.snr,
+            start_sub_band=sb_start,
+            file_index=i,
+            file_total=len(files),
         )
-        all_results[os.path.basename(filepath)] = len(hits)
+        all_results[fname] = len(hits)
+
+        # File complete: update checkpoint with completed file list
+        completed_files.append(fname)
+        save_checkpoint(args.out, i + 1, len(files), fname,
+                        sub_band_index=0, sub_band_total=0,
+                        completed_files=completed_files)
+        # Clean up partial hits file for this file
+        stem = os.path.splitext(fname)[0]
+        partial_path = os.path.join(args.out, stem, f'{stem}_partial_hits.json')
+        if os.path.isfile(partial_path):
+            os.remove(partial_path)
+
+    # Clean up checkpoint on successful completion
+    cp_path = os.path.join(args.out, 'checkpoint.json')
+    if os.path.isfile(cp_path):
+        os.remove(cp_path)
+        print("  Checkpoint cleared (pipeline complete)")
 
     print(f"\n{'=' * 70}")
     print(f"PIPELINE COMPLETE")

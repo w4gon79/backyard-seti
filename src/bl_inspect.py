@@ -64,9 +64,9 @@ def inspect_file(filepath, show_waterfall=False, save_plot=False, header_only=Fa
         if fstart is not None and fstop is not None:
             plot_lo, plot_hi = min(fstart, fstop), max(fstart, fstop)
         elif file_gb > 2:
-            # Large file: default to 100 MHz window from the bottom of the band
+            # Large file: plot the full band, decimation handles memory
             plot_lo = f_min
-            plot_hi = f_min + 100.0
+            plot_hi = f_max
         else:
             # Small file: plot everything
             plot_lo = f_min
@@ -147,27 +147,30 @@ def plot_large_waterfall(filepath, wf, f_start_mhz, f_stop_mhz):
         shape = data.shape
         print(f"  (HDF5 data shape: {shape})")
 
-        # Read the frequency slice across all time integrations
-        # Try common BL layouts
-        if len(shape) == 3:
-            # Most BL files: (nints, 1, nchans)
-            if shape[1] == 1:
-                plot_data = data[:, 0, ch_start:ch_stop]
-            elif shape[0] == 1:
-                plot_data = data[0, :, ch_start:ch_stop]
-            else:
-                plot_data = data[:, 0, ch_start:ch_stop]
+        # Decimate in HDF5 BEFORE loading to avoid memory blowup
+        n_plot_chans_avail = ch_stop - ch_start
+        max_plot_cols = 2000
+        if n_plot_chans_avail > max_plot_cols:
+            step = n_plot_chans_avail // max_plot_cols
+            # Read every Nth channel directly from disk
+            chan_indices = np.arange(ch_start, ch_stop, step)[:max_plot_cols]
+            print(f"  (Decimating {n_plot_chans_avail} -> {len(chan_indices)} channels, step={step})")
         else:
-            plot_data = data[:ch_stop] if len(shape) == 1 else data[..., ch_start:ch_stop]
+            chan_indices = np.arange(ch_start, ch_stop)
+            step = 1
 
-    plot_data = np.array(plot_data, dtype=np.float64)
+        # Read the decimated slice across all time integrations
+        if len(shape) == 3:
+            if shape[1] == 1:
+                plot_data = data[:, 0, chan_indices]
+            elif shape[0] == 1:
+                plot_data = data[0, :, chan_indices]
+            else:
+                plot_data = data[:, 0, chan_indices]
+        else:
+            plot_data = data[..., chan_indices]
 
-    # Decimate frequency axis if too many channels for plotting
-    max_plot_cols = 2000
-    if plot_data.shape[1] > max_plot_cols:
-        step = plot_data.shape[1] // max_plot_cols
-        plot_data = plot_data[:, ::step]
-        print(f"  (Decimated to {plot_data.shape[1]} frequency bins for display)")
+    plot_data = np.array(plot_data, dtype=np.float32)
 
     # Build frequency axis for the plot
     n_display = plot_data.shape[1]
@@ -180,7 +183,16 @@ def plot_large_waterfall(filepath, wf, f_start_mhz, f_stop_mhz):
     fig, ax = plt.subplots(figsize=(14, 8))
     # Use log scale for better dynamic range
     plot_db = 10 * np.log10(np.maximum(plot_data, 1e-30))
-    im = ax.pcolormesh(freqs, times, plot_db, shading='auto', cmap='viridis')
+
+    # Interpolate time axis if too few rows (fine-res has only ~20 integrations)
+    if n_times < 100:
+        from scipy.ndimage import zoom
+        zoom_factor = max(1, int(200 / n_times))
+        plot_db = zoom(plot_db, (zoom_factor, 1), order=1)
+        times = np.linspace(0, (n_times - 1) * tsamp, plot_db.shape[0])
+        print(f"  (Interpolated {n_times} -> {plot_db.shape[0]} time rows for display)")
+
+    im = ax.pcolormesh(freqs, times, plot_db, shading='gouraud', cmap='viridis')
     cbar = plt.colorbar(im, ax=ax, label='Power (dB)')
     ax.set_xlabel('Frequency (MHz)')
     ax.set_ylabel('Time (s)')

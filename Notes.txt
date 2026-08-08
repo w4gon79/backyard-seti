@@ -123,3 +123,28 @@ The script categorizes every hit into four buckets:
 • Candidates: Appears in all 3 ON, zero OFF = interesting
 • Transient: In some ON but not all, not in OFF = likely transient RFI
 • OFF only: Reference noise
+
+===============================================
+Here's the full workflow we're building, step by step:
+
+Phase 1: Detection (where we are now)
+Pipeline runs turbo_seti on all 6 files, finds every narrowband signal above SNR 5. Output: raw hit list, currently ~30k+ hits and climbing.
+
+Phase 2: ON/OFF Rejection (built, needs to run on completed scan)
+Compares ON source files to OFF source files. Any hit that appears in both ON and OFF at the same frequency is RFI (it's coming from Earth, not Proxima Centauri). This typically kills 90-95% of hits. Output: candidate list of ON-only signals.
+
+Phase 3: Cross-epoch Persistence (future, needs second dataset)
+Download another Proxima Centauri ABABAB cadence from a different observation date. Run the same pipeline. Apply barycentric correction to both candidate lists. Compare corrected frequencies. Anything that survives both datasets at the same barycentric frequency is very interesting. Output: short list of persistent candidates.
+
+Phase 4: What to do with survivors
+If a hit survives all of that, here's what's available:
+
+• Waveform analysis: Yes, you can drill into the high-res HDF5 data. Pull the raw spectra around the hit frequency, look at the drift profile across the 20 integrations, check if the drift rate is physically plausible for an orbiting body. We have the data locally, no need to ask anyone.
+
+• Known RFI catalog check: Breakthrough Listen maintains a list of known terrestrial RFI lines. We can cross-reference against that. turbo_seti has some of this built in but a manual check on survivors is worth doing.
+
+• Reobservation: The gold standard. Point a telescope at the same coordinates at the same Doppler-corrected frequency and see if it's still there. We can't do this ourselves (no telescope access), but this is where you'd involve the pros.
+
+• Report it: If something genuinely survives ON/OFF rejection, cross-epoch persistence, RFI catalog check, and has a plausible drift rate, that's when you contact the SETI community. Breakthrough Listen has a process for this. They'll want your candidate list, drift rates, SNRs, and observation details.
+
+The realistic expectation: After ON/OFF rejection, you'll probably have a few hundred to low thousands of candidates. Most will be RFI that happens to not appear in the OFF observations (intermittent transmitters, passing satellites). After cross-epoch persistence, likely zero to a handful. That's normal. That's how SETI works. The absence of survivors is itself a useful result.

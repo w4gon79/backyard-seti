@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>📡 SETI Mission Control</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=8">
+    <link rel="stylesheet" href="/static/css/mission.css?v=9">
+    <!-- No Plotly needed: spectrum rendered via canvas
+</head>
+<body>
+
+<!-- Star field background -->
+<canvas id="starfield"></canvas>
+
+<!-- CRT scan line overlays -->
+<div id="scanline-overlay"></div>
+<div id="scanline-bar"></div>
+
+<!-- Main Mission Control Layout -->
+<div id="mission-control">
+
+    <!-- ═══ Header Bar ═══ -->
+    <div class="mc-header">
+        <div class="mc-title">📡 SETI MISSION CONTROL</div>
+        <div class="mc-header-info">
+            <div class="mc-info-badge">
+                <span class="label">Target</span>
+                <span id="mc-target" class="value cyan">---</span>
+            </div>
+            <div class="mc-info-badge">
+                <span id="mc-status-dot" class="status-dot idle"></span>
+                <span class="label">Status</span>
+                <span id="mc-status" class="value dim">IDLE</span>
+            </div>
+            <div class="mc-info-badge">
+                <span class="label">Elapsed</span>
+                <span id="mc-elapsed" class="value amber">0s</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ Middle Section (2 columns) ═══ -->
+    <div class="mc-middle">
+
+        <!-- Left Column: Frequency Map + Spectrum -->
+        <div class="mc-left-column">
+            <!-- Frequency Coverage Map -->
+            <div class="mc-panel">
+                <div class="mc-panel-title">
+                    <span class="icon">📊</span> Frequency Coverage Map
+                </div>
+                <div class="mc-panel-body">
+                    <canvas id="freq-map-canvas"></canvas>
+                </div>
+            </div>
+
+            <!-- Live Spectrum (canvas, no Plotly) -->
+            <div class="mc-panel">
+                <div class="mc-panel-title">
+                    <span class="icon">🌊</span> Live Spectrum
+                </div>
+                <div class="mc-panel-body" style="position:relative;">
+                    <canvas id="spectrum-canvas" style="width:100%;height:100%;display:block;"></canvas>
+                    <div id="spectrum-placeholder" class="spectrum-placeholder">Awaiting scan data...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Column: Hit Ticker + Stats -->
+        <div class="mc-right-column">
+            <!-- Live Hit Ticker -->
+            <div class="mc-panel mc-ticker">
+                <div class="mc-panel-title">
+                    <span class="icon">🎯</span> Live Hit Ticker
+                </div>
+                <div class="mc-panel-body">
+                    <div id="hit-ticker"></div>
+                </div>
+            </div>
+
+            <!-- Live Stats -->
+            <div class="mc-panel">
+                <div class="mc-panel-title">
+                    <span class="icon">📈</span> Live Stats
+                </div>
+                <div class="mc-panel-body">
+                    <div class="mc-stats">
+                        <div class="stat-cell">
+                            <span class="stat-label">Sub-bands</span>
+                            <span id="stat-subbands" class="stat-value dim">0 / 0</span>
+                        </div>
+                        <div class="stat-cell">
+                            <span class="stat-label">Progress</span>
+                            <span id="stat-progress" class="stat-value dim">0.0%</span>
+                        </div>
+                        <div class="stat-cell">
+                            <span class="stat-label">Speed</span>
+                            <span id="stat-speed" class="stat-value dim">---/min</span>
+                        </div>
+                        <div class="stat-cell">
+                            <span class="stat-label">Total Hits</span>
+                            <span id="stat-hits" class="stat-value dim">0</span>
+                        </div>
+                        <div class="stat-cell">
+                            <span class="stat-label">ON Hits</span>
+                            <span id="stat-on" class="stat-value dim">0</span>
+                        </div>
+                        <div class="stat-cell">
+                            <span class="stat-label">OFF Hits</span>
+                            <span id="stat-off" class="stat-value dim">0</span>
+                        </div>
+                        <div class="stat-cell">
+                            <span class="stat-label">Current Freq</span>
+                            <span id="stat-freq" class="stat-value dim">---</span>
+                        </div>
+                        <div class="stat-cell">
+                            <span class="stat-label">ETA</span>
+                            <span id="stat-eta" class="stat-value dim">---</span>
+                        </div>
+                        <div class="stat-cell wide">
+                            <span class="stat-label">Elapsed Time</span>
+                            <span id="stat-elapsed" class="stat-value dim">0s</span>
+                        </div>
+                        <div class="stat-cell wide">
+                            <span class="stat-label">Current File</span>
+                            <span id="stat-file" class="stat-value dim">---</span>
+                        </div>
+                        <div class="stat-cell">
+                            <span class="stat-label">File Hits</span>
+                            <span id="stat-file-hits" class="stat-value dim">0</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ Bottom: Progress Bar + Log ═══ -->
+    <div class="mc-bottom">
+        <div class="mc-progress-row">
+            <div class="mc-progress-bar">
+                <div id="mc-progress-fill" class="mc-progress-fill" style="width:0%"></div>
+            </div>
+            <span id="mc-progress-text" class="mc-progress-text">Awaiting scan...</span>
+        </div>
+        <div id="mc-log"></div>
+    </div>
+
+</div>
+
+<script src="/static/js/mission.js?v=11"></script>
+</body>
+</html>

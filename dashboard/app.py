@@ -19,7 +19,7 @@ import threading
 import time
 import subprocess
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from flask import Flask, render_template, jsonify, request, send_from_directory
 import numpy as np
@@ -85,6 +85,29 @@ scan_state = {
     'log_lines': [],
     'active_scan_id': None,  # Track which scan_id is running
     'scan_start_time': None,
+    # Structured progress tracking
+    'sub_bands_done': 0,
+    'sub_bands_total': 0,
+    'current_sub_band': 0,
+    'current_freq_start': 0,
+    'current_freq_stop': 0,
+    'current_freq': 0,
+    'total_hits': 0,
+    'subband_hits': [],
+    'recent_hits': [],
+    'target': '',
+    'freq_start': 0,
+    'freq_end': 0,
+    'scan_dir': '',
+    # Fix 2: current file tracking
+    'current_file': '',
+    'current_file_index': 0,
+    'file_total': 0,
+    # Fix 3: ON/OFF hit accumulation
+    'on_hits': 0,
+    'off_hits': 0,
+    # Fix 8: per-file hit tracking
+    'file_hits': 0,
 }
 
 # Track downloads
@@ -101,7 +124,22 @@ def index():
     return render_template('index.html')
 
 
+@app.route('/mission')
+def mission():
+    return render_template('mission.html')
+
+
 # ─── API: Target Search ───────────────────────────────────────────────
+
+def mjd_to_date(mjd_str):
+    """Convert MJD string to YYYY-MM-DD date string."""
+    try:
+        mjd = int(mjd_str)
+        d = datetime(1858, 11, 17) + timedelta(days=mjd)
+        return d.strftime('%Y-%m-%d')
+    except (ValueError, TypeError):
+        return ''
+
 
 @app.route('/api/targets')
 def api_targets():
@@ -121,6 +159,7 @@ def api_targets():
                         'name': f,
                         'size_gb': round(os.path.getsize(os.path.join(FINE_DIR, f)) / 1e9, 2),
                         'path': f'fine/{f}',
+                        'date': mjd_to_date(parts[1]) if len(parts) >= 2 else '',
                     })
     
     # Scan mid-res
@@ -137,6 +176,7 @@ def api_targets():
                             'name': f,
                             'size_gb': round(os.path.getsize(os.path.join(MID_DIR, f)) / 1e6, 1),
                             'path': f'mid/{f}',
+                            'date': mjd_to_date(parts[1]) if len(parts) >= 2 else '',
                         })
     
     # Scan filterbank
@@ -151,6 +191,7 @@ def api_targets():
                     'name': f,
                     'size_gb': round(os.path.getsize(os.path.join(FILT_DIR, f)) / 1e9, 2),
                     'path': f'filterbank/{f}',
+                    'date': mjd_to_date(parts[1]) if len(parts) >= 2 else '',
                 })
     
     # Scan generic h5 files (no resolution marker)
@@ -165,6 +206,7 @@ def api_targets():
                         'name': f,
                         'size_gb': round(os.path.getsize(os.path.join(H5_DIR, f)) / 1e9, 2),
                         'path': f'h5/{f}',
+                        'date': mjd_to_date(f.split('_')[1]) if len(f.split('_')) >= 2 else '',
                     })
     
     # Also scan old PROXCEN dir for backwards compat
@@ -181,6 +223,7 @@ def api_targets():
                             'name': f,
                             'size_gb': round(os.path.getsize(os.path.join(PROXCEN_DIR, f)) / 1e6, 1),
                             'path': f'PROXCEN/{f}',
+                            'date': mjd_to_date(parts[1]) if len(parts) >= 2 else '',
                         })
     
     return jsonify(targets)
@@ -610,13 +653,97 @@ def api_header():
 
 @app.route('/api/scan/status')
 def api_scan_status():
-    """Get current scan status."""
+    """Get current scan status with structured progress data."""
+    # Load scan_meta for additional context
+    scan_meta = {}
+    if scan_state.get('active_scan_id'):
+        meta_dir = os.path.join(RESULTS_DIR, scan_state['active_scan_id'])
+        scan_meta = _load_scan_meta(meta_dir) or {}
+    
+    # Check if the currently selected scan (from dropdown) has a checkpoint
+    can_resume = False
+    resume_scan_id = None
+    if not scan_state['active']:
+        # The frontend passes the selected scan_id as a query param
+        selected = request.args.get('scan_id', '')
+        if selected:
+            cp_path = os.path.join(RESULTS_DIR, selected, 'checkpoint.json')
+            if os.path.isfile(cp_path):
+                can_resume = True
+                resume_scan_id = selected
+
     return jsonify({
         'active': scan_state['active'],
         'scan_id': scan_state.get('active_scan_id'),
+        'can_resume': can_resume,
+        'resume_scan_id': resume_scan_id,
         'progress': scan_state['progress'],
-        'log_tail': scan_state['log_lines'][-50:],
+        'log_tail': scan_state['log_lines'][-500:],
+        # Structured progress
+        'sub_bands_done': scan_state.get('sub_bands_done', 0),
+        'sub_bands_total': scan_state.get('sub_bands_total', 0),
+        'current_sub_band': scan_state.get('current_sub_band', 0),
+        'current_freq_start': scan_state.get('current_freq_start', 0),
+        'current_freq_stop': scan_state.get('current_freq_stop', 0),
+        'current_freq': scan_state.get('current_freq', 0),
+        'total_hits': scan_state.get('total_hits', 0),
+        'subband_hits': scan_state.get('subband_hits', []),
+        'recent_hits': scan_state.get('recent_hits', []),
+        'target': scan_state.get('target', ''),
+        'freq_start': scan_state.get('freq_start', 0),
+        'freq_end': scan_state.get('freq_end', 0),
+        # Fix 2/3/8: file tracking, ON/OFF hits, per-file hits
+        'current_file': scan_state.get('current_file', ''),
+        'current_file_index': scan_state.get('current_file_index', 0),
+        'file_total': scan_state.get('file_total', 0),
+        'on_hits': scan_state.get('on_hits', 0),
+        'off_hits': scan_state.get('off_hits', 0),
+        'file_hits': scan_state.get('file_hits', 0),
+        # Scan meta from file
+        'scan_meta': scan_meta,
     })
+
+
+@app.route('/api/scan/spectrum')
+def api_scan_spectrum():
+    """Return real spectra from the last processed subband.
+    
+    The pipeline writes last_spectra.npz to the scan directory
+    after extracting each subband. This endpoint reads the most
+    recent one available.
+    """
+    scan_dir = scan_state.get('scan_dir', '')
+    if not scan_dir:
+        # Try to infer from active scan_id
+        sid = scan_state.get('active_scan_id')
+        if sid:
+            scan_dir = os.path.join(RESULTS_DIR, sid)
+    if not scan_dir:
+        return jsonify({'error': 'No scan directory', 'spectra': []})
+    
+    npz_path = os.path.join(scan_dir, 'last_spectra.npz')
+    if not os.path.isfile(npz_path):
+        return jsonify({'error': 'No spectra snapshot available yet', 'spectra': []})
+    
+    try:
+        data = np.load(npz_path, allow_pickle=True)
+        spectra = data['spectra']  # shape: (n_times, n_freqs) already dB
+        f_start = float(data['f_start'])
+        f_stop = float(data['f_stop'])
+        n_freqs = spectra.shape[-1]
+        freqs = [f_start + (f_stop - f_start) * i / max(n_freqs - 1, 1) for i in range(n_freqs)]
+        
+        return jsonify({
+            'spectra': spectra.tolist(),
+            'freqs': freqs,
+            'n_times': int(spectra.shape[0]),
+            'n_freqs': int(spectra.shape[-1]),
+            'f_start': f_start,
+            'f_stop': f_stop,
+            'subband_index': int(data['subband_index']) if 'subband_index' in data else 0,
+        })
+    except Exception as e:
+        return jsonify({'error': str(e), 'spectra': []})
 
 
 # ─── API: Scan Control ────────────────────────────────────────────────
@@ -671,6 +798,12 @@ def api_scan_start():
     with open(os.path.join(scan_dir, 'scan_meta.json'), 'w') as f:
         json.dump(scan_meta, f, indent=2)
     
+    # Populate scan_state with meta fields
+    scan_state['target'] = target.upper()
+    scan_state['freq_start'] = f_start if f_start else 0
+    scan_state['freq_end'] = f_stop if f_stop else 0
+    scan_state['scan_dir'] = scan_dir
+    
     # Build command - output to the scan directory
     py = r'C:\Users\w4gon\AppData\Local\Programs\Python\Python311\python.exe'
     script = os.path.join(SETI_ROOT, 'src', 'fine_res_pipeline.py')
@@ -708,6 +841,28 @@ def api_scan_start():
         scan_state['log_lines'] = []
         scan_state['active_scan_id'] = scan_id
         scan_state['scan_start_time'] = time.time()
+        # Reset structured progress fields
+        scan_state['sub_bands_done'] = 0
+        scan_state['sub_bands_total'] = 0
+        scan_state['current_sub_band'] = 0
+        scan_state['current_freq_start'] = 0
+        scan_state['current_freq_stop'] = 0
+        scan_state['current_freq'] = 0
+        scan_state['total_hits'] = 0
+        scan_state['subband_hits'] = []
+        scan_state['recent_hits'] = []
+        scan_state['target'] = target.upper()
+        scan_state['freq_start'] = f_start if f_start else 0
+        scan_state['freq_end'] = f_stop if f_stop else 0
+        scan_state['scan_dir'] = scan_dir
+        # Fix 2/3/6/8: reset file tracking and ON/OFF counters
+        scan_state['current_file'] = ''
+        scan_state['current_file_index'] = 0
+        scan_state['file_total'] = 0
+        scan_state['on_hits'] = 0
+        scan_state['off_hits'] = 0
+        scan_state['file_hits'] = 0
+        scan_state['processing_file_count'] = 0  # track for file_total
         try:
             proc = subprocess.Popen(
                 cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -715,10 +870,82 @@ def api_scan_start():
             )
             scan_state['pid'] = proc.pid
             for line in proc.stdout:
-                scan_state['log_lines'].append(line.rstrip())
-                # Parse progress
-                if '->' in line and 'hits' in line:
-                    scan_state['progress']['last_line'] = line.strip()
+                line_stripped = line.rstrip()
+                scan_state['log_lines'].append(line_stripped)
+                scan_state['progress']['last_line'] = line_stripped
+                
+                # Parse resume line: 'Resuming from file 4/6, sub-band 0'
+                resume_match = re.search(r'Resuming from file (\d+)/(\d+)', line_stripped)
+                if resume_match:
+                    scan_state['processing_file_count'] = int(resume_match.group(1)) - 1
+                    scan_state['file_total'] = int(resume_match.group(2))
+                # Parse SKIP lines to count skipped files
+                skip_match = re.match(r'\s*SKIP \(complete\):\s*(.+\.h5)', line_stripped)
+                if skip_match:
+                    scan_state['processing_file_count'] += 1
+                # Fix 2: Parse current filename from 'Processing: filename.h5'
+                proc_match = re.match(r'Processing:\s*(.+\.h5)', line_stripped)
+                if proc_match:
+                    new_file = proc_match.group(1).strip()
+                    # Fix 6: On file transition, reset sub-band progress
+                    if scan_state['current_file'] and scan_state['current_file'] != new_file:
+                        scan_state['sub_bands_done'] = 0
+                        scan_state['sub_bands_total'] = 0
+                        scan_state['subband_hits'] = []
+                        scan_state['file_hits'] = 0  # Fix 8: reset per-file hits
+                    scan_state['current_file'] = new_file
+                    scan_state['processing_file_count'] += 1
+                    scan_state['current_file_index'] = scan_state['processing_file_count']
+                    # Track total file count from 'Files: N' or infer from checkpoint
+                    # The pipeline prints file count early on
+                    files_total_match = re.search(r'Files:\s*(\d+)', line_stripped)
+                    if files_total_match:
+                        scan_state['file_total'] = int(files_total_match.group(1))
+                # Also parse 'Files: N' from pipeline header
+                files_match = re.search(r'Files:\s*(\d+)', line_stripped)
+                if files_match:
+                    scan_state['file_total'] = int(files_match.group(1))
+                
+                # Parse subband progress: [X/Y] FFFF.SSSS-FFFF.SSSS MHz
+                sub_match = re.match(r'\s*\[(\d+)/(\d+)\]\s+([\d.]+)-([\d.]+)\s+MHz', line_stripped)
+                if sub_match:
+                    scan_state['sub_bands_done'] = int(sub_match.group(1))
+                    scan_state['sub_bands_total'] = int(sub_match.group(2))
+                    scan_state['current_sub_band'] = int(sub_match.group(1)) - 1
+                    scan_state['current_freq_start'] = float(sub_match.group(3))
+                    scan_state['current_freq_stop'] = float(sub_match.group(4))
+                    scan_state['current_freq'] = (scan_state['current_freq_start'] + scan_state['current_freq_stop']) / 2
+                
+                # Parse hit count: -> N hits
+                hit_match = re.match(r'\s*->\s*(\d+)\s*hits', line_stripped)
+                if hit_match:
+                    n_hits = int(hit_match.group(1))
+                    # Fix 8: total_hits accumulates across ALL files (never reset on file transition)
+                    scan_state['total_hits'] += n_hits
+                    scan_state['file_hits'] += n_hits  # per-file hits
+                    scan_state['subband_hits'].append(n_hits)
+                    # Fix 3: Classify as ON or OFF based on filename
+                    cur_file = scan_state.get('current_file', '')
+                    if '_S_' in cur_file:
+                        scan_state['on_hits'] += n_hits
+                    elif '_R_' in cur_file:
+                        scan_state['off_hits'] += n_hits
+                
+                # Parse top hit: find_doppler.N INFO     Top hit found! SNR X, Drift Rate Y, index Z
+                top_match = re.search(r'Top hit found!.*SNR\s+([\d.]+).*Drift Rate\s+([-\d.]+).*index\s+(\d+)', line_stripped)
+                if top_match:
+                    hit = {
+                        'snr': float(top_match.group(1)),
+                        'drift_rate': float(top_match.group(2)),
+                        'index': int(top_match.group(3)),
+                        'coarse_chan': None,
+                    }
+                    cc_match = re.search(r'find_doppler\.(\d+)', line_stripped)
+                    if cc_match:
+                        hit['coarse_chan'] = int(cc_match.group(1))
+                    scan_state['recent_hits'].append(hit)
+                    if len(scan_state['recent_hits']) > 50:
+                        scan_state['recent_hits'] = scan_state['recent_hits'][-50:]
             proc.wait()
         except Exception as e:
             scan_state['log_lines'].append(f'ERROR: {e}')
@@ -751,6 +978,199 @@ def api_scan_stop():
         except Exception as e:
             return jsonify({'error': str(e)}), 500
     return jsonify({'status': 'not running'})
+
+
+@app.route('/api/scan/resume', methods=['POST'])
+def api_scan_resume():
+    """Resume the most recent (or specified) scan from checkpoint."""
+    if scan_state['active']:
+        return jsonify({'error': 'Scan already running, stop it first'}), 409
+
+    params = request.json or {}
+    scan_id = params.get('scan_id')
+
+    # Find the scan to resume
+    if not scan_id:
+        # Find the most recent scan that has a checkpoint
+        scan_dirs = _discover_scans()
+        for sid in reversed(scan_dirs):
+            cp_path = os.path.join(_get_scan_dir(sid), 'checkpoint.json')
+            if os.path.isfile(cp_path):
+                scan_id = sid
+                break
+        if not scan_id:
+            return jsonify({'error': 'No scan with a checkpoint found to resume'}), 404
+
+    scan_dir = _get_scan_dir(scan_id)
+    if not scan_dir or not os.path.isdir(scan_dir):
+        return jsonify({'error': f'Scan directory not found: {scan_id}'}), 404
+
+    cp_path = os.path.join(scan_dir, 'checkpoint.json')
+    if not os.path.isfile(cp_path):
+        return jsonify({'error': 'No checkpoint found in scan directory'}), 404
+
+    # Load checkpoint to report what we're resuming
+    with open(cp_path) as f:
+        checkpoint = json.load(f)
+
+    # Load scan_meta to get original parameters
+    scan_meta = _load_scan_meta(scan_dir) or {}
+    orig_params = scan_meta.get('parameters', {})
+
+    files_list = orig_params.get('files', [])
+    sub_band_chans = orig_params.get('sub_band_chans', 262144)
+    overlap = orig_params.get('overlap', 512)
+    max_drift = orig_params.get('max_drift', 5.0)
+    snr = orig_params.get('snr', 5.0)
+
+    # Build command with --resume
+    py = r'C:\Users\w4gon\AppData\Local\Programs\Python\Python311\python.exe'
+    script = os.path.join(SETI_ROOT, 'src', 'fine_res_pipeline.py')
+
+    cmd = [py, script, '--out', scan_dir, '--resume']
+
+    if files_list:
+        for fpath in files_list:
+            candidates = [
+                os.path.join(SETI_ROOT, fpath),
+                os.path.join(SETI_ROOT, 'data', fpath),
+                os.path.join(DATA_DIR, fpath),
+            ]
+            for c in candidates:
+                if os.path.isfile(c):
+                    cmd.extend(['--file', c])
+                    break
+    else:
+        cmd.extend(['--data-dir', FINE_DIR])
+
+    cmd.extend(['--sub-band-width', str(sub_band_chans)])
+    cmd.extend(['--overlap', str(overlap)])
+    cmd.extend(['--max-drift', str(max_drift)])
+    cmd.extend(['--snr', str(snr)])
+
+    target = scan_meta.get('target', 'UNKNOWN')
+
+    def run_scan():
+        scan_state['active'] = True
+        scan_state['log_lines'] = []
+        scan_state['active_scan_id'] = scan_id
+        scan_state['scan_start_time'] = time.time()
+        scan_state['sub_bands_done'] = 0
+        scan_state['sub_bands_total'] = 0
+        scan_state['current_sub_band'] = 0
+        scan_state['current_freq_start'] = 0
+        scan_state['current_freq_stop'] = 0
+        scan_state['current_freq'] = 0
+        scan_state['total_hits'] = 0
+        scan_state['subband_hits'] = []
+        scan_state['recent_hits'] = []
+        scan_state['target'] = target
+        scan_state['freq_start'] = orig_params.get('f_start', 0) or 0
+        scan_state['freq_end'] = orig_params.get('f_stop', 0) or 0
+        scan_state['scan_dir'] = scan_dir
+        # Fix 2/3/6/8: reset file tracking and ON/OFF counters
+        scan_state['current_file'] = ''
+        scan_state['current_file_index'] = 0
+        scan_state['file_total'] = 0
+        scan_state['on_hits'] = 0
+        scan_state['off_hits'] = 0
+        scan_state['file_hits'] = 0
+        scan_state['processing_file_count'] = 0
+        try:
+            proc = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                cwd=SETI_ROOT, text=True, bufsize=1,
+            )
+            scan_state['pid'] = proc.pid
+            for line in proc.stdout:
+                line_stripped = line.rstrip()
+                scan_state['log_lines'].append(line_stripped)
+                scan_state['progress']['last_line'] = line_stripped
+
+                # Parse resume line: 'Resuming from file 4/6, sub-band 0'
+                resume_match = re.search(r'Resuming from file (\d+)/(\d+)', line_stripped)
+                if resume_match:
+                    scan_state['processing_file_count'] = int(resume_match.group(1)) - 1
+                    scan_state['file_total'] = int(resume_match.group(2))
+                # Parse SKIP lines to count skipped files
+                skip_match = re.match(r'\s*SKIP \(complete\):\s*(.+\.h5)', line_stripped)
+                if skip_match:
+                    scan_state['processing_file_count'] += 1
+
+                # Fix 2: Parse current filename
+                proc_match = re.match(r'Processing:\s*(.+\.h5)', line_stripped)
+                if proc_match:
+                    new_file = proc_match.group(1).strip()
+                    # Fix 6: On file transition, reset sub-band progress
+                    if scan_state['current_file'] and scan_state['current_file'] != new_file:
+                        scan_state['sub_bands_done'] = 0
+                        scan_state['sub_bands_total'] = 0
+                        scan_state['subband_hits'] = []
+                        scan_state['file_hits'] = 0
+                    scan_state['current_file'] = new_file
+                    scan_state['processing_file_count'] += 1
+                    scan_state['current_file_index'] = scan_state['processing_file_count']
+                files_match = re.search(r'Files:\s*(\d+)', line_stripped)
+                if files_match:
+                    scan_state['file_total'] = int(files_match.group(1))
+
+                sub_match = re.match(r'\s*\[(\d+)/(\d+)\]\s+([\d.]+)-([\d.]+)\s+MHz', line_stripped)
+                if sub_match:
+                    scan_state['sub_bands_done'] = int(sub_match.group(1))
+                    scan_state['sub_bands_total'] = int(sub_match.group(2))
+                    scan_state['current_sub_band'] = int(sub_match.group(1)) - 1
+                    scan_state['current_freq_start'] = float(sub_match.group(3))
+                    scan_state['current_freq_stop'] = float(sub_match.group(4))
+                    scan_state['current_freq'] = (scan_state['current_freq_start'] + scan_state['current_freq_stop']) / 2
+
+                hit_match = re.match(r'\s*->\s*(\d+)\s*hits', line_stripped)
+                if hit_match:
+                    n_hits = int(hit_match.group(1))
+                    scan_state['total_hits'] += n_hits
+                    scan_state['file_hits'] += n_hits
+                    scan_state['subband_hits'].append(n_hits)
+                    # Fix 3: ON/OFF classification
+                    cur_file = scan_state.get('current_file', '')
+                    if '_S_' in cur_file:
+                        scan_state['on_hits'] += n_hits
+                    elif '_R_' in cur_file:
+                        scan_state['off_hits'] += n_hits
+
+                top_match = re.search(r'Top hit found!.*SNR\s+([\d.]+).*Drift Rate\s+([-\d.]+).*index\s+(\d+)', line_stripped)
+                if top_match:
+                    hit = {
+                        'snr': float(top_match.group(1)),
+                        'drift_rate': float(top_match.group(2)),
+                        'index': int(top_match.group(3)),
+                        'coarse_chan': None,
+                    }
+                    cc_match = re.search(r'find_doppler\.(\d+)', line_stripped)
+                    if cc_match:
+                        hit['coarse_chan'] = int(cc_match.group(1))
+                    scan_state['recent_hits'].append(hit)
+                    if len(scan_state['recent_hits']) > 50:
+                        scan_state['recent_hits'] = scan_state['recent_hits'][-50:]
+            proc.wait()
+        except Exception as e:
+            scan_state['log_lines'].append(f'ERROR: {e}')
+        finally:
+            scan_state['active'] = False
+            scan_state['pid'] = None
+            elapsed = time.time() - scan_state.get('scan_start_time', time.time())
+            try:
+                _complete_scan_meta(scan_id, elapsed)
+            except Exception as e:
+                scan_state['log_lines'].append(f'WARN: Could not update scan_meta: {e}')
+            scan_state['active_scan_id'] = None
+
+    thread = threading.Thread(target=run_scan, daemon=True)
+    thread.start()
+
+    return jsonify({
+        'status': 'resumed',
+        'scan_id': scan_id,
+        'checkpoint': checkpoint,
+    })
 
 
 # ─── API: Delete File ─────────────────────────────────────────────────
