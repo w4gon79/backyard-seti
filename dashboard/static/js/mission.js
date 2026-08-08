@@ -676,7 +676,12 @@ async function pollMissionData() {
         if (statusData.freq_end) mcState.freqEnd = statusData.freq_end;
         if (statusData.sub_bands_total) mcState.subBandsTotal = statusData.sub_bands_total;
         if (statusData.sub_bands_done !== undefined) {
-            if (statusData.sub_bands_done > mcState.subBandsDone) {
+            // If file changed or sub_bands dropped (new file reset), sync immediately
+            if (statusData.current_file && mcState.currentFile && statusData.current_file !== mcState.currentFile) {
+                mcState.subBandsDone = statusData.sub_bands_done;
+                mcState.subBandsTotal = statusData.sub_bands_total || 0;
+                mcState.currentSubBand = statusData.sub_bands_done;
+            } else if (statusData.sub_bands_done > mcState.subBandsDone) {
                 mcState.subBandsDone = statusData.sub_bands_done;
                 mcState.currentSubBand = statusData.sub_bands_done;
                 mcState.subBandTimestamps.push(Date.now());
