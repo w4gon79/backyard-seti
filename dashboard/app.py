@@ -1839,12 +1839,14 @@ def api_barycentric_targets():
     
     # Also return which scans have barycentric correction completed
     corrected_scans = []
-    for sid in _discover_scans():
-        scan_dir = _get_scan_dir(sid)
-        if scan_dir:
-            combined_path = os.path.join(scan_dir, 'barycentric', 'combined_corrected.json')
-            if os.path.isfile(combined_path):
-                corrected_scans.append(sid)
+    for sm in _discover_scans():
+        sid = sm.get('scan_id') or sm.get('_dir', '')
+        if not sid:
+            continue
+        scan_dir = os.path.join(RESULTS_DIR, sid)
+        combined_path = os.path.join(scan_dir, 'barycentric', 'combined_corrected.json')
+        if os.path.isfile(combined_path):
+            corrected_scans.append(sid)
     
     return jsonify({'targets': targets, 'telescopes': telescopes, 'corrected_scans': corrected_scans})
 
