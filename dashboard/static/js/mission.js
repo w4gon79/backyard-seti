@@ -59,11 +59,210 @@ document.addEventListener('DOMContentLoaded', () => {
     initStarfield();
     initFreqMap();
     initSpectrum();
+    initStarmap();
     pollMissionData();
     setInterval(pollMissionData, POLL_INTERVAL);
     setInterval(updateElapsed, 1000);
     setInterval(pollSpectrum, SPECTRUM_POLL);
 });
+
+// ─── Target Sky Map (celestial star map) ────────────────────────────
+let starmapCanvas, starmapCtx;
+
+// Stars near Proxima Centauri (within ~15 deg)
+// RA/Dec in degrees, magnitude, name
+const STARMAP_STARS = [
+    {ra: 217.429, dec: -62.681, mag: 11.1, name: 'PROXIMA', isTarget: true},
+    {ra: 219.902, dec: -60.834, mag: 0.3,  name: '\u03b1 CEN'},
+    {ra: 210.956, dec: -60.373, mag: 0.61, name: 'HADAR'},
+    {ra: 216.767, dec: -50.716, mag: 2.60, name: '\u03b4 CEN'},
+    {ra: 213.917, dec: -53.466, mag: 3.13, name: '\u03bc CEN'},
+    {ra: 210.458, dec: -64.700, mag: 3.90, name: 'i CEN'},
+    {ra: 219.485, dec: -66.180, mag: 4.25, name: 'n CEN'},
+];
+
+// Map center & range
+const STARMAP_CENTER_RA  = 217.429;
+const STARMAP_CENTER_DEC = -62.681;
+const STARMAP_RANGE_RA   = 15;   // +/- degrees in RA
+const STARMAP_RANGE_DEC  = 15;   // +/- degrees in Dec
+
+function initStarmap() {
+    starmapCanvas = document.getElementById('starmap-canvas');
+    if (!starmapCanvas) return;
+    starmapCtx = starmapCanvas.getContext('2d');
+    resizeStarmap();
+    window.addEventListener('resize', resizeStarmap);
+    requestAnimationFrame(animateStarmap);
+}
+
+function resizeStarmap() {
+    if (!starmapCanvas) return;
+    const parent = starmapCanvas.parentElement;
+    const rect = parent.getBoundingClientRect();
+    const size = Math.min(rect.width - 12, 220);
+    starmapCanvas.width = size;
+    starmapCanvas.height = size;
+}
+
+function animateStarmap() {
+    drawStarmap();
+    requestAnimationFrame(animateStarmap);
+}
+
+function drawStarmap() {
+    const ctx = starmapCtx;
+    if (!ctx || !starmapCanvas) return;
+    const w = starmapCanvas.width;
+    const h = starmapCanvas.height;
+    if (w === 0 || h === 0) return;
+
+    // Clear
+    ctx.fillStyle = '#000400';
+    ctx.fillRect(0, 0, w, h);
+
+    const padL = 24, padR = 8, padT = 8, padB = 20;
+    const plotW = w - padL - padR;
+    const plotH = h - padT - padB;
+    if (plotW <= 0 || plotH <= 0) return;
+
+    // Projection helpers: RA increases rightward, but in sky maps RA often
+    // increases leftward. We'll use standard rectangular: RA right = higher.
+    // (For a small field this orientation doesn't matter much.)
+    function raToX(ra) {
+        return padL + ((ra - (STARMAP_CENTER_RA - STARMAP_RANGE_RA)) / (2 * STARMAP_RANGE_RA)) * plotW;
+    }
+    function decToY(dec) {
+        // Dec increases upward (lower Y = higher Dec)
+        return padT + ((STARMAP_CENTER_DEC + STARMAP_RANGE_DEC - dec) / (2 * STARMAP_RANGE_DEC)) * plotH;
+    }
+
+    // ── Grid lines (every 5 degrees) ──
+    ctx.strokeStyle = 'rgba(0, 102, 34, 0.2)';
+    ctx.lineWidth = 1;
+    ctx.font = "7px 'Share Tech Mono', Consolas, monospace";
+    ctx.fillStyle = 'rgba(0, 102, 34, 0.4)';
+
+    // Vertical grid lines (RA)
+    const raStart = Math.ceil((STARMAP_CENTER_RA - STARMAP_RANGE_RA) / 5) * 5;
+    const raEnd   = Math.floor((STARMAP_CENTER_RA + STARMAP_RANGE_RA) / 5) * 5;
+    for (let ra = raStart; ra <= raEnd; ra += 5) {
+        const x = raToX(ra);
+        if (x < padL || x > padL + plotW) continue;
+        ctx.beginPath();
+        ctx.moveTo(x, padT);
+        ctx.lineTo(x, padT + plotH);
+        ctx.stroke();
+        // RA label (convert to hours)
+        const raHours = (ra / 15).toFixed(1);
+        ctx.textAlign = 'center';
+        ctx.fillText(raHours + 'h', x, padT + plotH + 12);
+    }
+
+    // Horizontal grid lines (Dec)
+    const decStart = Math.ceil((STARMAP_CENTER_DEC - STARMAP_RANGE_DEC) / 5) * 5;
+    const decEnd   = Math.floor((STARMAP_CENTER_DEC + STARMAP_RANGE_DEC) / 5) * 5;
+    for (let dec = decStart; dec <= decEnd; dec += 5) {
+        const y = decToY(dec);
+        if (y < padT || y > padT + plotH) continue;
+        ctx.beginPath();
+        ctx.moveTo(padL, y);
+        ctx.lineTo(padL + plotW, y);
+        ctx.stroke();
+        // Dec label
+        ctx.textAlign = 'right';
+        ctx.fillText(dec + '\u00b0', padL - 3, y + 3);
+    }
+
+    // ── Border ──
+    ctx.strokeStyle = CRT.borderDim;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(padL, padT, plotW, plotH);
+
+    // ── Stars ──
+    for (const star of STARMAP_STARS) {
+        // Clamp stars that are outside range
+        const x = raToX(star.ra);
+        const y = decToY(star.dec);
+        if (x < padL - 2 || x > padL + plotW + 2 || y < padT - 2 || y > padT + plotH + 2) continue;
+
+        // Size from magnitude: brighter = bigger
+        let radius;
+        if (star.isTarget) {
+            radius = 3;
+        } else if (star.mag < 1) {
+            radius = 4;
+        } else if (star.mag < 2) {
+            radius = 3;
+        } else if (star.mag < 3) {
+            radius = 2.5;
+        } else if (star.mag < 4) {
+            radius = 2;
+        } else {
+            radius = 1.5;
+        }
+
+        // Glow for bright stars
+        if (star.mag < 2 || star.isTarget) {
+            ctx.fillStyle = 'rgba(51,255,51,0.12)';
+            ctx.beginPath();
+            ctx.arc(x, y, radius * 3, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = 'rgba(51,255,51,0.2)';
+            ctx.beginPath();
+            ctx.arc(x, y, radius * 2, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // Star dot
+        if (star.isTarget) {
+            ctx.fillStyle = CRT.whiteHot;
+        } else if (star.mag < 1) {
+            ctx.fillStyle = CRT.phosBright;
+        } else if (star.mag < 3) {
+            ctx.fillStyle = CRT.phosBright;
+        } else {
+            ctx.fillStyle = CRT.phosMid;
+        }
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.fill();
+
+        // ── Target crosshair ──
+        if (star.isTarget) {
+            const pulse = 0.5 + 0.5 * Math.sin(Date.now() * 0.004);
+            ctx.strokeStyle = `rgba(51,255,51,${0.4 + pulse * 0.5})`;
+            ctx.lineWidth = 1;
+            const armLen = 8 + pulse * 3;
+            // Horizontal arms
+            ctx.beginPath();
+            ctx.moveTo(x - armLen, y);
+            ctx.lineTo(x - 3, y);
+            ctx.moveTo(x + 3, y);
+            ctx.lineTo(x + armLen, y);
+            ctx.stroke();
+            // Vertical arms
+            ctx.beginPath();
+            ctx.moveTo(x, y - armLen);
+            ctx.lineTo(x, y - 3);
+            ctx.moveTo(x, y + 3);
+            ctx.lineTo(x, y + armLen);
+            ctx.stroke();
+
+            // Brackets around target name
+            ctx.fillStyle = CRT.phosBright;
+            ctx.font = "7px 'Share Tech Mono', Consolas, monospace";
+            ctx.textAlign = 'left';
+            ctx.fillText('[' + star.name + ']', x + armLen + 2, y + 3);
+        } else {
+            // Star label
+            ctx.fillStyle = 'rgba(0,170,51,0.55)';
+            ctx.font = "7px 'Share Tech Mono', Consolas, monospace";
+            ctx.textAlign = 'left';
+            ctx.fillText(star.name, x + radius + 2, y + 2);
+        }
+    }
+}
 
 // ─── Starfield Background (green-tinted CRT noise) ───────────────────
 function initStarfield() {

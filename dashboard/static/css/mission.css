@@ -268,7 +268,7 @@ html, body {
 }
 
 .mc-right-column {
-    grid-template-rows: 1fr auto;
+    grid-template-rows: 1fr auto auto;
     overflow: hidden;
 }
 
@@ -614,7 +614,44 @@ html, body {
     50% { opacity: 1; }
 }
 
-/* ─── Responsive ───────────────────────────────────────────────────── */
+/* ─── Star Map Panel ─────────────────────────────────────── */
+.mc-starmap {
+    border: 1px solid var(--phos-dark);
+}
+
+.starmap-body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 6px;
+    background: #000400;
+}
+
+#starmap-canvas {
+    display: block;
+    width: 100%;
+    max-width: 220px;
+    height: 200px;
+}
+
+.starmap-coords {
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
+    padding: 4px 8px 2px;
+    font-size: 0.7em;
+    color: var(--phos-dim);
+    font-family: var(--font-mono);
+    letter-spacing: 1px;
+}
+
+.starmap-coords span {
+    color: var(--phos-mid);
+    text-shadow: var(--glow-mid);
+}
+
+/* ─── Responsive ──── */───────────────────────────────────────────────── */
 @media (max-width: 1200px) {
     .mc-middle {
         grid-template-columns: 1fr;
