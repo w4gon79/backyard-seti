@@ -268,7 +268,15 @@ html, body {
 }
 
 .mc-right-column {
-    grid-template-rows: 1fr auto auto;
+    grid-template-rows: 1fr auto;
+    overflow: hidden;
+}
+
+.mc-right-top-row {
+    display: grid;
+    grid-template-columns: 1fr 220px;
+    gap: 6px;
+    min-height: 0;
     overflow: hidden;
 }
 
