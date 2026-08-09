@@ -674,13 +674,28 @@ async function pollMissionData() {
         if (statusData.target) mcState.target = statusData.target;
         if (statusData.freq_start) mcState.freqStart = statusData.freq_start;
         if (statusData.freq_end) mcState.freqEnd = statusData.freq_end;
+
+        // Detect file change BEFORE processing sub-bands (ordering matters!)
+        let fileChanged = false;
+        if (statusData.current_file !== undefined) {
+            if (mcState.currentFile && statusData.current_file !== mcState.currentFile) {
+                fileChanged = true;
+                spectrumScrollRows = [];
+                seenHits.clear();
+                clearTicker();
+            }
+            mcState.currentFile = statusData.current_file;
+        }
+
+        // Now process sub-bands with file change awareness
         if (statusData.sub_bands_total) mcState.subBandsTotal = statusData.sub_bands_total;
         if (statusData.sub_bands_done !== undefined) {
-            // If file changed or sub_bands dropped (new file reset), sync immediately
-            if (statusData.current_file && mcState.currentFile && statusData.current_file !== mcState.currentFile) {
+            if (fileChanged || statusData.sub_bands_done < mcState.subBandsDone) {
+                // File transition or counter reset: sync immediately
                 mcState.subBandsDone = statusData.sub_bands_done;
                 mcState.subBandsTotal = statusData.sub_bands_total || 0;
                 mcState.currentSubBand = statusData.sub_bands_done;
+                mcState.subBandTimestamps = [];
             } else if (statusData.sub_bands_done > mcState.subBandsDone) {
                 mcState.subBandsDone = statusData.sub_bands_done;
                 mcState.currentSubBand = statusData.sub_bands_done;
@@ -693,14 +708,6 @@ async function pollMissionData() {
         if (statusData.current_freq_stop) mcState.currentFreqStop = statusData.current_freq_stop;
         if (statusData.total_hits !== undefined) mcState.totalHits = statusData.total_hits;
 
-        if (statusData.current_file !== undefined) {
-            if (mcState.currentFile && statusData.current_file !== mcState.currentFile) {
-                spectrumScrollRows = [];
-                seenHits.clear();
-                clearTicker();
-            }
-            mcState.currentFile = statusData.current_file;
-        }
         if (statusData.current_file_index !== undefined) mcState.currentFileIndex = statusData.current_file_index;
         if (statusData.file_total !== undefined) mcState.fileTotal = statusData.file_total;
         if (statusData.on_hits !== undefined) mcState.onHits = statusData.on_hits;
