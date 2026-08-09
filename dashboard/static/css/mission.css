@@ -274,7 +274,7 @@ html, body {
 
 .mc-right-top-row {
     display: grid;
-    grid-template-columns: 1fr 220px;
+    grid-template-columns: 1fr 300px;
     gap: 6px;
     min-height: 0;
     overflow: hidden;

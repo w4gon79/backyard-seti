@@ -169,7 +169,7 @@ function resizeStarmap() {
     if (!starmapCanvas) return;
     const parent = starmapCanvas.parentElement;
     const rect = parent.getBoundingClientRect();
-    const size = Math.min(rect.width - 12, 220);
+    const size = Math.min(rect.width - 12, 300);
     starmapCanvas.width = size;
     starmapCanvas.height = size;
 }
