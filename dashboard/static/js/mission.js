@@ -35,7 +35,7 @@ let mcState = {
     fileHits: 0,
 };
 
-const POLL_INTERVAL = 2000;
+const POLL_INTERVAL = 3000;  // Fix 5: was 2000ms, now matches dashboard
 const SPECTRUM_POLL = 3000;
 
 // ── Green phosphor color constants for canvas rendering ──
@@ -176,7 +176,9 @@ function resizeStarmap() {
 
 function animateStarmap() {
     drawStarmap();
-    requestAnimationFrame(animateStarmap);
+    // Fix 1: Only redraw star map via requestAnimationFrame for the pulsing crosshair
+    // but throttle to 10fps instead of 60fps
+    setTimeout(() => requestAnimationFrame(animateStarmap), 100);
 }
 
 function drawStarmap() {
@@ -365,7 +367,8 @@ function initStarfield() {
             ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
             ctx.fill();
         }
-        requestAnimationFrame(drawStars);
+        // Fix 1: throttle starfield to 15fps instead of 60fps
+        setTimeout(() => requestAnimationFrame(drawStars), 66);
     }
     drawStars();
 
@@ -394,7 +397,8 @@ function resizeFreqMap() {
 
 function animateFreqMap() {
     drawFreqMap();
-    requestAnimationFrame(animateFreqMap);
+    // Fix 1: throttle to 10fps instead of 60fps
+    setTimeout(() => requestAnimationFrame(animateFreqMap), 100);
 }
 
 function drawFreqMap() {
@@ -691,6 +695,7 @@ function updateSpectrum(spectra, freqs, subbandIdx) {
         spectrumScrollRows.pop();
     }
 
+    // Fix 2: only redraw when new data arrives, not every animation frame
     drawSpectrum();
 }
 
@@ -878,8 +883,17 @@ function updateLog(logLines) {
     if (!logEl) return;
     if (!logLines || logLines.length === 0) {
         logEl.innerHTML = '<div class="mc-log-line info">NO SCAN LOG OUTPUT YET.</div>';
+        window._mcLastLogCount = 0;
         return;
     }
+    // Fix 3: Incremental log updates - only rebuild if line count changed significantly
+    const newCount = logLines.length;
+    if (window._mcLastLogCount === newCount && window._mcLastLogSig === logLines[logLines.length-1].substring(0,30)) {
+        return; // No change, skip DOM update entirely
+    }
+    window._mcLastLogCount = newCount;
+    window._mcLastLogSig = logLines[logLines.length-1].substring(0,30);
+    
     const wasNearBottom = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 50;
     const prevScrollTop = logEl.scrollTop;
     logEl.innerHTML = '';

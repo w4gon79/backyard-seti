@@ -45,11 +45,17 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.key === 'Enter') searchBL();
     });
     document.getElementById('results-filter').onchange = applyFilters;
-    document.getElementById('results-snr-min').oninput = applyFilters;
-    document.getElementById('results-drift-min').oninput = applyFilters;
-    document.getElementById('results-drift-max').oninput = applyFilters;
-    document.getElementById('results-freq-min').oninput = applyFilters;
-    document.getElementById('results-freq-max').oninput = applyFilters;
+    // Fix 4: Debounce filter inputs (300ms delay) instead of re-sorting 30k hits on every keystroke
+    var _filterDebounce = null;
+    function debouncedFilter() {
+        clearTimeout(_filterDebounce);
+        _filterDebounce = setTimeout(applyFilters, 300);
+    }
+    document.getElementById('results-snr-min').oninput = debouncedFilter;
+    document.getElementById('results-drift-min').oninput = debouncedFilter;
+    document.getElementById('results-drift-max').oninput = debouncedFilter;
+    document.getElementById('results-freq-min').oninput = debouncedFilter;
+    document.getElementById('results-freq-max').oninput = debouncedFilter;
     document.getElementById('btn-run-rejection').onclick = runRejection;
     document.getElementById('scan-selector').onchange = onScanSelected;
 
@@ -787,14 +793,21 @@ async function pollScanStatus() {
                 // Lines repeat across polls, so track by index offset from end
                 return true;
             });
-            // Simpler approach: rebuild from backend log_tail (now 500 lines) but preserve scroll position
-            var wasNearBottom = logDiv.scrollHeight - logDiv.scrollTop - logDiv.clientHeight < 50;
-            var prevScrollTop = logDiv.scrollTop;
-            logDiv.innerHTML = lines.map(function(l) { return '<div>' + escapeHtml(l) + '</div>'; }).join('');
-            if (wasNearBottom) {
-                logDiv.scrollTop = logDiv.scrollHeight;
+            // Fix 3: Skip log rebuild if unchanged (last line signature matches)
+            var lastSig = lines.length > 0 ? lines[lines.length-1].substring(0, 40) : '';
+            if (window._dashLastLogSig === lastSig && window._dashLastLogCount === lines.length) {
+                // Log unchanged, skip DOM rebuild
             } else {
-                logDiv.scrollTop = prevScrollTop;
+                window._dashLastLogSig = lastSig;
+                window._dashLastLogCount = lines.length;
+                var wasNearBottom = logDiv.scrollHeight - logDiv.scrollTop - logDiv.clientHeight < 50;
+                var prevScrollTop = logDiv.scrollTop;
+                logDiv.innerHTML = lines.map(function(l) { return '<div>' + escapeHtml(l) + '</div>'; }).join('');
+                if (wasNearBottom) {
+                    logDiv.scrollTop = logDiv.scrollHeight;
+                } else {
+                    logDiv.scrollTop = prevScrollTop;
+                }
             }
             // Use structured progress if available, fall back to log parsing
             if (subTotal > 0) {
@@ -1067,6 +1080,12 @@ function getFilteredHits() {
     var freqMin = parseFloat(document.getElementById('results-freq-min').value);
     var freqMax = parseFloat(document.getElementById('results-freq-max').value);
 
+    // Fix 6: Build cache key from filter params + sort + data source. Only re-sort if changed.
+    var cacheKey = filter + '|' + snrMin + '|' + driftMin + '|' + driftMax + '|' + freqMin + '|' + freqMax + '|' + resultsSort.col + '|' + resultsSort.dir + '|' + allHits.length + '|' + rejectionCandidates.length;
+    if (window._filteredHitsCache && window._filteredHitsCacheKey === cacheKey) {
+        return window._filteredHitsCache;
+    }
+
     var hits = allHits.slice();
     if (filter === 'on') hits = hits.filter(function(h) { return h.on_off === 'ON' || (h._source || '').indexOf('_S_') !== -1 || (h.source_file || '').indexOf('_S_') !== -1 || (h.file || '').indexOf('_S_') !== -1; });
     else if (filter === 'off') hits = hits.filter(function(h) { return h.on_off === 'OFF' || (h._source || '').indexOf('_R_') !== -1 || (h.source_file || '').indexOf('_R_') !== -1 || (h.file || '').indexOf('_R_') !== -1; });
@@ -1088,6 +1107,10 @@ function getFilteredHits() {
         }
         return (av - bv) * dir;
     });
+    
+    // Cache the result
+    window._filteredHitsCache = hits;
+    window._filteredHitsCacheKey = cacheKey;
     return hits;
 }
 
