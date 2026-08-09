@@ -69,23 +69,92 @@ document.addEventListener('DOMContentLoaded', () => {
 // ─── Target Sky Map (celestial star map) ────────────────────────────
 let starmapCanvas, starmapCtx;
 
-// Stars near Proxima Centauri (within ~15 deg)
-// RA/Dec in degrees, magnitude, name
-const STARMAP_STARS = [
-    {ra: 217.429, dec: -62.681, mag: 11.1, name: 'PROXIMA', isTarget: true},
-    {ra: 219.902, dec: -60.834, mag: 0.3,  name: '\u03b1 CEN'},
-    {ra: 210.956, dec: -60.373, mag: 0.61, name: 'HADAR'},
-    {ra: 216.767, dec: -50.716, mag: 2.60, name: '\u03b4 CEN'},
-    {ra: 213.917, dec: -53.466, mag: 3.13, name: '\u03bc CEN'},
-    {ra: 210.458, dec: -64.700, mag: 3.90, name: 'i CEN'},
-    {ra: 219.485, dec: -66.180, mag: 4.25, name: 'n CEN'},
-];
+// Target coordinate database (matches barycentric_correct.py TARGET_COORDS)
+const TARGET_SKY = {
+    'PROXCEN': {
+        ra: 217.429, dec: -62.681, name: 'PROXIMA CENTAURI',
+        stars: [
+            {ra: 217.429, dec: -62.681, mag: 11.1, name: 'PROXIMA', isTarget: true},
+            {ra: 219.902, dec: -60.834, mag: 0.3,  name: '\u03b1 CEN'},
+            {ra: 210.956, dec: -60.373, mag: 0.61, name: 'HADAR'},
+            {ra: 216.767, dec: -50.716, mag: 2.60, name: '\u03b4 CEN'},
+            {ra: 213.917, dec: -53.466, mag: 3.13, name: '\u03bc CEN'},
+            {ra: 210.458, dec: -64.700, mag: 3.90, name: 'i CEN'},
+            {ra: 219.485, dec: -66.180, mag: 4.25, name: 'n CEN'},
+        ],
+    },
+    'TAU_CETI': {
+        ra: 25.937, dec: -15.937, name: 'TAU CETI',
+        stars: [
+            {ra: 25.937, dec: -15.937, mag: 3.50, name: '\u03c4 CET', isTarget: true},
+            {ra: 22.271, dec: -17.654, mag: 4.29, name: '\u03b4 CET'},
+            {ra: 30.625, dec: -12.349, mag: 4.08, name: '\u03b5 CET'},
+            {ra: 19.066, dec: -21.059, mag: 2.53, name: '\u03b6 CET'},
+            {ra: 27.083, dec: -10.315, mag: 5.35, name: 'Y CET'},
+        ],
+    },
+    'KIC_8462852': {
+        ra: 301.564, dec: 44.456, name: 'TABBY\'S STAR',
+        stars: [
+            {ra: 301.564, dec: 44.456, mag: 11.7, name: 'KIC8462852', isTarget: true},
+            {ra: 303.046, dec: 44.498, mag: 7.5,  name: 'BD+44 3724'},
+            {ra: 300.233, dec: 44.156, mag: 8.3,  name: 'TYC 3162-1002'},
+        ],
+    },
+    'WOLOG': {
+        ra: 289.083, dec: 37.145, name: 'WOLF 359',
+        stars: [
+            {ra: 289.083, dec: 37.145, mag: 13.5, name: 'WOLF 359', isTarget: true},
+            {ra: 286.604, dec: 38.308, mag: 3.5,  name: '\u03b2 LEO'},
+        ],
+    },
+};
 
-// Map center & range
-const STARMAP_CENTER_RA  = 217.429;
-const STARMAP_CENTER_DEC = -62.681;
-const STARMAP_RANGE_RA   = 15;   // +/- degrees in RA
-const STARMAP_RANGE_DEC  = 15;   // +/- degrees in Dec
+// Default to Proxima, will be updated by polling
+let currentTargetKey = 'PROXCEN';
+let STARMAP_STARS = TARGET_SKY[currentTargetKey].stars;
+let STARMAP_CENTER_RA  = TARGET_SKY[currentTargetKey].ra;
+let STARMAP_CENTER_DEC = TARGET_SKY[currentTargetKey].dec;
+const STARMAP_RANGE_RA   = 15;
+const STARMAP_RANGE_DEC  = 15;
+
+function updateStarmapTarget(targetName) {
+    // Normalize target name to match keys
+    let key = targetName.toUpperCase().replace(/\s/g, '_');
+    // Try direct lookup
+    if (TARGET_SKY[key]) {
+        currentTargetKey = key;
+    } else {
+        // Try partial match
+        for (const k in TARGET_SKY) {
+            if (k.indexOf(key) !== -1 || key.indexOf(k) !== -1) {
+                currentTargetKey = k;
+                break;
+            }
+        }
+    }
+    const t = TARGET_SKY[currentTargetKey];
+    if (t) {
+        STARMAP_STARS = t.stars;
+        STARMAP_CENTER_RA = t.ra;
+        STARMAP_CENTER_DEC = t.dec;
+        // Update coordinate readout
+        const raH = Math.floor(STARMAP_CENTER_RA / 15);
+        const raM = Math.floor((STARMAP_CENTER_RA / 15 - raH) * 60);
+        const raS = ((STARMAP_CENTER_RA / 15 - raH) * 60 - raM) * 60;
+        const decSign = STARMAP_CENTER_DEC < 0 ? '-' : '+';
+        const decAbs = Math.abs(STARMAP_CENTER_DEC);
+        const decD = Math.floor(decAbs);
+        const decM = Math.floor((decAbs - decD) * 60);
+        const decS = ((decAbs - decD) * 60 - decM) * 60;
+        const coordsDiv = document.querySelector('.starmap-coords');
+        if (coordsDiv) {
+            const spans = coordsDiv.querySelectorAll('span');
+            if (spans[0]) spans[0].textContent = `RA: ${raH}h ${raM}m ${raS.toFixed(0)}s`;
+            if (spans[1]) spans[1].textContent = `DEC: ${decSign}${decD}\u00b0 ${decM}' ${decS.toFixed(0)}"`;
+        }
+    }
+}
 
 function initStarmap() {
     starmapCanvas = document.getElementById('starmap-canvas');
@@ -870,7 +939,12 @@ async function pollMissionData() {
             mcState.status = 'complete';
         }
 
-        if (statusData.target) mcState.target = statusData.target;
+        if (statusData.target) {
+            if (mcState.target !== statusData.target) {
+                updateStarmapTarget(statusData.target);
+            }
+            mcState.target = statusData.target;
+        }
         if (statusData.freq_start) mcState.freqStart = statusData.freq_start;
         if (statusData.freq_end) mcState.freqEnd = statusData.freq_end;
 
