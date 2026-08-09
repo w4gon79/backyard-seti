@@ -659,25 +659,209 @@ html, body {
     text-shadow: var(--glow-mid);
 }
 
-/* ─── Responsive ──── */───────────────────────────────────────────────── */
+/* ─── Responsive ─────────────────────────────────────────────────── */
+
 @media (max-width: 1200px) {
     .mc-middle {
         grid-template-columns: 1fr;
     }
+    .mc-left-column {
+        grid-template-rows: 140px 1fr;
+    }
     .mc-stats {
         grid-template-columns: 1fr 1fr 1fr 1fr;
+    }
+    #starmap-canvas {
+        max-width: 180px;
+        height: 160px;
     }
 }
 
 @media (max-width: 768px) {
-    .mc-stats {
-        grid-template-columns: 1fr 1fr;
+    /* Stack everything single-column */
+    #mission-control {
+        padding: 4px;
+        gap: 4px;
+        height: auto;
+        min-height: 100vh;
     }
-    .mc-header-info {
-        flex-wrap: wrap;
-        gap: 8px;
+
+    html, body {
+        overflow-y: auto;
+        overflow-x: hidden;
+    }
+
+    /* Header */
+    .mc-header {
+        flex-direction: column;
+        gap: 6px;
+        padding: 8px 10px;
+        text-align: center;
     }
     .mc-title {
         font-size: 1.1em;
+        letter-spacing: 2px;
+    }
+    .mc-header-info {
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 6px;
+    }
+    .mc-info-badge {
+        padding: 3px 8px;
+        font-size: 0.75em;
+    }
+
+    /* Middle: single column */
+    .mc-middle {
+        grid-template-columns: 1fr;
+        overflow: visible;
+    }
+
+    /* Left column: shorter freq map */
+    .mc-left-column {
+        grid-template-rows: 100px 200px;
+        overflow: visible;
+    }
+
+    /* Right column */
+    .mc-right-column {
+        grid-template-rows: auto auto;
+        overflow: visible;
+    }
+
+    /* Hit Ticker + Star Map: stack vertically */
+    .mc-right-top-row {
+        grid-template-columns: 1fr;
+        grid-template-rows: 180px 200px;
+        overflow: visible;
+    }
+
+    /* Star map smaller */
+    #starmap-canvas {
+        max-width: 140px;
+        height: 130px;
+    }
+
+    /* Stats: 2 columns */
+    .mc-stats {
+        grid-template-columns: 1fr 1fr;
+        gap: 4px;
+        padding: 6px;
+    }
+    .stat-cell {
+        padding: 6px 8px;
+    }
+    .stat-cell .stat-value {
+        font-size: 1.2em;
+    }
+    .stat-cell .stat-label {
+        font-size: 0.58em;
+    }
+
+    /* Hit ticker */
+    #hit-ticker {
+        font-size: 0.72em;
+        line-height: 1.5;
+        padding: 4px 8px;
+    }
+
+    /* Panel titles smaller */
+    .mc-panel-title {
+        font-size: 0.7em;
+        padding: 4px 8px;
+        letter-spacing: 1px;
+    }
+
+    /* Bottom section */
+    .mc-bottom {
+        padding: 6px 8px;
+        max-height: 120px;
+    }
+    .mc-progress-row {
+        flex-direction: column;
+        gap: 4px;
+        align-items: stretch;
+    }
+    .mc-progress-bar {
+        width: 100%;
+        height: 14px;
+    }
+    .mc-progress-text {
+        text-align: center;
+        min-width: 0;
+        font-size: 0.72em;
+    }
+    #mc-log {
+        font-size: 0.68em;
+        max-height: 60px;
+    }
+
+    /* Spectrum placeholder */
+    .spectrum-placeholder {
+        font-size: 0.85em;
+    }
+
+    /* Star map coords */
+    .starmap-coords {
+        font-size: 0.62em;
+    }
+}
+
+@media (max-width: 480px) {
+    .mc-title {
+        font-size: 0.9em;
+        letter-spacing: 1px;
+    }
+    .mc-header-info {
+        gap: 4px;
+    }
+    .mc-info-badge {
+        padding: 2px 6px;
+        font-size: 0.68em;
+    }
+
+    /* Even shorter freq map */
+    .mc-left-column {
+        grid-template-rows: 80px 160px;
+    }
+
+    /* Star map even smaller */
+    .mc-right-top-row {
+        grid-template-rows: 140px 160px;
+    }
+    #starmap-canvas {
+        max-width: 110px;
+        height: 110px;
+    }
+
+    /* Stats text smaller */
+    .stat-cell .stat-value {
+        font-size: 1em;
+    }
+    .stat-cell .stat-label {
+        font-size: 0.52em;
+    }
+    .stat-cell { padding: 4px 6px; }
+
+    /* Ticker */
+    #hit-ticker {
+        font-size: 0.65em;
+        padding: 4px 6px;
+    }
+
+    /* Panel titles */
+    .mc-panel-title {
+        font-size: 0.62em;
+        padding: 3px 6px;
+    }
+
+    /* Log */
+    #mc-log {
+        font-size: 0.6em;
+        max-height: 50px;
+    }
+    .mc-progress-text {
+        font-size: 0.62em;
     }
 }

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>📡 Backyard SETI Dashboard</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=8">
-    <link rel="stylesheet" href="/static/css/style.css?v=30">
+    <link rel="stylesheet" href="/static/css/style.css?v=31">
     <link rel="stylesheet" href="/static/css/celestial.css?v=1">
     <!-- Plotly for charts -->
     <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
@@ -178,6 +178,7 @@
                 <div id="bary-corrected-panel" class="bary-tab-panel">
                     <div class="bary-summary" id="bary-corrected-summary"></div>
                     <div id="bary-corrected-table-container">
+                        <div class="table-scroll-wrapper">
                         <table id="bary-corrected-table" class="bary-table">
                             <thead>
                                 <tr>
@@ -195,12 +196,14 @@
                                 <tr><td colspan="8" class="empty">Run correction to see results.</td></tr>
                             </tbody>
                         </table>
+                        </div>
                     </div>
                     <div id="bary-corrected-pagination" class="bl-pagination" style="display:none;"></div>
                 </div>
                 <div id="bary-cross-panel" class="bary-tab-panel" style="display:none;">
                     <div class="bary-summary" id="bary-cross-summary"></div>
                     <div id="bary-cross-table-container">
+                        <div class="table-scroll-wrapper">
                         <table id="bary-cross-table" class="bary-table">
                             <thead>
                                 <tr>
@@ -217,6 +220,7 @@
                                 <tr><td colspan="7" class="empty">Run cross-epoch search to see candidates.</td></tr>
                             </tbody>
                         </table>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -265,6 +269,7 @@
                 </div>
                 <div id="hit-chart"></div>
                 <div id="hit-table-container">
+                    <div class="table-scroll-wrapper">
                     <table id="hit-table">
                         <thead>
                             <tr>
@@ -282,6 +287,7 @@
                             <tr><td colspan="8" class="empty">No results yet. Run a scan or refresh.</td></tr>
                         </tbody>
                     </table>
+                    </div>
                 </div>
                 <div id="results-pagination" class="bl-pagination" style="display:none;"></div>
             </div>

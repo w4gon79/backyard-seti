@@ -858,9 +858,155 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
     background: rgba(102, 187, 106, 0.15);
 }
 
+/* ── Table scroll wrapper ── */
+.table-scroll-wrapper {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+/* ── Mobile responsive ── */
 @media (max-width: 768px) {
-    .dashboard-header { flex-direction: column; gap: 8px; }
-    .control-grid { grid-template-columns: 1fr; }
-    .bary-controls-row, .bary-cross-group { flex-direction: column; align-items: stretch; }
+    /* Header */
+    .dashboard-header {
+        flex-direction: column;
+        gap: 8px;
+        padding: 12px 14px;
+        text-align: center;
+    }
+    .dashboard-header h1 { font-size: 1.3em; }
+    .header-stats {
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 6px;
+    }
+    .stat-badge {
+        padding: 4px 10px;
+        font-size: 0.78em;
+    }
+
+    /* Layout: stack everything */
+    #app { padding: 6px; }
+    .row { flex-direction: column; gap: 8px; margin-bottom: 8px; }
+    .panel-half { width: 100%; }
+
+    /* Panel headers */
+    .panel-header {
+        flex-wrap: wrap;
+        gap: 6px;
+        padding: 8px 12px;
+        font-size: 0.88em;
+    }
+
+    /* Sky map */
+    #sky-map-container { height: 360px; }
+    #celestial-map { height: 300px; }
+
+    /* Search box */
+    .search-box { flex-direction: column; gap: 6px; }
+    .search-box button { width: 100%; }
+
+    /* Scan controls */
+    .control-grid { grid-template-columns: 1fr; gap: 6px 8px; }
+    .freq-range { flex-wrap: wrap; }
+    .freq-range span { display: none; }
+    .freq-range input { flex: 1; min-width: 0; }
+
+    /* Scan buttons */
+    .scan-buttons { flex-wrap: wrap; gap: 6px; }
+    .scan-buttons button { flex: 1; min-width: 120px; padding: 8px 10px; font-size: 0.82em; }
+
+    /* Results controls */
+    .results-controls { width: 100%; gap: 4px; }
+    .results-controls select,
+    .results-controls input[type="number"] {
+        width: calc(50% - 4px) !important;
+        min-width: 0;
+        font-size: 0.8em;
+    }
+
+    /* Rejection controls */
+    .rejection-controls { flex-direction: column; align-items: stretch; gap: 6px; }
+    .rejection-controls input[type="number"] { width: 100%; }
+    .rejection-controls .tol-hint { font-size: 0.72em; }
+
+    /* Scan history bar */
+    .scan-history-bar { flex-wrap: wrap; gap: 6px; }
+    #scan-selector { max-width: 100%; width: 100%; }
+
+    /* Barycentric */
+    .bary-controls-row, .bary-cross-group {
+        flex-direction: column;
+        align-items: stretch;
+    }
     .bary-controls-row > *, .bary-cross-group > * { width: 100%; }
+    .bary-controls-row input,
+    .bary-controls-row select,
+    .bary-cross-group input[type="number"] { width: 100% !important; }
+    .bary-tabs { flex-wrap: wrap; }
+    .bary-tab { padding: 6px 12px; font-size: 0.82em; }
+
+    /* Tables: allow horizontal scroll */
+    #hit-table-container,
+    #bary-corrected-table-container,
+    #bary-cross-table-container {
+        max-height: 300px;
+    }
+
+    /* File selection */
+    .file-selection-controls { flex-wrap: wrap; }
+
+    /* Download panel */
+    .dl-item-header { flex-direction: column; align-items: flex-start; gap: 4px; }
+
+    /* Scan log */
+    .scan-log { max-height: 200px; font-size: 0.72em; }
+
+    /* Mission Control button */
+    .btn-mission { padding: 4px 10px; font-size: 0.72em; }
+
+    /* Modal */
+    .modal-content { padding: 12px; width: 95%; max-height: 85vh; }
+    #waterfall-plot { height: 280px !important; }
+    .waterfall-meta { font-size: 0.78em; gap: 4px 10px; }
+
+    /* File detail grid */
+    .file-detail-card .fd-grid { grid-template-columns: auto 1fr; }
+}
+
+@media (max-width: 480px) {
+    /* Even tighter on phones */
+    .dashboard-header h1 { font-size: 1.1em; }
+    .header-stats { gap: 4px; }
+    .stat-badge { padding: 3px 8px; font-size: 0.72em; }
+
+    #app { padding: 4px; }
+    .panel-header { font-size: 0.8em; padding: 6px 10px; }
+
+    #sky-map-container { height: 280px; }
+    #celestial-map { height: 220px; }
+
+    .scan-buttons button { min-width: 100%; }
+
+    .results-controls select,
+    .results-controls input[type="number"] {
+        width: 100% !important;
+    }
+
+    .control-grid select,
+    .control-grid input[type="number"] {
+        font-size: 0.82em;
+        padding: 5px 6px;
+    }
+
+    button { padding: 6px 12px; font-size: 0.82em; }
+
+    .scan-log { max-height: 150px; }
+    #hit-chart { height: 180px; }
+
+    /* Hit table smaller */
+    #hit-table { font-size: 0.78em; }
+    #hit-table th, #hit-table td { padding: 4px 6px; }
+
+    .modal-content { padding: 8px; width: 98%; }
+    #waterfall-plot { height: 220px !important; }
 }
