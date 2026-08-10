@@ -2549,30 +2549,59 @@ def api_stack_run():
         if phase == 'start':
             job_state['progress'] = 5
             job_state['progress_msg'] = 'Starting stack job...'
+        elif phase == 'chunk_start':
+            ci = status.get('chunk_index', 0)
+            tc = status.get('total_chunks', 1)
+            cc = status.get('chunk_center', 0)
+            cw = status.get('chunk_width', 0)
+            job_state['progress'] = 5 + int(85 * ci / tc)
+            job_state['progress_msg'] = f"Chunk {ci+1}/{tc} ({cc:.0f} MHz, {cw:.0f} MHz wide)..."
+        elif phase == 'chunk_skipped':
+            ci = status.get('chunk_index', 0)
+            tc = status.get('total_chunks', 1)
+            job_state['progress'] = 5 + int(85 * (ci + 1) / tc)
+            job_state['progress_msg'] = f"Chunk {ci+1}/{tc} already done (resuming)..."
+        elif phase == 'chunk_done':
+            ci = status.get('chunk_index', 0)
+            tc = status.get('total_chunks', 1)
+            np = status.get('n_peaks', 0)
+            job_state['progress'] = 5 + int(85 * (ci + 1) / tc)
+            job_state['progress_msg'] = f"Chunk {ci+1}/{tc} done ({np} peaks)."
         elif phase == 'epoch_start':
             idx = status.get('epoch_index', 0)
             total = status.get('total_epochs', 1)
             label = status.get('epoch_label', '?')
-            job_state['progress'] = 5 + int(70 * idx / total)
-            job_state['progress_msg'] = f"Epoch {label} ({idx+1}/{total}): loading data..."
+            ci = status.get('chunk_index', 0)
+            tc = status.get('total_chunks', 1)
+            # Within a chunk, epochs take up the chunk's progress slice
+            chunk_base = 5 + int(85 * ci / tc)
+            chunk_span = int(85 / tc)
+            job_state['progress'] = chunk_base + int(chunk_span * idx / total)
+            job_state['progress_msg'] = f"Chunk {ci+1}/{tc}, Epoch {label} ({idx+1}/{total}): loading..."
         elif phase == 'file_load':
             fname = status.get('file', status.get('filename', '?'))
             ftype = status.get('type', status.get('file_type', ''))
-            job_state['progress_msg'] = f"Loading {ftype}: {fname}..."
+            ci = status.get('chunk_index', 0)
+            tc = status.get('total_chunks', 1)
+            job_state['progress_msg'] = f"Chunk {ci+1}/{tc}: Loading {ftype} {fname}..."
         elif phase == 'epoch_done':
             idx = status.get('epoch_index', 0)
             total = status.get('total_epochs', 1)
             label = status.get('epoch_label', '?')
-            job_state['progress'] = 5 + int(70 * (idx + 1) / total)
-            job_state['progress_msg'] = f"Epoch {label} done."
+            ci = status.get('chunk_index', 0)
+            tc = status.get('total_chunks', 1)
+            chunk_base = 5 + int(85 * ci / tc)
+            chunk_span = int(85 / tc)
+            job_state['progress'] = chunk_base + int(chunk_span * (idx + 1) / total)
+            job_state['progress_msg'] = f"Chunk {ci+1}/{tc}, Epoch {label} done."
         elif phase == 'stacking':
-            job_state['progress'] = 80
+            job_state['progress'] = 90
             job_state['progress_msg'] = 'Stacking epochs...'
         elif phase == 'peak_finding':
-            job_state['progress'] = 88
+            job_state['progress'] = 93
             job_state['progress_msg'] = 'Finding peaks...'
         elif phase == 'plotting':
-            job_state['progress'] = 95
+            job_state['progress'] = 97
             job_state['progress_msg'] = 'Generating plot...'
         elif phase == 'complete':
             job_state['progress'] = 100
@@ -2584,17 +2613,36 @@ def api_stack_run():
     # Run in background thread
     def run_thread():
         try:
-            from incoherent_stack import run_stack_job
-            result = run_stack_job({
-                'target': target,
-                'freq_center': freq_center,
-                'width': width,
-                'epochs': epochs,
-                'n_sigma': n_sigma,
-                'telescope': telescope,
-                'output_png': plot_path,
-                'output_json': json_path,
-            }, progress_callback=progress_cb)
+            # Use chunked processing for wide windows (>50 MHz), simple for narrow
+            use_chunked = width > 50
+            if use_chunked:
+                from incoherent_stack import run_stack_job_chunked
+                chunk_dir = os.path.join(STACK_OUTPUT_DIR, f'chunks_{job_id}')
+                os.makedirs(chunk_dir, exist_ok=True)
+                result = run_stack_job_chunked({
+                    'target': target,
+                    'freq_center': freq_center,
+                    'width': width,
+                    'epochs': epochs,
+                    'n_sigma': n_sigma,
+                    'telescope': telescope,
+                    'output_png': plot_path,
+                    'output_json': json_path,
+                    'output_dir': chunk_dir,
+                    'chunk_size_mhz': 50.0,
+                }, progress_callback=progress_cb)
+            else:
+                from incoherent_stack import run_stack_job
+                result = run_stack_job({
+                    'target': target,
+                    'freq_center': freq_center,
+                    'width': width,
+                    'epochs': epochs,
+                    'n_sigma': n_sigma,
+                    'telescope': telescope,
+                    'output_png': plot_path,
+                    'output_json': json_path,
+                }, progress_callback=progress_cb)
 
             job_state['result'] = result
             if result.get('success'):
@@ -2640,6 +2688,188 @@ def api_stack_run():
 
     return jsonify({
         'job_id': job_id,
+        'status': 'running',
+        'target': target,
+        'freq_center': freq_center,
+        'width': width,
+        'epochs': epochs,
+        'n_sigma': n_sigma,
+    })
+
+
+@app.route('/api/stack/resume/<job_id>', methods=['POST'])
+def api_stack_resume(job_id):
+    """Resume an interrupted chunked stack job.
+
+    Checks for existing chunk files and continues from where it left off.
+    """
+    # Load original job params from DB
+    try:
+        from db import get_db
+        conn = get_db()
+        row = conn.execute(
+            'SELECT * FROM stack_jobs WHERE job_id = ?', (job_id,)).fetchone()
+        conn.close()
+        if not row:
+            return jsonify({'error': 'Job not found'}), 404
+        if row['status'] == 'complete':
+            return jsonify({'error': 'Job already complete'}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+    target = row['target']
+    freq_center = row['freq_center']
+    width = row['width_mhz']
+    epochs = json.loads(row['epochs'] or '[]')
+    n_sigma = row['n_sigma']
+
+    # New job state
+    new_job_id = str(_uuid.uuid4())[:8]
+    plot_path = os.path.join(STACK_OUTPUT_DIR, f'stack_{new_job_id}.png')
+    json_path = os.path.join(STACK_OUTPUT_DIR, f'stack_{new_job_id}.json')
+    # Reuse the same chunk dir so existing chunks are found
+    chunk_dir = os.path.join(STACK_OUTPUT_DIR, f'chunks_{job_id}')
+
+    job_state = {
+        'job_id': new_job_id,
+        'status': 'running',
+        'progress': 0,
+        'progress_msg': 'Resuming stack job...',
+        'result': None,
+        'target': target,
+        'freq_center': freq_center,
+        'width': width,
+        'epochs': epochs,
+        'n_sigma': n_sigma,
+    }
+    _stack_jobs[new_job_id] = job_state
+
+    # Reuse the same progress callback logic
+    def progress_cb(status):
+        phase = status.get('phase', '')
+        if phase == 'start':
+            job_state['progress'] = 5
+            job_state['progress_msg'] = 'Resuming stack job...'
+        elif phase == 'chunk_start':
+            ci = status.get('chunk_index', 0)
+            tc = status.get('total_chunks', 1)
+            cc = status.get('chunk_center', 0)
+            cw = status.get('chunk_width', 0)
+            job_state['progress'] = 5 + int(85 * ci / tc)
+            job_state['progress_msg'] = f"Chunk {ci+1}/{tc} ({cc:.0f} MHz, {cw:.0f} MHz wide)..."
+        elif phase == 'chunk_skipped':
+            ci = status.get('chunk_index', 0)
+            tc = status.get('total_chunks', 1)
+            job_state['progress'] = 5 + int(85 * (ci + 1) / tc)
+            job_state['progress_msg'] = f"Chunk {ci+1}/{tc} already done (resuming)..."
+        elif phase == 'chunk_done':
+            ci = status.get('chunk_index', 0)
+            tc = status.get('total_chunks', 1)
+            np_ = status.get('n_peaks', 0)
+            job_state['progress'] = 5 + int(85 * (ci + 1) / tc)
+            job_state['progress_msg'] = f"Chunk {ci+1}/{tc} done ({np_} peaks)."
+        elif phase == 'epoch_start':
+            idx = status.get('epoch_index', 0)
+            total = status.get('total_epochs', 1)
+            label = status.get('epoch_label', '?')
+            ci = status.get('chunk_index', 0)
+            tc = status.get('total_chunks', 1)
+            chunk_base = 5 + int(85 * ci / tc)
+            chunk_span = int(85 / tc)
+            job_state['progress'] = chunk_base + int(chunk_span * idx / total)
+            job_state['progress_msg'] = f"Chunk {ci+1}/{tc}, Epoch {label} ({idx+1}/{total}): loading..."
+        elif phase == 'file_load':
+            fname = status.get('file', status.get('filename', '?'))
+            ftype = status.get('type', status.get('file_type', ''))
+            ci = status.get('chunk_index', 0)
+            tc = status.get('total_chunks', 1)
+            job_state['progress_msg'] = f"Chunk {ci+1}/{tc}: Loading {ftype} {fname}..."
+        elif phase == 'epoch_done':
+            idx = status.get('epoch_index', 0)
+            total = status.get('total_epochs', 1)
+            label = status.get('epoch_label', '?')
+            ci = status.get('chunk_index', 0)
+            tc = status.get('total_chunks', 1)
+            chunk_base = 5 + int(85 * ci / tc)
+            chunk_span = int(85 / tc)
+            job_state['progress'] = chunk_base + int(chunk_span * (idx + 1) / total)
+            job_state['progress_msg'] = f"Chunk {ci+1}/{tc}, Epoch {label} done."
+        elif phase == 'stacking':
+            job_state['progress'] = 90
+            job_state['progress_msg'] = 'Stacking epochs...'
+        elif phase == 'peak_finding':
+            job_state['progress'] = 93
+            job_state['progress_msg'] = 'Finding peaks...'
+        elif phase == 'plotting':
+            job_state['progress'] = 97
+            job_state['progress_msg'] = 'Generating plot...'
+        elif phase == 'complete':
+            job_state['progress'] = 100
+            job_state['progress_msg'] = 'Complete.'
+        elif phase == 'error':
+            job_state['status'] = 'error'
+            job_state['progress_msg'] = status.get('message', 'Unknown error')
+
+    def run_thread():
+        try:
+            from incoherent_stack import run_stack_job_chunked
+            result = run_stack_job_chunked({
+                'target': target,
+                'freq_center': freq_center,
+                'width': width,
+                'epochs': epochs,
+                'n_sigma': n_sigma,
+                'telescope': 'parkes',
+                'output_png': plot_path,
+                'output_json': json_path,
+                'output_dir': chunk_dir,
+                'chunk_size_mhz': 50.0,
+            }, progress_callback=progress_cb)
+
+            job_state['result'] = result
+            if result.get('success'):
+                job_state['status'] = 'complete'
+            else:
+                job_state['status'] = 'error'
+                job_state['progress_msg'] = result.get('error', 'Unknown error')
+
+            try:
+                from db import get_db
+                conn = get_db()
+                conn.execute('''
+                    INSERT INTO stack_jobs
+                    (job_id, target, freq_center, width_mhz, epochs, n_epochs,
+                     n_sigma, status, progress, progress_msg, peaks_json,
+                     plot_path, stack_median, stack_sigma, snr_improvement, completed_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                ''', (
+                    new_job_id, target, freq_center, width,
+                    json.dumps(epochs), len(epochs), n_sigma,
+                    job_state['status'], job_state['progress'],
+                    job_state['progress_msg'],
+                    json.dumps(result.get('peaks', [])[:200]),
+                    plot_path if os.path.isfile(plot_path) else None,
+                    result.get('stack_median'), result.get('stack_sigma'),
+                    result.get('snr_improvement'),
+                ))
+                conn.commit()
+                conn.close()
+            except Exception as db_err:
+                print(f"  Stack DB persist error: {db_err}")
+
+        except Exception as e:
+            job_state['status'] = 'error'
+            job_state['progress_msg'] = str(e)
+            import traceback
+            traceback.print_exc()
+
+    thread = _threading.Thread(target=run_thread, daemon=True)
+    job_state['thread'] = thread
+    thread.start()
+
+    return jsonify({
+        'job_id': new_job_id,
+        'original_job_id': job_id,
         'status': 'running',
         'target': target,
         'freq_center': freq_center,

@@ -26,6 +26,7 @@ import sys
 import argparse
 import numpy as np
 import json
+import math
 from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src'))
@@ -322,6 +323,105 @@ def find_peaks(spectrum, grid, n_sigma=5, min_channels=3):
 
 
 # ---------------------------------------------------------------------------
+# Internal helper: process_single_chunk
+# ---------------------------------------------------------------------------
+
+def process_single_chunk(target, freq_center, width, epoch_labels,
+                          target_ra, target_dec, n_sigma, telescope,
+                          progress_callback=None, _cb=None,
+                          chunk_index=None, total_chunks=None):
+    """Core stacking logic for a single frequency window.
+
+    Shared by both run_stack_job() and run_stack_job_chunked().
+
+    Returns
+    -------
+    dict with keys:
+        success     : bool
+        peaks       : list of dicts
+        stack       : np.ndarray (the stacked spectrum)
+        common_grid : np.ndarray
+        median      : float
+        sigma       : float
+        used_epochs : list of str
+        n_epochs    : int
+        epoch_info  : list of dicts
+        epoch_spectra : list of np.ndarray (for plotting)
+    """
+    padding_mhz = 0.5
+    f_start_obs = freq_center - width / 2 - padding_mhz
+    f_stop_obs = freq_center + width / 2 + padding_mhz
+
+    common_grid = build_common_grid(freq_center, width)
+
+    epoch_spectra = []
+    used_epochs = []
+    epoch_info = []
+
+    total_epochs = len(epoch_labels)
+    for epoch_idx, label in enumerate(epoch_labels):
+        if label not in EPOCHS:
+            print(f"  Unknown epoch {label}, skipping")
+            continue
+
+        # Wrap callback to inject epoch_index, total_epochs, and chunk info
+        def _epoch_cb(status, _idx=epoch_idx, _label=label):
+            status['epoch_index'] = _idx
+            status['total_epochs'] = total_epochs
+            status['epoch_label'] = _label
+            if chunk_index is not None:
+                status['chunk_index'] = chunk_index
+                status['total_chunks'] = total_chunks
+            if _cb:
+                _cb(status)
+
+        spec = process_epoch(
+            label, EPOCHS[label], target_ra, target_dec,
+            f_start_obs, f_stop_obs, common_grid, telescope,
+            progress_callback=_epoch_cb if (_cb or progress_callback) else None,
+        )
+        if spec is not None:
+            epoch_spectra.append(spec)
+            used_epochs.append(label)
+            ep_median = float(np.median(spec))
+            ep_mad = float(np.median(np.abs(spec - ep_median)))
+            ep_sigma = float(1.4826 * ep_mad)
+            epoch_info.append({
+                'label': label,
+                'median': ep_median,
+                'sigma': ep_sigma,
+            })
+
+    if len(epoch_spectra) < 2:
+        return {
+            'success': False,
+            'error': f'Need at least 2 epochs for stacking, got {len(epoch_spectra)}',
+        }
+
+    stack = np.mean(epoch_spectra, axis=0)
+    n = len(epoch_spectra)
+
+    median = float(np.median(stack))
+    mad = float(np.median(np.abs(stack - median)))
+    sigma = float(1.4826 * mad)
+
+    peaks = find_peaks(stack, common_grid, n_sigma=n_sigma)
+
+    return {
+        'success': True,
+        'peaks': peaks,
+        'stack': stack,
+        'common_grid': common_grid,
+        'median': median,
+        'sigma': sigma,
+        'used_epochs': used_epochs,
+        'n_epochs': n,
+        'epoch_info': epoch_info,
+        'epoch_spectra': epoch_spectra,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Importable API: run_stack_job
 # ---------------------------------------------------------------------------
 
@@ -385,59 +485,36 @@ def run_stack_job(params, progress_callback=None):
         return {'success': False, 'error': msg}
     target_ra, target_dec = TARGET_COORDS[target_key]
 
-    # Build observed frequency load range (pad for Doppler)
-    padding_mhz = 0.5
-    f_start_obs = freq_center - width / 2 - padding_mhz
-    f_stop_obs = freq_center + width / 2 + padding_mhz
+    # Use shared helper for the core stacking logic
+    _cb({'phase': 'stacking', 'n_epochs': len(epoch_labels)})
 
-    common_grid = build_common_grid(freq_center, width)
+    chunk_result = process_single_chunk(
+        target=target,
+        freq_center=freq_center,
+        width=width,
+        epoch_labels=epoch_labels,
+        target_ra=target_ra,
+        target_dec=target_dec,
+        n_sigma=n_sigma,
+        telescope=telescope,
+        _cb=_cb,
+    )
 
-    # Process each epoch
-    epoch_spectra = []
-    used_epochs = []
-    epoch_info = []
+    if not chunk_result['success']:
+        _cb({'phase': 'error', 'message': chunk_result['error']})
+        return {'success': False, 'error': chunk_result['error']}
 
-    for label in epoch_labels:
-        if label not in EPOCHS:
-            print(f"  Unknown epoch {label}, skipping")
-            continue
+    stack = chunk_result['stack']
+    common_grid = chunk_result['common_grid']
+    peaks = chunk_result['peaks']
+    used_epochs = chunk_result['used_epochs']
+    n = chunk_result['n_epochs']
+    median = chunk_result['median']
+    sigma = chunk_result['sigma']
+    epoch_info = chunk_result['epoch_info']
+    epoch_spectra = chunk_result['epoch_spectra']
 
-        spec = process_epoch(
-            label, EPOCHS[label], target_ra, target_dec,
-            f_start_obs, f_stop_obs, common_grid, telescope,
-            progress_callback=_cb if progress_callback else None,
-        )
-        if spec is not None:
-            epoch_spectra.append(spec)
-            used_epochs.append(label)
-            ep_median = float(np.median(spec))
-            ep_mad = float(np.median(np.abs(spec - ep_median)))
-            ep_sigma = float(1.4826 * ep_mad)
-            epoch_info.append({
-                'label': label,
-                'median': ep_median,
-                'sigma': ep_sigma,
-            })
-
-    if len(epoch_spectra) < 2:
-        msg = f"Need at least 2 epochs for stacking, got {len(epoch_spectra)}"
-        _cb({'phase': 'error', 'message': msg})
-        return {'success': False, 'error': msg}
-
-    # Stack
-    _cb({'phase': 'stacking', 'n_epochs': len(epoch_spectra)})
-
-    stack = np.mean(epoch_spectra, axis=0)
-    n = len(epoch_spectra)
-
-    median = float(np.median(stack))
-    mad = float(np.median(np.abs(stack - median)))
-    sigma = float(1.4826 * mad)
-
-    # Find peaks
     _cb({'phase': 'peak_finding', 'n_sigma': n_sigma})
-
-    peaks = find_peaks(stack, common_grid, n_sigma=n_sigma)
 
     # Plot
     if output_png:
@@ -506,6 +583,288 @@ def run_stack_job(params, progress_callback=None):
     _cb({'phase': 'complete', 'results': {k: v for k, v in results.items()
                                           if k != 'peaks'},
          'n_peaks': len(peaks)})
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Importable API: run_stack_job_chunked (full-band processing with recovery)
+# ---------------------------------------------------------------------------
+
+def run_stack_job_chunked(params, progress_callback=None):
+    """Run incoherent stacking across a wide band, split into chunks.
+
+    Each chunk is processed independently through the full pipeline
+    (load ON/OFF, subtract, barycentric correct, interpolate, stack,
+    find peaks). Results are saved to disk after each chunk completes,
+    enabling crash recovery and resume.
+
+    Parameters
+    ----------
+    params : dict
+        Required keys (same as run_stack_job plus):
+            target          : str
+            freq_center     : float  (MHz) -- centre of the FULL band
+            width           : float  (MHz) -- total bandwidth
+            epochs          : list of str
+            n_sigma         : float
+            telescope       : str
+            output_png      : str or None
+            output_json     : str or None  (combined results)
+        Additional keys:
+            chunk_size_mhz  : float  (default 50.0)
+            output_dir      : str    (directory for per-chunk JSON files)
+    progress_callback : callable or None
+        Same phases as run_stack_job, plus:
+            phase='chunk_start'   -- beginning a chunk
+            phase='chunk_done'    -- chunk finished
+            phase='chunk_skipped' -- chunk already processed (resume)
+        Epoch-level callbacks include chunk_index and total_chunks.
+
+    Returns
+    -------
+    dict (same format as run_stack_job, with all peaks from all chunks)
+    """
+    def _cb(status):
+        if progress_callback:
+            try:
+                progress_callback(status)
+            except Exception:
+                pass
+
+    target = params['target']
+    freq_center = params['freq_center']
+    width = params['width']
+    epoch_labels = params.get('epochs', list(EPOCHS.keys()))
+    n_sigma = params.get('n_sigma', 5.0)
+    telescope = params.get('telescope', 'parkes')
+    output_png = params.get('output_png')
+    output_json = params.get('output_json')
+    chunk_size_mhz = params.get('chunk_size_mhz', 50.0)
+    output_dir = Path(params.get('output_dir', '.'))
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    _cb({'phase': 'start', 'target': target, 'freq_center': freq_center,
+         'width': width, 'epochs': epoch_labels,
+         'chunked': True, 'chunk_size_mhz': chunk_size_mhz})
+
+    # Resolve target coordinates
+    target_key = target.upper().replace(' ', '_')
+    if target_key not in TARGET_COORDS:
+        msg = f"Unknown target: {target}"
+        _cb({'phase': 'error', 'message': msg})
+        return {'success': False, 'error': msg}
+    target_ra, target_dec = TARGET_COORDS[target_key]
+
+    # Compute chunk boundaries
+    full_band_start = freq_center - width / 2
+    full_band_end = freq_center + width / 2
+    n_chunks = max(1, math.ceil(width / chunk_size_mhz))
+
+    print(f"\nChunked stacking: {width:.1f} MHz band in {n_chunks} chunks "
+          f"of ~{chunk_size_mhz:.1f} MHz each")
+
+    all_peaks = []
+    chunk_results = []  # (chunk_idx, grid, stack) for combined plot
+
+    for i in range(n_chunks):
+        chunk_start = full_band_start + chunk_size_mhz * i
+        chunk_end = min(chunk_start + chunk_size_mhz, full_band_end)
+        chunk_width = chunk_end - chunk_start
+        chunk_center = (chunk_start + chunk_end) / 2
+
+        chunk_file = output_dir / f'chunk_{i:03d}.json'
+
+        # --- Resume support: skip if chunk file exists ---
+        if chunk_file.exists():
+            try:
+                with open(chunk_file, 'r') as f:
+                    saved = json.load(f)
+                all_peaks.extend(saved.get('peaks', []))
+                chunk_results.append((i, saved))
+                print(f"\n  Chunk {i+1}/{n_chunks}: SKIPPED (already saved, "
+                      f"{len(saved.get('peaks', []))} peaks)")
+                _cb({
+                    'phase': 'chunk_skipped',
+                    'chunk_index': i,
+                    'total_chunks': n_chunks,
+                    'n_peaks': len(saved.get('peaks', [])),
+                })
+                continue
+            except (json.JSONDecodeError, KeyError) as e:
+                print(f"  Chunk {i+1}: corrupt chunk file, reprocessing ({e})")
+                # Fall through to reprocess
+
+        # --- Process this chunk ---
+        print(f"\n  Chunk {i+1}/{n_chunks}: {chunk_center:.4f} MHz "
+              f"({chunk_width:.2f} MHz wide)")
+        _cb({
+            'phase': 'chunk_start',
+            'chunk_index': i,
+            'total_chunks': n_chunks,
+            'chunk_center': chunk_center,
+            'chunk_width': chunk_width,
+        })
+
+        chunk_result = process_single_chunk(
+            target=target,
+            freq_center=chunk_center,
+            width=chunk_width,
+            epoch_labels=epoch_labels,
+            target_ra=target_ra,
+            target_dec=target_dec,
+            n_sigma=n_sigma,
+            telescope=telescope,
+            _cb=_cb,
+            chunk_index=i,
+            total_chunks=n_chunks,
+        )
+
+        if not chunk_result['success']:
+            print(f"  Chunk {i+1} FAILED: {chunk_result.get('error')}")
+            # Save empty result so resume doesn't get stuck
+            chunk_data = {
+                'chunk_index': i,
+                'freq_center': chunk_center,
+                'width': chunk_width,
+                'peaks': [],
+                'stack_median': None,
+                'stack_sigma': None,
+                'error': chunk_result.get('error'),
+            }
+            with open(chunk_file, 'w') as f:
+                json.dump(chunk_data, f, indent=2)
+            _cb({
+                'phase': 'chunk_done',
+                'chunk_index': i,
+                'total_chunks': n_chunks,
+                'n_peaks': 0,
+                'status': 'failed',
+            })
+            continue
+
+        # Save chunk results immediately
+        chunk_data = {
+            'chunk_index': i,
+            'freq_center': chunk_center,
+            'width': chunk_width,
+            'peaks': chunk_result['peaks'],
+            'stack_median': chunk_result['median'],
+            'stack_sigma': chunk_result['sigma'],
+        }
+        with open(chunk_file, 'w') as f:
+            json.dump(chunk_data, f, indent=2)
+        print(f"  Chunk {i+1} saved: {chunk_file} "
+              f"({len(chunk_result['peaks'])} peaks)")
+
+        all_peaks.extend(chunk_result['peaks'])
+        chunk_results.append((i, chunk_data, chunk_result['common_grid'],
+                              chunk_result['stack']))
+
+        _cb({
+            'phase': 'chunk_done',
+            'chunk_index': i,
+            'total_chunks': n_chunks,
+            'n_peaks': len(chunk_result['peaks']),
+        })
+
+    # --- Final merge ---
+    all_peaks.sort(key=lambda p: p['snr'], reverse=True)
+
+    # Compute combined stats from all chunk results
+    # Chunks loaded from disk (resume): (idx, saved_dict)
+    # Chunks processed fresh: (idx, chunk_data, grid, stack)
+    all_medians = []
+    all_sigmas = []
+    for cr in chunk_results:
+        saved = cr[1] if isinstance(cr[1], dict) else cr[1]
+        m = saved.get('stack_median')
+        s = saved.get('stack_sigma')
+        if m is not None:
+            all_medians.append(m)
+        if s is not None:
+            all_sigmas.append(s)
+    combined_median = float(np.mean(all_medians)) if all_medians else 0.0
+    combined_sigma = float(np.mean(all_sigmas)) if all_sigmas else 0.0
+
+    # Determine used epochs from the first successful chunk
+    used_epochs = epoch_labels  # fallback
+    n_epochs = len(used_epochs)
+
+    # Combined plot: concatenate chunk spectra into full-band spectrum
+    if output_png:
+        _cb({'phase': 'plotting', 'output_png': output_png})
+        try:
+            import matplotlib
+            matplotlib.use('Agg')
+            import matplotlib.pyplot as plt
+
+            # Collect non-empty chunk grids/spectra for concatenation
+            chunk_grids = []
+            chunk_stacks = []
+            for cr in chunk_results:
+                if len(cr) >= 4:
+                    grid, stack = cr[2], cr[3]
+                    chunk_grids.append(grid)
+                    chunk_stacks.append(stack)
+
+            if chunk_grids:
+                full_grid = np.concatenate(chunk_grids)
+                full_stack = np.concatenate(chunk_stacks)
+
+                fig, ax = plt.subplots(1, 1, figsize=(16, 4))
+                ax.plot(full_grid, full_stack, linewidth=0.2, color='red')
+                ax.set_ylabel(f'Stacked (N={n_epochs})\nPower')
+                ax.set_xlabel('Barycentric Frequency (MHz)')
+
+                for p in all_peaks[:20]:
+                    ax.axvline(p['freq_mhz'], color='orange',
+                               alpha=0.5, linewidth=0.3)
+
+                fig.suptitle(
+                    f'Incoherent Stack (Chunked) - {target} - '
+                    f'{freq_center - width/2:.0f}-{freq_center + width/2:.0f} MHz '
+                    f'({width:.0f} MHz, {n_chunks} chunks)',
+                    fontsize=14,
+                )
+                plt.tight_layout()
+                plt.savefig(output_png, dpi=150)
+                plt.close(fig)
+                print(f"Combined plot saved: {output_png}")
+        except Exception as e:
+            print(f"Combined plot failed: {e}")
+
+    # Assemble combined results
+    results = {
+        'success': True,
+        'target': target,
+        'freq_center_mhz': freq_center,
+        'width_mhz': width,
+        'epochs': used_epochs,
+        'n_epochs': n_epochs,
+        'snr_improvement': float(np.sqrt(n_epochs)),
+        'n_peaks': len(all_peaks),
+        'peaks': all_peaks[:200],
+        'stack_median': combined_median,
+        'stack_sigma': combined_sigma,
+        'epoch_info': [],
+        'grid_n_bins': sum(len(cr[2]) for cr in chunk_results if len(cr) >= 4) or
+                       int(width / 2.7939677e-6),  # fallback estimate
+        'chunked': True,
+        'n_chunks': n_chunks,
+        'chunk_size_mhz': chunk_size_mhz,
+    }
+
+    # Save combined JSON
+    if output_json:
+        with open(output_json, 'w') as f:
+            json.dump(results, f, indent=2)
+        print(f"Combined results saved: {output_json}")
+
+    _cb({'phase': 'complete',
+         'results': {k: v for k, v in results.items() if k != 'peaks'},
+         'n_peaks': len(all_peaks)})
 
     return results
 
