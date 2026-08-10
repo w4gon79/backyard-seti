@@ -674,9 +674,44 @@ def api_header():
 
 # ─── API: Scan Status ─────────────────────────────────────────────────
 
+def _check_process_alive(pid):
+    """Check if a process with given PID is alive (Windows)."""
+    if not pid:
+        return False
+    try:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            return False
+        kernel32.CloseHandle(handle)
+        return True
+    except Exception:
+        return False
+
+
+def _recover_zombie_scan_state():
+    """If scan_state says active but the process is dead, recover."""
+    if not scan_state['active']:
+        return False
+    pid = scan_state.get('pid')
+    if not pid or not _check_process_alive(pid):
+        ts = datetime.now().strftime('%H:%M:%S')
+        scan_state['log_lines'].append(
+            f'[{ts}] WARN: Process PID {pid} is dead but scan_state was active. Auto-recovering.')
+        scan_state['active'] = False
+        scan_state['pid'] = None
+        scan_state['active_scan_id'] = None
+        return True
+    return False
+
+
 @app.route('/api/scan/status')
 def api_scan_status():
     """Get current scan status with structured progress data."""
+    # ── Zombie scan_state recovery ──
+    _recover_zombie_scan_state()
     # Load scan_meta for additional context
     scan_meta = {}
     if scan_state.get('active_scan_id'):
@@ -974,8 +1009,8 @@ def api_scan_start():
             # Auto-import completed scan into SQLite DB
             try:
                 from db import import_scan_from_json
-                scan_dir = os.path.join(RESULTS_DIR, scan_id)
-                import_stats = import_scan_from_json(scan_dir)
+                _import_dir = os.path.join(RESULTS_DIR, scan_id)
+                import_stats = import_scan_from_json(_import_dir)
                 scan_state['log_lines'].append(
                     f'DB import: {import_stats.get("hits_imported", 0)} hits imported')
             except Exception as e:
@@ -991,6 +1026,7 @@ def api_scan_start():
 @app.route('/api/scan/stop', methods=['POST'])
 def api_scan_stop():
     """Stop a running scan."""
+    _recover_zombie_scan_state()
     if scan_state['pid']:
         try:
             import signal
@@ -1005,8 +1041,18 @@ def api_scan_stop():
 @app.route('/api/scan/resume', methods=['POST'])
 def api_scan_resume():
     """Resume the most recent (or specified) scan from checkpoint."""
+    # Check for zombie state first
+    _recover_zombie_scan_state()
+    
     if scan_state['active']:
-        return jsonify({'error': 'Scan already running, stop it first'}), 409
+        params = request.json or {}
+        if params.get('force'):
+            ts = datetime.now().strftime('%H:%M:%S')
+            scan_state['log_lines'].append(f'[{ts}] WARN: Force-resuming despite active=True')
+            scan_state['active'] = False
+            scan_state['pid'] = None
+        else:
+            return jsonify({'error': 'Scan already running, stop it first'}), 409
 
     params = request.json or {}
     scan_id = params.get('scan_id')
@@ -1092,80 +1138,106 @@ def api_scan_resume():
         scan_state['off_hits'] = 0
         scan_state['file_hits'] = 0
         scan_state['processing_file_count'] = 0
+        _log_ts = lambda: datetime.now().strftime('%H:%M:%S')
+        scan_state['log_lines'].append(f'[{_log_ts()}] RESUME: Starting pipeline...')
+        scan_state['log_lines'].append(f'[{_log_ts()}] RESUME: cmd={" ".join(cmd)}')
+        scan_state['log_lines'].append(f'[{_log_ts()}] RESUME: cwd={SETI_ROOT}')
         try:
             proc = subprocess.Popen(
                 cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 cwd=SETI_ROOT, text=True, bufsize=1,
             )
             scan_state['pid'] = proc.pid
-            for line in proc.stdout:
-                line_stripped = line.rstrip()
-                scan_state['log_lines'].append(line_stripped)
-                scan_state['progress']['last_line'] = line_stripped
+            scan_state['log_lines'].append(f'[{_log_ts()}] RESUME: Process started PID={proc.pid}')
+            # Use readline with liveness check instead of blocking iterator
+            # This prevents the thread from hanging forever if the process
+            # dies but a child process (e.g. turboSETI workers) holds the pipe open
+            _stall_counter = 0
+            while True:
+                line = proc.stdout.readline()
+                if line:
+                    _stall_counter = 0
+                    line_stripped = line.rstrip()
+                    scan_state['log_lines'].append(line_stripped)
+                    scan_state['progress']['last_line'] = line_stripped
 
-                # Parse resume line: 'Resuming from file 4/6, sub-band 0'
-                resume_match = re.search(r'Resuming from file (\d+)/(\d+)', line_stripped)
-                if resume_match:
-                    scan_state['processing_file_count'] = int(resume_match.group(1)) - 1
-                    scan_state['file_total'] = int(resume_match.group(2))
-                # Parse SKIP lines to count skipped files
-                skip_match = re.match(r'\s*SKIP \(complete\):\s*(.+\.h5)', line_stripped)
-                if skip_match:
-                    scan_state['processing_file_count'] += 1
+                    # Parse resume line: 'Resuming from file 4/6, sub-band 0'
+                    resume_match = re.search(r'Resuming from file (\d+)/(\d+)', line_stripped)
+                    if resume_match:
+                        scan_state['processing_file_count'] = int(resume_match.group(1)) - 1
+                        scan_state['file_total'] = int(resume_match.group(2))
+                    # Parse SKIP lines to count skipped files
+                    skip_match = re.match(r'\s*SKIP \(complete\):\s*(.+\.h5)', line_stripped)
+                    if skip_match:
+                        scan_state['processing_file_count'] += 1
 
-                # Fix 2: Parse current filename
-                proc_match = re.match(r'Processing:\s*(.+\.h5)', line_stripped)
-                if proc_match:
-                    new_file = proc_match.group(1).strip()
-                    # Fix 6: On file transition, reset sub-band progress
-                    if scan_state['current_file'] and scan_state['current_file'] != new_file:
-                        scan_state['sub_bands_done'] = 0
-                        scan_state['sub_bands_total'] = 0
-                        scan_state['subband_hits'] = []
-                        scan_state['file_hits'] = 0
-                    scan_state['current_file'] = new_file
-                    scan_state['processing_file_count'] += 1
-                    scan_state['current_file_index'] = scan_state['processing_file_count']
-                files_match = re.search(r'Files:\s*(\d+)', line_stripped)
-                if files_match:
-                    scan_state['file_total'] = int(files_match.group(1))
+                    # Fix 2: Parse current filename
+                    proc_match = re.match(r'Processing:\s*(.+\.h5)', line_stripped)
+                    if proc_match:
+                        new_file = proc_match.group(1).strip()
+                        # Fix 6: On file transition, reset sub-band progress
+                        if scan_state['current_file'] and scan_state['current_file'] != new_file:
+                            scan_state['sub_bands_done'] = 0
+                            scan_state['sub_bands_total'] = 0
+                            scan_state['subband_hits'] = []
+                            scan_state['file_hits'] = 0
+                        scan_state['current_file'] = new_file
+                        scan_state['processing_file_count'] += 1
+                        scan_state['current_file_index'] = scan_state['processing_file_count']
+                    files_match = re.search(r'Files:\s*(\d+)', line_stripped)
+                    if files_match:
+                        scan_state['file_total'] = int(files_match.group(1))
 
-                sub_match = re.match(r'\s*\[(\d+)/(\d+)\]\s+([\d.]+)-([\d.]+)\s+MHz', line_stripped)
-                if sub_match:
-                    scan_state['sub_bands_done'] = int(sub_match.group(1))
-                    scan_state['sub_bands_total'] = int(sub_match.group(2))
-                    scan_state['current_sub_band'] = int(sub_match.group(1)) - 1
-                    scan_state['current_freq_start'] = float(sub_match.group(3))
-                    scan_state['current_freq_stop'] = float(sub_match.group(4))
-                    scan_state['current_freq'] = (scan_state['current_freq_start'] + scan_state['current_freq_stop']) / 2
+                    sub_match = re.match(r'\s*\[(\d+)/(\d+)\]\s+([\d.]+)-([\d.]+)\s+MHz', line_stripped)
+                    if sub_match:
+                        scan_state['sub_bands_done'] = int(sub_match.group(1))
+                        scan_state['sub_bands_total'] = int(sub_match.group(2))
+                        scan_state['current_sub_band'] = int(sub_match.group(1)) - 1
+                        scan_state['current_freq_start'] = float(sub_match.group(3))
+                        scan_state['current_freq_stop'] = float(sub_match.group(4))
+                        scan_state['current_freq'] = (scan_state['current_freq_start'] + scan_state['current_freq_stop']) / 2
 
-                hit_match = re.match(r'\s*->\s*(\d+)\s*hits', line_stripped)
-                if hit_match:
-                    n_hits = int(hit_match.group(1))
-                    scan_state['total_hits'] += n_hits
-                    scan_state['file_hits'] += n_hits
-                    scan_state['subband_hits'].append(n_hits)
-                    # Fix 3: ON/OFF classification
-                    cur_file = scan_state.get('current_file', '')
-                    if '_S_' in cur_file:
-                        scan_state['on_hits'] += n_hits
-                    elif '_R_' in cur_file:
-                        scan_state['off_hits'] += n_hits
+                    hit_match = re.match(r'\s*->\s*(\d+)\s*hits', line_stripped)
+                    if hit_match:
+                        n_hits = int(hit_match.group(1))
+                        scan_state['total_hits'] += n_hits
+                        scan_state['file_hits'] += n_hits
+                        scan_state['subband_hits'].append(n_hits)
+                        # Fix 3: ON/OFF classification
+                        cur_file = scan_state.get('current_file', '')
+                        if '_S_' in cur_file:
+                            scan_state['on_hits'] += n_hits
+                        elif '_R_' in cur_file:
+                            scan_state['off_hits'] += n_hits
 
-                top_match = re.search(r'Top hit found!.*SNR\s+([\d.]+).*Drift Rate\s+([-\d.]+).*index\s+(\d+)', line_stripped)
-                if top_match:
-                    hit = {
-                        'snr': float(top_match.group(1)),
-                        'drift_rate': float(top_match.group(2)),
-                        'index': int(top_match.group(3)),
-                        'coarse_chan': None,
-                    }
-                    cc_match = re.search(r'find_doppler\.(\d+)', line_stripped)
-                    if cc_match:
-                        hit['coarse_chan'] = int(cc_match.group(1))
-                    scan_state['recent_hits'].append(hit)
-                    if len(scan_state['recent_hits']) > 50:
-                        scan_state['recent_hits'] = scan_state['recent_hits'][-50:]
+                    top_match = re.search(r'Top hit found!.*SNR\s+([\d.]+).*Drift Rate\s+([-\d.]+).*index\s+(\d+)', line_stripped)
+                    if top_match:
+                        hit = {
+                            'snr': float(top_match.group(1)),
+                            'drift_rate': float(top_match.group(2)),
+                            'index': int(top_match.group(3)),
+                            'coarse_chan': None,
+                        }
+                        cc_match = re.search(r'find_doppler\.(\d+)', line_stripped)
+                        if cc_match:
+                            hit['coarse_chan'] = int(cc_match.group(1))
+                        scan_state['recent_hits'].append(hit)
+                        if len(scan_state['recent_hits']) > 50:
+                            scan_state['recent_hits'] = scan_state['recent_hits'][-50:]
+                else:
+                    # No data on readline — check if process is done
+                    rc = proc.poll()
+                    if rc is not None:
+                        scan_state['log_lines'].append(
+                            f'[{_log_ts()}] RESUME: Process exited with code {rc}')
+                        break
+                    # Process still alive but no output — wait a bit
+                    _stall_counter += 1
+                    time.sleep(0.2)
+                    # If we've been stalled for >60s with no output, log it
+                    if _stall_counter % 300 == 0:  # every 60s
+                        scan_state['log_lines'].append(
+                            f'[{_log_ts()}] RESUME: Process PID={proc.pid} alive but no output for {_stall_counter * 0.2:.0f}s')
             proc.wait()
         except Exception as e:
             scan_state['log_lines'].append(f'ERROR: {e}')
@@ -1180,8 +1252,8 @@ def api_scan_resume():
             # Auto-import completed scan into SQLite DB
             try:
                 from db import import_scan_from_json
-                scan_dir = os.path.join(RESULTS_DIR, scan_id)
-                import_stats = import_scan_from_json(scan_dir)
+                _import_dir = os.path.join(RESULTS_DIR, scan_id)
+                import_stats = import_scan_from_json(_import_dir)
                 scan_state['log_lines'].append(
                     f'DB import: {import_stats.get("hits_imported", 0)} hits imported')
             except Exception as e:
