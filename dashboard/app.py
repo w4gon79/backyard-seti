@@ -2556,8 +2556,8 @@ def api_stack_run():
             job_state['progress'] = 5 + int(70 * idx / total)
             job_state['progress_msg'] = f"Epoch {label} ({idx+1}/{total}): loading data..."
         elif phase == 'file_load':
-            fname = status.get('filename', '?')
-            ftype = status.get('file_type', '')
+            fname = status.get('file', status.get('filename', '?'))
+            ftype = status.get('type', status.get('file_type', ''))
             job_state['progress_msg'] = f"Loading {ftype}: {fname}..."
         elif phase == 'epoch_done':
             idx = status.get('epoch_index', 0)
@@ -2800,6 +2800,13 @@ def api_stack_history():
 
 
 # ─── Main ─────────────────────────────────────────────────────────────
+
+# Ensure DB schema is up to date (creates stack_jobs table if missing)
+try:
+    from db import init_db
+    init_db()
+except Exception as _db_err:
+    print(f"  WARNING: DB init error: {_db_err}")
 
 if __name__ == '__main__':
     import numpy as np  # needed by header endpoint
