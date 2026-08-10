@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>📊 Incoherent Stack - Phase 2C</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=8">
+    <link rel="stylesheet" href="/static/css/style.css?v=31">
+    <link rel="stylesheet" href="/static/css/stack.css?v=1">
+    <!-- Plotly for waterfall plots -->
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+</head>
+<body>
+<div id="stack-app">
+
+    <!-- Header -->
+    <header class="stack-header">
+        <div class="stack-header-left">
+            <a href="/" class="back-link">← Dashboard</a>
+            <h1>📊 Incoherent Stack <span class="phase-badge">Phase 2C</span></h1>
+        </div>
+        <div class="stack-header-right">
+            <span id="stack-snr-badge" class="snr-improvement-badge" style="display:none;">
+                SNR Gain: <strong>√N</strong>
+            </span>
+        </div>
+    </header>
+
+    <!-- Main Layout -->
+    <div class="stack-row">
+
+        <!-- Left Panel: Controls -->
+        <div class="stack-panel stack-panel-left">
+            <div class="panel-header">⚙️ Stack Parameters</div>
+            <div class="stack-controls">
+
+                <div class="control-group">
+                    <label for="stack-target">Target</label>
+                    <input type="text" id="stack-target" value="PROXCEN" placeholder="e.g. PROXCEN">
+                </div>
+
+                <div class="control-row">
+                    <div class="control-group">
+                        <label for="stack-freq-center">Frequency Center (MHz)</label>
+                        <input type="number" id="stack-freq-center" value="3000" step="0.1" min="0">
+                    </div>
+                    <div class="control-group">
+                        <label for="stack-width">Width (MHz)</label>
+                        <input type="number" id="stack-width" value="10" step="0.1" min="0">
+                    </div>
+                </div>
+
+                <div class="preset-buttons">
+                    <button class="btn-preset" data-width="10" data-center="3000">10 MHz</button>
+                    <button class="btn-preset" data-width="50" data-center="3000">50 MHz</button>
+                    <button class="btn-preset" data-width="100" data-center="3000">100 MHz</button>
+                    <button class="btn-preset" data-width="580" data-center="3034">Full Band</button>
+                </div>
+
+                <div class="control-group">
+                    <label for="stack-n-sigma">n_sigma Threshold</label>
+                    <input type="number" id="stack-n-sigma" value="5.0" step="0.5" min="1">
+                </div>
+
+                <div class="control-group">
+                    <label>Epochs</label>
+                    <div id="stack-epochs-list" class="epochs-list">
+                        <div class="epochs-loading">
+                            <div class="spinner-sm"></div>
+                            <span>Loading epochs...</span>
+                        </div>
+                    </div>
+                    <div class="epoch-actions">
+                        <button id="stack-epoch-all" class="btn-small">All</button>
+                        <button id="stack-epoch-none" class="btn-small">None</button>
+                        <span id="stack-epoch-count" class="epoch-count">0 selected</span>
+                    </div>
+                </div>
+
+                <button id="stack-run-btn" class="btn-primary btn-run">▶ Run Stack</button>
+
+                <div id="stack-progress-wrapper" class="stack-progress-wrapper" style="display:none;">
+                    <div class="progress-bar">
+                        <div id="stack-progress-fill" class="progress-fill" style="width:0%;"></div>
+                    </div>
+                    <div id="stack-status-text" class="stack-status-text">Idle</div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- Right Panel: Results -->
+        <div class="stack-panel stack-panel-right">
+            <div class="panel-header">
+                <span>📋 Results</span>
+                <span id="stack-result-badge" class="result-badge" style="display:none;"></span>
+            </div>
+            <div class="stack-results">
+
+                <!-- Idle placeholder -->
+                <div id="stack-idle" class="stack-idle">
+                    <div class="stack-idle-icon">📊</div>
+                    <h3>Incoherent Stacking</h3>
+                    <p>Incoherent stacking combines multiple observation epochs of the same target
+                       by aligning and averaging their frequency spectra. This suppresses random
+                       noise (which decreases as <strong>1/√N</strong>) while preserving narrowband
+                       signals that persist across epochs — potentially revealing signals too weak
+                       to detect in any single observation.</p>
+                    <p class="stack-idle-hint">Configure parameters on the left and click <strong>Run Stack</strong> to begin.</p>
+                </div>
+
+                <!-- Running view -->
+                <div id="stack-running" class="stack-running" style="display:none;">
+                    <div class="stack-running-spinner">
+                        <div class="spinner-lg"></div>
+                    </div>
+                    <div id="stack-running-status" class="stack-running-status">Starting...</div>
+                    <div class="progress-bar">
+                        <div id="stack-running-fill" class="progress-fill" style="width:0%;"></div>
+                    </div>
+                    <div id="stack-running-epoch" class="stack-running-epoch"></div>
+                </div>
+
+                <!-- Complete view -->
+                <div id="stack-complete" class="stack-complete" style="display:none;">
+
+                    <!-- Summary stats -->
+                    <div id="stack-summary" class="stack-summary"></div>
+
+                    <!-- Plot -->
+                    <div class="stack-plot-section">
+                        <div class="stack-subsection-header">📈 Stack Plot</div>
+                        <img id="stack-plot-img" class="stack-plot-img" alt="Stack plot" style="display:none;">
+                    </div>
+
+                    <!-- Per-epoch noise table -->
+                    <div class="stack-epoch-table-section">
+                        <div class="stack-subsection-header">Per-Epoch Noise</div>
+                        <div class="stack-epoch-table-wrap">
+                            <table class="stack-epoch-table">
+                                <thead>
+                                    <tr>
+                                        <th>Epoch</th>
+                                        <th>σ (noise)</th>
+                                        <th>Ratio vs stack σ</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="stack-epoch-tbody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Peaks table -->
+                    <div class="stack-peaks-section">
+                        <div class="stack-subsection-header">
+                            <span>🌟 Top Peaks</span>
+                            <span id="stack-peak-count" class="peak-count-badge"></span>
+                        </div>
+                        <div class="stack-peaks-wrap">
+                            <table class="stack-peaks-table" id="stack-peaks-table">
+                                <thead>
+                                    <tr>
+                                        <th data-sort="index" class="sortable">#</th>
+                                        <th data-sort="freq" class="sortable sorted-desc">Freq (MHz) ▼</th>
+                                        <th data-sort="snr" class="sortable">SNR</th>
+                                        <th data-sort="width" class="sortable">Width (chans)</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="stack-peaks-tbody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                </div> <!-- /complete -->
+
+                <!-- Error view -->
+                <div id="stack-error" class="stack-error-view" style="display:none;">
+                    <div class="stack-error-icon">⚠️</div>
+                    <div id="stack-error-msg" class="stack-error-msg"></div>
+                </div>
+
+            </div>
+        </div>
+
+    </div>
+
+    <!-- History -->
+    <div class="stack-panel stack-history-panel">
+        <div class="panel-header">
+            <span>📜 Stack History</span>
+            <button id="stack-refresh-history" class="btn-small">Refresh</button>
+        </div>
+        <div id="stack-history-list" class="stack-history-list">
+            <div class="history-placeholder">No previous stacks. Run one!</div>
+        </div>
+    </div>
+
+</div>
+
+<!-- Waterfall Modal -->
+<div id="waterfall-modal" class="modal-overlay" style="display:none;">
+    <div class="modal-content">
+        <div class="modal-header">
+            <span id="waterfall-title">Waterfall View</span>
+            <button id="waterfall-close" class="modal-close">✕</button>
+        </div>
+        <div id="waterfall-meta" class="waterfall-meta"></div>
+        <div id="waterfall-body" style="width:100%;">
+            <div id="waterfall-plot" style="width:100%;height:400px;"></div>
+        </div>
+    </div>
+</div>
+
+<script src="/static/js/stack.js?v=1"></script>
+</body>
+</html>

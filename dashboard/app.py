@@ -2427,6 +2427,356 @@ def api_db_cross_epoch_load(result_id):
         return jsonify({'error': str(e)}), 500
 
 
+# ─── API: Incoherent Stack ────────────────────────────────────────────
+
+import uuid as _uuid
+import threading as _threading
+
+# In-memory job tracker for stack runs
+_stack_jobs = {}  # job_id -> {thread, status, progress, msg, result}
+
+# Ensure stack output directory exists
+STACK_OUTPUT_DIR = os.path.join(SETI_ROOT, 'data', 'stack_results')
+os.makedirs(STACK_OUTPUT_DIR, exist_ok=True)
+
+
+@app.route('/stack')
+def stack_page():
+    """Serve the Incoherent Stack page."""
+    return render_template('stack.html')
+
+
+@app.route('/api/stack/epochs')
+def api_stack_epochs():
+    """List available epochs for stacking."""
+    try:
+        from incoherent_stack import get_available_epochs, EPOCHS
+        epochs = get_available_epochs()
+        # Build a summary list with file availability info
+        result = []
+        for label, info in sorted(epochs.items()):
+            result.append({
+                'label': label,
+                'mjd_int': info['mjd_int'],
+                'n_pairs': len(info['seqs']),
+            })
+        return jsonify({'epochs': result})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/stack/run', methods=['POST'])
+def api_stack_run():
+    """Start an incoherent stack job in the background.
+
+    POST body JSON:
+        target:       str   (e.g. 'PROXCEN')
+        freq_center:  float (MHz)
+        width:        float (MHz, 0 = full band)
+        epochs:       list of str
+        n_sigma:      float (default 5.0)
+        telescope:    str   (default 'parkes')
+    """
+    params = request.json or {}
+    target = params.get('target', 'PROXCEN')
+    freq_center = params.get('freq_center', 3000.0)
+    width = params.get('width', 10.0)
+    epochs = params.get('epochs', [])
+    n_sigma = params.get('n_sigma', 5.0)
+    telescope = params.get('telescope', 'parkes')
+
+    if not epochs:
+        try:
+            from incoherent_stack import get_available_epochs
+            epochs = list(get_available_epochs().keys())
+        except Exception:
+            epochs = []
+
+    if len(epochs) < 2:
+        return jsonify({'error': 'Need at least 2 epochs for stacking'}), 400
+
+    # Full band: use the overlap range across epochs
+    if width == 0 or width is None:
+        freq_center = 3034.0
+        width = 580.0
+
+    job_id = str(_uuid.uuid4())[:8]
+
+    # Output paths
+    plot_path = os.path.join(STACK_OUTPUT_DIR, f'stack_{job_id}.png')
+    json_path = os.path.join(STACK_OUTPUT_DIR, f'stack_{job_id}.json')
+
+    # Job state
+    job_state = {
+        'job_id': job_id,
+        'status': 'running',
+        'progress': 0,
+        'progress_msg': 'Initializing...',
+        'result': None,
+        'target': target,
+        'freq_center': freq_center,
+        'width': width,
+        'epochs': epochs,
+        'n_sigma': n_sigma,
+    }
+    _stack_jobs[job_id] = job_state
+
+    # Progress callback
+    def progress_cb(status):
+        phase = status.get('phase', '')
+        if phase == 'start':
+            job_state['progress'] = 5
+            job_state['progress_msg'] = 'Starting stack job...'
+        elif phase == 'epoch_start':
+            idx = status.get('epoch_index', 0)
+            total = status.get('total_epochs', 1)
+            label = status.get('epoch_label', '?')
+            job_state['progress'] = 5 + int(70 * idx / total)
+            job_state['progress_msg'] = f"Epoch {label} ({idx+1}/{total}): loading data..."
+        elif phase == 'file_load':
+            fname = status.get('filename', '?')
+            ftype = status.get('file_type', '')
+            job_state['progress_msg'] = f"Loading {ftype}: {fname}..."
+        elif phase == 'epoch_done':
+            idx = status.get('epoch_index', 0)
+            total = status.get('total_epochs', 1)
+            label = status.get('epoch_label', '?')
+            job_state['progress'] = 5 + int(70 * (idx + 1) / total)
+            job_state['progress_msg'] = f"Epoch {label} done."
+        elif phase == 'stacking':
+            job_state['progress'] = 80
+            job_state['progress_msg'] = 'Stacking epochs...'
+        elif phase == 'peak_finding':
+            job_state['progress'] = 88
+            job_state['progress_msg'] = 'Finding peaks...'
+        elif phase == 'plotting':
+            job_state['progress'] = 95
+            job_state['progress_msg'] = 'Generating plot...'
+        elif phase == 'complete':
+            job_state['progress'] = 100
+            job_state['progress_msg'] = 'Complete.'
+        elif phase == 'error':
+            job_state['status'] = 'error'
+            job_state['progress_msg'] = status.get('message', 'Unknown error')
+
+    # Run in background thread
+    def run_thread():
+        try:
+            from incoherent_stack import run_stack_job
+            result = run_stack_job({
+                'target': target,
+                'freq_center': freq_center,
+                'width': width,
+                'epochs': epochs,
+                'n_sigma': n_sigma,
+                'telescope': telescope,
+                'output_png': plot_path,
+                'output_json': json_path,
+            }, progress_callback=progress_cb)
+
+            job_state['result'] = result
+            if result.get('success'):
+                job_state['status'] = 'complete'
+            else:
+                job_state['status'] = 'error'
+                job_state['progress_msg'] = result.get('error', 'Unknown error')
+
+            # Persist to SQLite
+            try:
+                from db import get_db
+                conn = get_db()
+                conn.execute('''
+                    INSERT INTO stack_jobs
+                    (job_id, target, freq_center, width_mhz, epochs, n_epochs,
+                     n_sigma, status, progress, progress_msg, peaks_json,
+                     plot_path, stack_median, stack_sigma, snr_improvement, completed_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                ''', (
+                    job_id, target, freq_center, width,
+                    json.dumps(epochs), len(epochs), n_sigma,
+                    job_state['status'], job_state['progress'],
+                    job_state['progress_msg'],
+                    json.dumps(result.get('peaks', [])[:200]),
+                    plot_path if os.path.isfile(plot_path) else None,
+                    result.get('stack_median'), result.get('stack_sigma'),
+                    result.get('snr_improvement'),
+                ))
+                conn.commit()
+                conn.close()
+            except Exception as db_err:
+                print(f"  Stack DB persist error: {db_err}")
+
+        except Exception as e:
+            job_state['status'] = 'error'
+            job_state['progress_msg'] = str(e)
+            import traceback
+            traceback.print_exc()
+
+    thread = _threading.Thread(target=run_thread, daemon=True)
+    job_state['thread'] = thread
+    thread.start()
+
+    return jsonify({
+        'job_id': job_id,
+        'status': 'running',
+        'target': target,
+        'freq_center': freq_center,
+        'width': width,
+        'epochs': epochs,
+        'n_sigma': n_sigma,
+    })
+
+
+@app.route('/api/stack/status/<job_id>')
+def api_stack_status(job_id):
+    """Poll stack job progress."""
+    job = _stack_jobs.get(job_id)
+    if not job:
+        # Try loading from DB
+        try:
+            from db import get_db
+            conn = get_db()
+            row = conn.execute(
+                'SELECT * FROM stack_jobs WHERE job_id = ?', (job_id,)).fetchone()
+            conn.close()
+            if row:
+                return jsonify({
+                    'job_id': job_id,
+                    'status': row['status'],
+                    'progress': row['progress'],
+                    'progress_msg': row['progress_msg'],
+                    'target': row['target'],
+                    'freq_center': row['freq_center'],
+                    'width': row['width_mhz'],
+                    'n_epochs': row['n_epochs'],
+                    'n_peaks': len(json.loads(row['peaks_json'] or '[]')),
+                })
+        except Exception:
+            pass
+        return jsonify({'error': 'Job not found'}), 404
+
+    resp = {
+        'job_id': job_id,
+        'status': job['status'],
+        'progress': job['progress'],
+        'progress_msg': job['progress_msg'],
+        'target': job.get('target'),
+        'freq_center': job.get('freq_center'),
+        'width': job.get('width'),
+        'epochs': job.get('epochs'),
+    }
+
+    if job['status'] == 'complete' and job.get('result'):
+        r = job['result']
+        resp.update({
+            'n_peaks': len(r.get('peaks', [])),
+            'n_epochs': r.get('n_epochs'),
+            'snr_improvement': r.get('snr_improvement'),
+            'stack_median': r.get('stack_median'),
+            'stack_sigma': r.get('stack_sigma'),
+            'peaks': r.get('peaks', [])[:50],
+            'epoch_info': r.get('epoch_info', []),
+        })
+    elif job['status'] == 'error':
+        resp['error'] = job.get('progress_msg', 'Unknown error')
+
+    return jsonify(resp)
+
+
+@app.route('/api/stack/results/<job_id>')
+def api_stack_results(job_id):
+    """Get full results for a completed stack job."""
+    job = _stack_jobs.get(job_id)
+    if not job:
+        return jsonify({'error': 'Job not found'}), 404
+
+    if job['status'] != 'complete':
+        return jsonify({'error': 'Job not complete', 'status': job['status']}), 400
+
+    r = job['result']
+    if not r:
+        return jsonify({'error': 'No result data'}), 500
+
+    return jsonify({
+        'job_id': job_id,
+        'success': True,
+        'target': r.get('target'),
+        'freq_center_mhz': r.get('freq_center_mhz'),
+        'width_mhz': r.get('width_mhz'),
+        'n_epochs': r.get('n_epochs'),
+        'used_epochs': r.get('used_epochs'),
+        'snr_improvement': r.get('snr_improvement'),
+        'stack_median': r.get('stack_median'),
+        'stack_sigma': r.get('stack_sigma'),
+        'peaks': r.get('peaks', []),
+        'epoch_info': r.get('epoch_info', []),
+        'grid_n_bins': r.get('grid_n_bins'),
+    })
+
+
+@app.route('/api/stack/plot/<job_id>')
+def api_stack_plot(job_id):
+    """Serve the plot PNG for a stack job."""
+    # Try in-memory job first
+    job = _stack_jobs.get(job_id)
+    if job:
+        plot_path = os.path.join(STACK_OUTPUT_DIR, f'stack_{job_id}.png')
+    else:
+        # Try DB lookup
+        try:
+            from db import get_db
+            conn = get_db()
+            row = conn.execute(
+                'SELECT plot_path FROM stack_jobs WHERE job_id = ?', (job_id,)).fetchone()
+            conn.close()
+            if row and row['plot_path']:
+                plot_path = row['plot_path']
+            else:
+                plot_path = os.path.join(STACK_OUTPUT_DIR, f'stack_{job_id}.png')
+        except Exception:
+            plot_path = os.path.join(STACK_OUTPUT_DIR, f'stack_{job_id}.png')
+
+    if os.path.isfile(plot_path):
+        return send_from_directory(os.path.dirname(plot_path), os.path.basename(plot_path))
+    return jsonify({'error': 'Plot not found'}), 404
+
+
+@app.route('/api/stack/history')
+def api_stack_history():
+    """List past stack jobs from SQLite."""
+    try:
+        from db import get_db
+        conn = get_db()
+        rows = conn.execute('''
+            SELECT job_id, target, freq_center, width_mhz, epochs, n_epochs,
+                   n_sigma, status, n_peaks as peak_count_hint,
+                   stack_sigma, snr_improvement, created_at, completed_at
+            FROM stack_jobs
+            ORDER BY created_at DESC
+            LIMIT 50
+        ''').fetchall()
+        conn.close()
+        results = []
+        for r in rows:
+            results.append({
+                'job_id': r['job_id'],
+                'target': r['target'],
+                'freq_center': r['freq_center'],
+                'width_mhz': r['width_mhz'],
+                'epochs': json.loads(r['epochs'] or '[]'),
+                'n_epochs': r['n_epochs'],
+                'n_sigma': r['n_sigma'],
+                'status': r['status'],
+                'stack_sigma': r['stack_sigma'],
+                'snr_improvement': r['snr_improvement'],
+                'created_at': r['created_at'],
+                'completed_at': r['completed_at'],
+            })
+        return jsonify({'jobs': results})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 # ─── Main ─────────────────────────────────────────────────────────────
 
 if __name__ == '__main__':

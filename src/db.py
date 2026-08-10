@@ -99,6 +99,29 @@ def init_db(db_path=None):
             );
 
             CREATE INDEX IF NOT EXISTS idx_cross_epoch_lookup ON cross_epoch_results(scan_ids, min_snr, tolerance_hz, min_epochs);
+
+            CREATE TABLE IF NOT EXISTS stack_jobs (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_id          TEXT UNIQUE,
+                target          TEXT,
+                freq_center     REAL,
+                width_mhz       REAL,
+                epochs          TEXT,
+                n_epochs        INTEGER,
+                n_sigma         REAL,
+                status          TEXT DEFAULT 'pending',
+                progress        INTEGER DEFAULT 0,
+                progress_msg    TEXT,
+                peaks_json      TEXT,
+                plot_path       TEXT,
+                stack_median    REAL,
+                stack_sigma     REAL,
+                snr_improvement REAL,
+                created_at      TEXT DEFAULT (datetime('now')),
+                completed_at    TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_stack_jobs_status ON stack_jobs(status);
         ''')
         conn.commit()
     finally:
