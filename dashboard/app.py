@@ -1782,17 +1782,34 @@ def api_barycentric_results(scan_id):
     })
 
 
+# ─── Cross-Epoch Cache Helpers ──────────────────────────────────────
+
+def _cross_epoch_cache_dir():
+    """Return the cross-epoch cache directory, creating it if needed."""
+    cache_dir = os.path.join(SETI_ROOT, 'results', 'cross_epoch_cache')
+    os.makedirs(cache_dir, exist_ok=True)
+    return cache_dir
+
+def _cross_epoch_cache_filename(scan_ids, min_snr, tol_hz, min_epochs):
+    """Build a deterministic cache filename for given parameters."""
+    ids_str = '_'.join(scan_ids)
+    # Sanitize: keep alphanumerics, underscores, hyphens
+    ids_safe = re.sub(r'[^A-Za-z0-9_-]', '', ids_str)
+    return f'cross_epoch_{ids_safe}_snr{min_snr}_tol{tol_hz}_ep{min_epochs}.json'
+
+
 @app.route('/api/barycentric/cross-epoch', methods=['POST'])
 def api_barycentric_cross_epoch():
     """Run cross-epoch comparison across multiple scans.
     
-    Body: {scan_ids, freq_tolerance_hz?, min_epochs?}
+    Body: {scan_ids, freq_tolerance_hz?, min_epochs?, min_snr?, force_rerun?}
     """
     params = request.json or {}
     scan_ids = params.get('scan_ids', [])
     freq_tolerance_hz = params.get('freq_tolerance_hz', 10)
     min_epochs = params.get('min_epochs', 2)
     min_snr = params.get('min_snr', 0)
+    force_rerun = params.get('force_rerun', False)
     
     if not scan_ids or len(scan_ids) < 2:
         return jsonify({'error': 'Need at least 2 scan_ids for cross-epoch comparison'}), 400
@@ -1804,6 +1821,21 @@ def api_barycentric_cross_epoch():
             return jsonify({'error': f'Scan not found: {sid}'}), 404
         scan_dirs.append(sd)
     
+    # Check cache first (unless force_rerun)
+    cache_dir = _cross_epoch_cache_dir()
+    cache_file = _cross_epoch_cache_filename(scan_ids, min_snr, freq_tolerance_hz, min_epochs)
+    cache_path = os.path.join(cache_dir, cache_file)
+    
+    if not force_rerun and os.path.isfile(cache_path):
+        try:
+            with open(cache_path) as f:
+                result = json.load(f)
+            result['summary']['from_cache'] = True
+            result['summary']['cache_file'] = cache_file
+            return jsonify(result)
+        except Exception:
+            pass  # Cache read failed, fall through to recompute
+    
     try:
         from barycentric_correct import cross_epoch_match
         
@@ -1813,11 +1845,132 @@ def api_barycentric_cross_epoch():
             min_epochs=int(min_epochs),
             min_snr=float(min_snr),
         )
+        result['summary']['from_cache'] = False
+        result['summary']['cache_file'] = cache_file
+        
+        # Save to cache
+        try:
+            with open(cache_path, 'w') as f:
+                json.dump(result, f)
+        except Exception as e:
+            print(f'[WARNING] Failed to cache cross-epoch result: {e}')
         
         return jsonify(result)
     except Exception as e:
         import traceback
         return jsonify({'error': str(e), 'traceback': traceback.format_exc()[-500:]}), 500
+
+
+@app.route('/api/barycentric/cross-epoch/history')
+def api_barycentric_cross_epoch_history():
+    """List all cached cross-epoch runs, newest first."""
+    cache_dir = _cross_epoch_cache_dir()
+    runs = []
+    
+    for entry in os.listdir(cache_dir):
+        if not entry.endswith('.json'):
+            continue
+        if not re.match(r'^[A-Za-z0-9_-]+\.json$', entry):
+            continue
+        full_path = os.path.join(cache_dir, entry)
+        try:
+            mtime = os.path.getmtime(full_path)
+            # Try to load summary from the cached file
+            with open(full_path) as f:
+                data = json.load(f)
+            summary = data.get('summary', {})
+            runs.append({
+                'filename': entry,
+                'timestamp': datetime.fromtimestamp(mtime).isoformat(),
+                'scan_ids': summary.get('scan_ids', []),
+                'min_snr': summary.get('min_snr', 0),
+                'tolerance_hz': summary.get('freq_tolerance_hz', 10),
+                'min_epochs': summary.get('min_epochs', 2),
+                'candidate_count': summary.get('total_candidates', 0),
+                'total_scans': summary.get('total_scans', 0),
+            })
+        except Exception:
+            continue
+    
+    runs.sort(key=lambda r: r.get('timestamp', ''), reverse=True)
+    return jsonify({'runs': runs})
+
+
+@app.route('/api/barycentric/cross-epoch/load')
+def api_barycentric_cross_epoch_load():
+    """Load a specific cached cross-epoch result by filename."""
+    filename = request.args.get('file', '')
+    if not filename or not re.match(r'^[A-Za-z0-9_-]+\.json$', filename):
+        return jsonify({'error': 'Invalid filename'}), 400
+    
+    cache_path = os.path.join(_cross_epoch_cache_dir(), filename)
+    if not os.path.isfile(cache_path):
+        return jsonify({'error': 'Cached result not found'}), 404
+    
+    try:
+        with open(cache_path) as f:
+            result = json.load(f)
+        result['summary']['from_cache'] = True
+        result['summary']['cache_file'] = filename
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/barycentric/corrected/<scan_id>')
+def api_barycentric_corrected_load(scan_id):
+    """Load pre-computed barycentric correction results for a scan."""
+    if not re.match(r'^[A-Za-z0-9_-]+$', scan_id):
+        return jsonify({'error': 'Invalid scan_id'}), 400
+    
+    scan_dir = _get_scan_dir(scan_id)
+    if not scan_dir:
+        return jsonify({'error': 'Scan not found'}), 404
+    
+    combined_path = os.path.join(scan_dir, 'barycentric', 'combined_corrected.json')
+    if not os.path.isfile(combined_path):
+        return jsonify({'error': 'No barycentric correction found for this scan'}), 404
+    
+    # Use existing paginated results endpoint logic
+    page = request.args.get('page', default=1, type=int)
+    per_page = request.args.get('per_page', default=500, type=int)
+    snr_min = request.args.get('snr_min', default=0, type=float)
+    
+    try:
+        with open(combined_path) as f:
+            data = json.load(f)
+        
+        hits = data.get('hits', [])
+        # Apply SNR filter
+        if snr_min > 0:
+            hits = [h for h in hits if h.get('snr', 0) >= snr_min]
+        
+        total_filtered = len(hits)
+        total_hits = len(data.get('hits', []))
+        total_pages = max(1, (total_filtered + per_page - 1) // per_page)
+        start = (page - 1) * per_page
+        page_hits = hits[start:start + per_page]
+        
+        # Count corrected files
+        files_set = set()
+        for h in data.get('hits', []):
+            sf = h.get('source_file', '')
+            if sf:
+                files_set.add(sf)
+        
+        return jsonify({
+            'hits': page_hits,
+            'total_hits': total_hits,
+            'total_filtered': total_filtered,
+            'page': page,
+            'per_page': per_page,
+            'total_pages': total_pages,
+            'target': data.get('target', ''),
+            'mjd': data.get('mjd', 0),
+            'files_corrected': len(files_set),
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/barycentric/targets')

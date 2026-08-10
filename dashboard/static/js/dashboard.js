@@ -62,6 +62,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Barycentric init
     loadBarycentricTargets();
     updateBaryScanCheckboxes();
+    loadCrossEpochHistory();
 
     logInterval = setInterval(pollScanStatus, 3000);
     pollScanStatus();  // Fire immediately so button states sync on page load
@@ -1872,6 +1873,8 @@ async function runCrossEpoch() {
         document.getElementById('bary-results-container').style.display = 'block';
         switchBaryTab('cross');
         renderCrossEpochResults(data);
+        // Refresh history dropdown with the new cached run
+        loadCrossEpochHistory();
     } catch(e) {
         alert('Error: ' + e.message);
     } finally {
@@ -1928,4 +1931,89 @@ function switchBaryTab(tab) {
     document.getElementById('bary-tab-' + tab).classList.add('active');
     document.getElementById('bary-corrected-panel').style.display = (tab === 'corrected') ? 'block' : 'none';
     document.getElementById('bary-cross-panel').style.display = (tab === 'cross') ? 'block' : 'none';
+}
+
+// ── Cross-Epoch History & Persistence ───────────────────────────────
+
+async function loadCrossEpochHistory() {
+    var select = document.getElementById('bary-cross-history');
+    if (!select) return;
+    
+    try {
+        var resp = await fetch('/api/barycentric/cross-epoch/history');
+        var data = await resp.json();
+        var runs = data.runs || [];
+        
+        if (runs.length === 0) {
+            select.innerHTML = '<option value="">No previous runs</option>';
+            return;
+        }
+        
+        var html = '<option value="">-- Select previous run --</option>';
+        for (var i = 0; i < runs.length; i++) {
+            var r = runs[i];
+            var label = (r.timestamp || '').substring(0, 19).replace('T', ' ');
+            label += ' | SNR ' + (r.min_snr || 0);
+            label += ' | tol ' + (r.tolerance_hz || 10);
+            label += ' | ' + (r.candidate_count || 0) + ' cand';
+            html += '<option value="' + r.filename + '">' + escapeHtml(label) + '</option>';
+        }
+        select.innerHTML = html;
+        
+        // Auto-load most recent run
+        loadCrossEpochRun(runs[0].filename);
+    } catch(e) {
+        console.error('Error loading cross-epoch history:', e);
+        select.innerHTML = '<option value="">Error loading history</option>';
+    }
+}
+
+async function loadCrossEpochRun(filename) {
+    if (!filename) return;
+    try {
+        var resp = await fetch('/api/barycentric/cross-epoch/load?file=' + encodeURIComponent(filename));
+        var data = await resp.json();
+        if (data.error) {
+            alert(data.error);
+            return;
+        }
+        document.getElementById('bary-results-container').style.display = 'block';
+        switchBaryTab('cross');
+        renderCrossEpochResults(data);
+    } catch(e) {
+        alert('Error loading cached run: ' + e.message);
+    }
+}
+
+// ── Barycentric Corrected Hits: Load Cached ────────────────────────
+
+async function loadCachedCorrected() {
+    if (!currentScanId) {
+        alert('Select a scan first.');
+        return;
+    }
+    var statusDiv = document.getElementById('bary-status');
+    statusDiv.innerHTML = '<span style="color:#8ab4f8;">Loading cached correction...</span>';
+    
+    try {
+        // Check if correction exists via the corrected endpoint
+        var resp = await fetch('/api/barycentric/corrected/' + encodeURIComponent(currentScanId) + '?page=1&per_page=500');
+        if (resp.status === 404) {
+            statusDiv.innerHTML = '<span style="color:#ef5350;">No cached correction found for this scan. Run correction first.</span>';
+            return;
+        }
+        var data = await resp.json();
+        if (data.error) {
+            statusDiv.innerHTML = '<span style="color:#ef5350;">' + escapeHtml(data.error) + '</span>';
+            return;
+        }
+        statusDiv.innerHTML = '<span style="color:#66bb6a;">\u2713 Loaded cached correction: ' +
+            data.total_hits.toLocaleString() + ' hits, ' + data.files_corrected + ' files.</span>';
+        document.getElementById('bary-results-container').style.display = 'block';
+        switchBaryTab('corrected');
+        baryCorrectedPage = 1;
+        loadBaryCorrectedResults(currentScanId);
+    } catch(e) {
+        statusDiv.innerHTML = '<span style="color:#ef5350;">Error: ' + escapeHtml(e.message) + '</span>';
+    }
 }

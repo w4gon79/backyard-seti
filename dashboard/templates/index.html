@@ -158,6 +158,7 @@
                         </select>
                     </div>
                     <button id="btn-bary-correct" class="btn-primary" onclick="runBarycentric()" title="Computes the barycentric velocity correction for the selected scan using astropy. Shifts all hit frequencies to the solar system barycenter rest frame so signals from a real transmitter appear at the same frequency across different observation dates. Must be run before cross-epoch comparison.">Run Correction</button>
+                    <button id="btn-bary-load-cached" class="btn-secondary" onclick="loadCachedCorrected()" title="Load previously computed barycentric correction from disk instead of re-running.">Load Cached</button>
                 </div>
                 <div class="bary-cross-group">
                     <label title="Select 2+ scans to find signals that appear in ON frames across multiple epochs but NOT in OFF frames. Requires barycentric correction to be run first.">Cross-Epoch Scans</label>
@@ -169,6 +170,12 @@
                     <label title="Post-filter: only use hits with SNR at or above this value. Since turboSETI's SNR threshold is a simple cutoff on the detection statistic, post-filtering existing results is mathematically equivalent to re-running turboSETI at the higher threshold. No re-scan needed. Default 0 = use all hits from the original search. Try 10 or 15 to eliminate noise detections.">Min SNR</label>
                     <input type="number" id="bary-min-snr" value="0" min="0" max="100" step="1" style="width:60px;" title="Post-filter hits by SNR. 0 = use all. 10-15 recommended for noise rejection. Equivalent to re-running turboSETI at that SNR threshold without re-scanning.">
                     <button id="btn-cross-epoch" class="btn-warning" onclick="runCrossEpoch()">Run Cross-Epoch Search</button>
+                </div>
+                <div class="bary-cross-history-row" style="margin-top:8px;">
+                    <label style="font-size:0.85em;color:#8ab4f8;">Previous Runs:</label>
+                    <select id="bary-cross-history" onchange="if(this.value) loadCrossEpochRun(this.value)" style="max-width:500px;font-size:0.85em;">
+                        <option value="">Loading...</option>
+                    </select>
                 </div>
                 <div id="bary-status" class="bary-status"></div>
             </div>

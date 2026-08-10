@@ -731,6 +731,7 @@ def cross_epoch_match(scan_dirs, freq_tolerance_hz=10, min_epochs=2, min_snr=0):
             'freq_tolerance_hz': freq_tolerance_hz,
             'min_epochs': min_epochs,
             'min_snr': min_snr,
+            'scan_ids': [os.path.basename(os.path.abspath(sd)) for sd in scan_dirs],
         },
     }
 
