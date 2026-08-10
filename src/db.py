@@ -625,7 +625,12 @@ def import_scan_from_json(scan_dir, db_path=None):
         for hf in hit_files:
             with open(hf) as f:
                 data = json.load(f)
-            fname = data.get('file', os.path.basename(hf).replace('_hits.json', ''))
+            fname = data.get('file', '')
+            if not fname:
+                # Derive from JSON filename: strip _hits.json, remove _partial, add .h5
+                fname = os.path.basename(hf).replace('_partial_hits.json', '.h5').replace('_hits.json', '.h5')
+                if not fname.endswith('.h5'):
+                    fname += '.h5'
             is_on = '_S_' in fname
             for h in data.get('hits', []):
                 h['on_off'] = 'ON' if is_on else 'OFF'

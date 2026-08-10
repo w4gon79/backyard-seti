@@ -1560,7 +1560,7 @@ function resolveHitFile(h) {
     }
     // Derive from _source (JSON filename like 'Parkes_57791_72989_PROXCEN_S_fine_hits.json')
     if (h._source) {
-        var base = h._source.replace('_hits.json', '.h5');
+        var base = h._source.replace('_partial_hits.json', '.h5').replace('_hits.json', '.h5');
         if (base.indexOf('/') === -1) {
             return 'fine/' + base;
         }
@@ -1568,7 +1568,7 @@ function resolveHitFile(h) {
     }
     // Try h.file
     if (h.file) {
-        var base2 = h.file.replace(/\.(json|txt)$/, '.h5');
+        var base2 = h.file.replace(/_partial\.(json|txt)/, '.$1').replace(/\.(json|txt)$/, '.h5');
         if (base2.indexOf('/') === -1) return 'fine/' + base2;
         return base2;
     }
