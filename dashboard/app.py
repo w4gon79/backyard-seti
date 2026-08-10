@@ -28,6 +28,7 @@ from dotenv import load_dotenv
 # Add src to path for imports
 SETI_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(SETI_ROOT, 'src'))
+sys.path.insert(0, SETI_ROOT)  # for incoherent_stack.py
 
 # Load .env for local config (secondary data paths, etc.)
 load_dotenv(os.path.join(SETI_ROOT, '.env'))
@@ -254,6 +255,27 @@ def api_targets():
                         'date': mjd_to_date(f.split('_')[1]) if len(f.split('_')) >= 2 else '',
                     })
     
+    # Scan secondary data dirs (e.g. D:\seti_data\fine)
+    for sec_dir in DATA_DIRS_SECONDARY:
+        if not os.path.isdir(sec_dir):
+            continue
+        for f in os.listdir(sec_dir):
+            if f.endswith('.h5'):
+                parts = f.split('_')
+                if len(parts) >= 4:
+                    target = parts[3]
+                    if target not in targets:
+                        targets[target] = {'fine': [], 'mid': [], 'filterbank': [], 'h5': []}
+                    # Avoid duplicates: skip if already listed from primary
+                    existing_names = [item['name'] for item in targets[target]['fine']]
+                    if f not in existing_names:
+                        targets[target]['fine'].append({
+                            'name': f,
+                            'size_gb': round(os.path.getsize(os.path.join(sec_dir, f)) / 1e9, 2),
+                            'path': f'fine/{f}',  # _resolve_data_file checks secondary dirs too
+                            'date': mjd_to_date(parts[1]) if len(parts) >= 2 else '',
+                        })
+
     # Also scan old PROXCEN dir for backwards compat
     if os.path.isdir(PROXCEN_DIR):
         for f in os.listdir(PROXCEN_DIR):
