@@ -73,9 +73,25 @@ CREATE TABLE cross_epoch_results (
 );
 ```
 
-## Migration plan
-1. Create the DB and schema
-2. Write import script that reads existing JSON files and populates the DB
-3. Modify barycentric_correct.py to read/write from DB instead of JSON
-4. Modify dashboard/app.py endpoints to query DB
-5. Keep JSON as fallback/export format
+## Status: LIVE (2026-08-10)
+
+All implemented and deployed. Database is the primary data store.
+
+- **DB path:** `G:\seti\data\seti_hits.db` (506 MB, WAL mode)
+- **Migration:** `src/migrate_to_sqlite.py` (idempotent, already run)
+- **DB layer:** `src/db.py` (all CRUD + query functions)
+- **Dashboard:** 8 new `/api/db/` Flask endpoints, JS uses SQLite with JSON fallback
+- **1,361,383 hits** across 3 scans, 7 indexes, millisecond query times
+
+**Rule: use SQLite wherever possible.** JSON kept for small metadata only
+(scan_meta.json, cross-epoch cache files). Hit data and search results
+belong in the database.
+
+## Performance Comparison
+
+| Operation | Before (JSON) | After (SQLite) | Speedup |
+|-----------|-------------|----------------|--------|
+| Scan list | 10-30s | <100ms | 100x+ |
+| Hit query (SNR>=10) | 5-10s | 2ms | 2500x |
+| Cross-epoch (SNR=10) | 9s | 0.25s | 36x |
+| Paginated hits | N/A | instant | new |

@@ -1,5 +1,24 @@
 # SETI Dashboard Performance Optimization Roadmap
 
+## Completed (2026-08-10): SQLite Migration
+
+**The big one.** Replaced JSON hit storage with indexed SQLite database.
+
+| Operation | Before (JSON) | After (SQLite) | Speedup |
+|-----------|-------------|----------------|---------|
+| Scan list | 10-30s | <100ms | 100x+ |
+| Hit query (SNR>=10) | 5-10s | <100ms | 50x+ |
+| Cross-epoch (SNR=10) | 9s | 0.25s | 36x |
+| Paginated hits | N/A (load all) | instant | new feature |
+
+- Database: `data/seti_hits.db` (506 MB, WAL mode)
+- 1.36M hits across 3 scans, 7 indexes
+- 8 new `/api/db/` Flask endpoints with pagination and filtering
+- Cross-epoch results cached in DB, auto-loadable from history
+- Migration is idempotent (`src/migrate_to_sqlite.py`)
+
+**Rule: use SQLite wherever possible.** JSON is kept for small metadata only.
+
 ## Completed (2026-08-08): Low-Hanging Fruit
 
 1. ✅ Canvas loops throttled (starfield, star map, freq map from 60fps to 10-15fps)

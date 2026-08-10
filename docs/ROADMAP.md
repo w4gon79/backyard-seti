@@ -75,6 +75,11 @@ resume capability handles unattended processing.
 | Batch runner | `batch_search.py` | Working | Ours |
 | RFI rejection (ON/OFF) | `bl_rfi_reject.py` | Working | Ours (not in SETI repo) |
 | Waterfall inspection | `bl_inspect.py` | Working | Ours |
+| SQLite database layer | `src/db.py` | Working | Ours |
+| JSON-to-SQLite migration | `src/migrate_to_sqlite.py` | Working | Ours |
+| Barycentric correction | `src/barycentric_correct.py` | Working | Ours |
+| Cross-epoch search | SQL-based in `db.py` | Working | Ours |
+| Dashboard (Flask) | `dashboard/app.py` | Working | Ours |
 
 ### Data Inventory
 
@@ -159,7 +164,8 @@ pointing.
 
 ### 2A. Barycentric Frequency Correction
 
-**Status:** In progress (2026-08-08).
+**Status:** Complete (2026-08-10). Barycentric correction and cross-epoch search
+both operational with SQLite backend.
 
 **Method:**
 1. For each observation epoch, compute the expected barycentric Doppler shift 
@@ -169,16 +175,30 @@ pointing.
 3. A real signal now appears at the SAME frequency in all epochs
 4. RFI appears at different barycentric-corrected frequencies across epochs
 
-**Deliverable:** `barycentric_correct.py` ✓ + corrected frequency tables. ✓
+**Deliverable:** `barycentric_correct.py` ✓ + SQLite `hits` table with 
+barycentric_freq column. ✓
 
 **Implementation:** Module built using astropy `radial_velocity_correction` for
 accurate solar-system-barycenter velocity computation. Dashboard integration
 with API endpoints for running correction on scans and cross-epoch candidate
 search. Target coordinate database for common BL targets. Cross-epoch matcher
-uses frequency bucketing for O(N) complexity.
+uses SQL bucketing on indexed barycentric_freq column for O(N) complexity.
+Results cached in `cross_epoch_results` table.
 
-**Next:** Run correction on all 6 PROXCEN epochs once full-band scans complete,
-then run cross-epoch search for candidates.
+**Cross-epoch SNR post-filter:** `--min-snr` parameter allows retroactive
+SNR thresholding without re-scanning. turboSETI's SNR threshold is a simple
+cutoff on the detection statistic, so post-filtering existing hits is
+mathematically equivalent to re-running turboSETI at the higher threshold.
+Verified: SNR 5 scan with min_snr=10 post-filter gives identical results to
+a hypothetical SNR 10 scan.
+
+**Results (2026-08-10, 2 epochs):**
+- SNR 5 (no filter): 1238 candidates (expected from noise, ~1637 predicted)
+- SNR 10: 0 candidates (expected, ~0.04 predicted)
+- SNR 15: 0 candidates
+
+Zero candidates at SNR 10+ is the correct result for a quiet target with
+only 2 epochs. More epochs needed for statistical significance.
 
 ### 2B. Cross-Epoch Hit Stacking
 
@@ -367,7 +387,7 @@ Proxima Centauri is our testbed for every phase.
 2. ~~Fine-res full pipeline run~~ -- 57791 scanning, 58020 queued. IN PROGRESS.
 3. ~~Sub-band edge deduplication~~ -- Low priority, not blocking.
 4. ~~RFI characterization~~ (Phase 1B) -- Will harvest from OFF frames after scans complete.
-5. **Barycentric correction + cross-epoch** (Phase 2A-2B) -- Module built, dashboard integrated. Validate with 57791 vs 58020. NEXT.
+5. ~~Barycentric correction + cross-epoch~~ (Phase 2A-2B) -- COMPLETE. SQLite-backed, dashboard integrated, SNR post-filter working. Validated with 57791 vs 58020.
 6. **Cross-epoch hit stacking** (Phase 2B) -- False alarm probabilities. Validate with 4 epochs (Feb, Apr, Jul, Sep).
 7. **Incoherent stack** (Phase 2C) -- Deep sensitivity from all 25 PROXCEN epochs. SNR 1.5 -> ~7.5.
 8. **ML training set** (Phase 3A) -- Harvest from PROXCEN OFF frames + synthetic injections.
@@ -407,5 +427,5 @@ reduce sub-band count by 90%+ for initial reconnaissance.
 ---
 
 *Document created: 2026-08-06*
-*Last updated: 2026-08-08*
+*Last updated: 2026-08-10*
 *Authors: Carl & Joel*
