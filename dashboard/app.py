@@ -2159,6 +2159,185 @@ def api_waterfall():
         return jsonify({'error': str(e), 'traceback': tb[-500:]}), 500
 
 
+# ─── API: SQLite Database Endpoints ─────────────────────────────────
+
+@app.route('/api/db/stats')
+def api_db_stats():
+    """Database statistics."""
+    try:
+        from db import db_stats
+        return jsonify(db_stats())
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/db/scans')
+def api_db_scans():
+    """List all scans from the database (fast, replaces slow JSON discovery)."""
+    try:
+        from db import get_all_scans
+        scans = get_all_scans()
+        return jsonify(scans)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/db/scans/<scan_id>/hits')
+def api_db_hits(scan_id):
+    """Paginated hits from the database."""
+    if not re.match(r'^[A-Za-z0-9_-]+$', scan_id):
+        return jsonify({'error': 'Invalid scan_id'}), 400
+    try:
+        from db import get_hits, count_hits
+        min_snr = request.args.get('min_snr', default=0, type=float)
+        on_off = request.args.get('on_off', default=None, type=str)
+        if on_off and on_off not in ('ON', 'OFF'):
+            on_off = None
+        limit = request.args.get('limit', default=100, type=int)
+        offset = request.args.get('offset', default=0, type=int)
+        order = request.args.get('order', default='snr DESC', type=str)
+
+        hits = get_hits(scan_id, min_snr=min_snr, on_off=on_off,
+                        limit=limit, offset=offset, order_by=order)
+        total = count_hits(scan_id, min_snr=min_snr, on_off=on_off)
+
+        return jsonify({
+            'scan_id': scan_id,
+            'hits': hits,
+            'total': total,
+            'limit': limit,
+            'offset': offset,
+            'count': len(hits),
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/db/scans/<scan_id>/stats')
+def api_db_scan_stats(scan_id):
+    """Hit statistics for a scan from the database."""
+    if not re.match(r'^[A-Za-z0-9_-]+$', scan_id):
+        return jsonify({'error': 'Invalid scan_id'}), 400
+    try:
+        from db import get_hit_stats
+        stats = get_hit_stats(scan_id)
+        return jsonify(stats)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/db/scans/<scan_id>/corrected')
+def api_db_corrected(scan_id):
+    """Paginated barycentric-corrected hits from the database."""
+    if not re.match(r'^[A-Za-z0-9_-]+$', scan_id):
+        return jsonify({'error': 'Invalid scan_id'}), 400
+    try:
+        from db import get_hits, count_hits, get_scan
+        min_snr = request.args.get('min_snr', default=0, type=float)
+        limit = request.args.get('limit', default=100, type=int)
+        offset = request.args.get('offset', default=0, type=int)
+
+        hits = get_hits(scan_id, min_snr=min_snr, limit=limit, offset=offset,
+                        order_by='snr DESC')
+        total = count_hits(scan_id, min_snr=min_snr)
+        scan = get_scan(scan_id)
+
+        return jsonify({
+            'scan_id': scan_id,
+            'hits': hits,
+            'total_filtered': total,
+            'total_hits': scan.get('total_hits', 0) if scan else 0,
+            'limit': limit,
+            'offset': offset,
+            'count': len(hits),
+            'target': scan.get('target', '') if scan else '',
+            'bary_corrected': scan.get('bary_corrected', 0) if scan else 0,
+            'bary_velocity': scan.get('bary_velocity') if scan else None,
+            'telescope': scan.get('telescope', '') if scan else '',
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/db/cross-epoch', methods=['POST'])
+def api_db_cross_epoch():
+    """Run SQL-based cross-epoch search, cache result to DB."""
+    params = request.json or {}
+    scan_ids = params.get('scan_ids', [])
+    freq_tolerance_hz = params.get('freq_tolerance_hz', 10)
+    min_epochs = params.get('min_epochs', 2)
+    min_snr = params.get('min_snr', 0)
+    force_rerun = params.get('force_rerun', False)
+
+    if not scan_ids or len(scan_ids) < 2:
+        return jsonify({'error': 'Need at least 2 scan_ids'}), 400
+
+    try:
+        from db import cross_epoch_search_sql, save_cross_epoch_result, get_cross_epoch_history, load_cross_epoch_result
+
+        # Check for cached result
+        if not force_rerun:
+            history = get_cross_epoch_history()
+            for h in history:
+                if (h['min_snr'] == min_snr and
+                    h['tolerance_hz'] == freq_tolerance_hz and
+                    h['min_epochs'] == min_epochs):
+                    cached = load_cross_epoch_result(h['id'])
+                    if cached:
+                        result = cached['result']
+                        result['summary']['from_cache'] = True
+                        result['summary']['cache_id'] = h['id']
+                        return jsonify(result)
+
+        # Run the search
+        result = cross_epoch_search_sql(
+            scan_ids,
+            min_snr=float(min_snr),
+            tolerance_hz=float(freq_tolerance_hz),
+            min_epochs=int(min_epochs),
+        )
+
+        # Save to DB cache
+        try:
+            result_id = save_cross_epoch_result(result)
+            result['summary']['cache_id'] = result_id
+            result['summary']['from_cache'] = False
+        except Exception as e:
+            print(f'[WARNING] Failed to cache cross-epoch result: {e}')
+
+        return jsonify(result)
+    except Exception as e:
+        import traceback
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()[-500:]}), 500
+
+
+@app.route('/api/db/cross-epoch/history')
+def api_db_cross_epoch_history():
+    """List cached cross-epoch results from the database."""
+    try:
+        from db import get_cross_epoch_history
+        runs = get_cross_epoch_history()
+        return jsonify({'runs': runs})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/db/cross-epoch/<int:result_id>')
+def api_db_cross_epoch_load(result_id):
+    """Load a specific cached cross-epoch result by id."""
+    try:
+        from db import load_cross_epoch_result
+        cached = load_cross_epoch_result(result_id)
+        if not cached:
+            return jsonify({'error': 'Result not found'}), 404
+        result = cached['result']
+        result['summary']['from_cache'] = True
+        result['summary']['cache_id'] = result_id
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 # ─── Main ─────────────────────────────────────────────────────────────
 
 if __name__ == '__main__':

@@ -13,6 +13,12 @@ let scansList = [];       // Array of scan metadata objects
 let currentScanId = null; // Currently selected scan_id
 let scanStateActive = false; // Tracks whether a scan is currently running
 
+// DB-backed hit pagination state
+let allHitsTotal = 0;
+let allHitsScanId = null;
+let allHitsOffset = 0;
+let allHitsLimit = 500;
+
 // Results pagination state
 let resultsPage = 0;
 let resultsPageSize = 100;
@@ -847,8 +853,40 @@ async function pollScanStatus() {
 
 async function loadScansList() {
     try {
-        var resp = await fetch('/api/scans');
-        scansList = await resp.json();
+        // Use fast SQLite endpoint
+        var resp = await fetch('/api/db/scans');
+        var dbScans = await resp.json();
+        if (dbScans && !dbScans.error && dbScans.length > 0) {
+            // Convert DB format to the format the dashboard expects
+            scansList = dbScans.map(function(s) {
+                return {
+                    scan_id: s.scan_id,
+                    target: s.target,
+                    timestamp: s.timestamp,
+                    status: s.status,
+                    parameters: {
+                        sub_band_chans: s.sub_band_chans,
+                        overlap: s.overlap,
+                        max_drift: s.max_drift,
+                        snr: s.snr_threshold,
+                        f_start: s.f_start,
+                        f_stop: s.f_stop,
+                    },
+                    stats: {
+                        total_hits: s.total_hits,
+                        on_hits: s.on_hits,
+                        off_hits: s.off_hits,
+                        duration_s: s.duration_s,
+                    },
+                    _bary_corrected: s.bary_corrected,
+                    _bary_velocity: s.bary_velocity,
+                };
+            });
+        } else {
+            // Fallback to legacy endpoint
+            var resp2 = await fetch('/api/scans');
+            scansList = await resp2.json();
+        }
         renderScanSelector();
         // Auto-select the most recent scan if none selected
         if (!currentScanId && scansList.length > 0) {
@@ -925,16 +963,76 @@ async function updateResumeButton() {
 
 async function loadScanResults(scanId) {
     try {
-        var resp = await fetch('/api/scans/' + encodeURIComponent(scanId) + '/results');
+        // Use fast SQLite endpoint with pagination
+        var resp = await fetch('/api/db/scans/' + encodeURIComponent(scanId) + '/hits?limit=500&offset=0&order=snr%20DESC');
         var data = await resp.json();
         if (data.error) {
             console.error('Scan results error:', data.error);
-            return;
+            // Fallback to legacy
+            return loadScanResultsLegacy(scanId);
         }
-        // Render scan meta display
-        renderScanMetaDisplay(data.meta || {}, data.results);
         
-        // Process results into allHits
+        // Find scan meta from scansList
+        var meta = null;
+        for (var i = 0; i < scansList.length; i++) {
+            if (scansList[i].scan_id === scanId) { meta = scansList[i]; break; }
+        }
+        renderScanMetaDisplay(meta || {}, []);
+        
+        // Convert DB hits to the format expected by renderHitTable
+        allHits = (data.hits || []).map(function(h) {
+            return {
+                drift_rate: h.drift_rate,
+                snr: h.snr,
+                freq: h.freq,
+                channel: h.channel,
+                sub_band: h.sub_band,
+                file: h.source_file,
+                _source: h.source_file,
+                on_off: h.on_off,
+                barycentric_freq: h.barycentric_freq,
+            };
+        });
+        
+        // Store total for pagination display
+        allHitsTotal = data.total || allHits.length;
+        allHitsScanId = scanId;
+        allHitsOffset = 0;
+        allHitsLimit = 500;
+        
+        // Load rejection results from legacy endpoint (still JSON-based)
+        try {
+            var rresp = await fetch('/api/scans/' + encodeURIComponent(scanId) + '/results');
+            var rdata = await rresp.json();
+            if (rdata.rejection && rdata.rejection.candidates) {
+                rejectionCandidates = rdata.rejection.candidates;
+                renderRejectionSummary(rdata.rejection.summary, rdata.rejection.parameters);
+            } else {
+                rejectionCandidates = [];
+                document.getElementById('rejection-summary').innerHTML =
+                    '<p style="color:#546e7a;">No rejection run for this scan yet.</p>';
+            }
+        } catch(e2) {
+            rejectionCandidates = [];
+        }
+        
+        renderHitTable();
+        renderHitChart();
+        renderHitsPagination();
+    } catch(e) {
+        console.error('Error loading scan results:', e);
+        // Fallback to legacy
+        loadScanResultsLegacy(scanId);
+    }
+}
+
+// Legacy results loader (JSON-based, kept as fallback)
+async function loadScanResultsLegacy(scanId) {
+    try {
+        var resp = await fetch('/api/scans/' + encodeURIComponent(scanId) + '/results');
+        var data = await resp.json();
+        if (data.error) { console.error('Scan results error:', data.error); return; }
+        renderScanMetaDisplay(data.meta || {}, data.results);
         allHits = [];
         var results = data.results || [];
         for (var i = 0; i < results.length; i++) {
@@ -945,46 +1043,32 @@ async function loadScanResults(scanId) {
                     allHits.push(result.data.hits[j]);
                 }
             }
-            if (result.type === 'summary' && result.data.files) {
-                for (var fname in result.data.files) {
-                    if (!result.data.files.hasOwnProperty(fname)) continue;
-                    var info = result.data.files[fname];
-                    if (info.top_hits) {
-                        for (var k = 0; k < info.top_hits.length; k++) {
-                            info.top_hits[k]._source = fname;
-                            info.top_hits[k].on_off = info.on_off;
-                            allHits.push(info.top_hits[k]);
-                        }
-                    }
-                }
-            }
         }
-        
-        // Load rejection results if present for this scan
         if (data.rejection && data.rejection.candidates) {
             rejectionCandidates = data.rejection.candidates;
             renderRejectionSummary(data.rejection.summary, data.rejection.parameters);
-        } else {
-            rejectionCandidates = [];
-            document.getElementById('rejection-summary').innerHTML =
-                '<p style="color:#546e7a;">No rejection run for this scan yet.</p>';
         }
-        
         renderHitTable();
         renderHitChart();
     } catch(e) {
-        console.error('Error loading scan results:', e);
+        console.error('Error loading legacy scan results:', e);
     }
 }
 
 async function loadScanStats(scanId) {
     try {
-        var resp = await fetch('/api/stats?scan_id=' + encodeURIComponent(scanId));
+        // Use fast SQLite endpoint
+        var resp = await fetch('/api/db/scans/' + encodeURIComponent(scanId) + '/stats');
         var data = await resp.json();
-        document.getElementById('stat-total').textContent = 'Total Hits: ' + data.total_hits;
-        document.getElementById('stat-on').textContent = 'ON: ' + data.on_hits;
-        document.getElementById('stat-off').textContent = 'OFF: ' + data.off_hits;
-        document.getElementById('stat-top').textContent = 'Top SNR: ' + data.top_snr;
+        if (data.error) {
+            // Fallback to legacy
+            var resp2 = await fetch('/api/stats?scan_id=' + encodeURIComponent(scanId));
+            data = await resp2.json();
+        }
+        document.getElementById('stat-total').textContent = 'Total Hits: ' + (data.total_hits || 0).toLocaleString();
+        document.getElementById('stat-on').textContent = 'ON: ' + (data.on_hits || 0).toLocaleString();
+        document.getElementById('stat-off').textContent = 'OFF: ' + (data.off_hits || 0).toLocaleString();
+        document.getElementById('stat-top').textContent = 'Top SNR: ' + (data.top_snr || 0);
     } catch(e) {}
 }
 
@@ -1762,21 +1846,23 @@ async function loadBaryCorrectedResults(scanId, page) {
     if (!page) page = baryCorrectedPage || 1;
     var snrMin = 0;
     try {
-        var resp = await fetch('/api/barycentric/results/' + encodeURIComponent(scanId) +
-            '?page=' + page + '&per_page=' + baryCorrectedPerPage + '&snr_min=' + snrMin);
+        // Use fast SQLite endpoint
+        var limit = baryCorrectedPerPage || 500;
+        var offset = (page - 1) * limit;
+        var resp = await fetch('/api/db/scans/' + encodeURIComponent(scanId) +
+            '/corrected?min_snr=' + snrMin + '&limit=' + limit + '&offset=' + offset);
         var data = await resp.json();
         if (data.error) {
-            document.getElementById('bary-corrected-tbody').innerHTML =
-                '<tr><td colspan="8" class="empty">' + escapeHtml(data.error) + '</td></tr>';
-            return;
+            // Fallback to legacy JSON endpoint
+            return loadBaryCorrectedResultsLegacy(scanId, page);
         }
 
         // Render summary
         var summaryHtml = '';
         summaryHtml += '<div class="bs-item"><span class="bs-label">Target:</span><span class="bs-val">' + (data.target || '?') + '</span></div>';
-        summaryHtml += '<div class="bs-item"><span class="bs-label">Total hits:</span><span class="bs-val">' + data.total_hits.toLocaleString() + '</span></div>';
-        summaryHtml += '<div class="bs-item"><span class="bs-label">Files:</span><span class="bs-val">' + data.files_corrected + '</span></div>';
-        summaryHtml += '<div class="bs-item"><span class="bs-label">Showing:</span><span class="bs-val">' + data.total_filtered.toLocaleString() + '</span></div>';
+        summaryHtml += '<div class="bs-item"><span class="bs-label">Total hits:</span><span class="bs-val">' + (data.total_hits || 0).toLocaleString() + '</span></div>';
+        summaryHtml += '<div class="bs-item"><span class="bs-label">Bary corrected:</span><span class="bs-val">' + (data.bary_corrected ? '✓' : '✗') + '</span></div>';
+        summaryHtml += '<div class="bs-item"><span class="bs-label">Showing:</span><span class="bs-val">' + (data.total_filtered || 0).toLocaleString() + '</span></div>';
         document.getElementById('bary-corrected-summary').innerHTML = summaryHtml;
 
         // Render table
@@ -1788,7 +1874,7 @@ async function loadBaryCorrectedResults(scanId, page) {
             return;
         }
 
-        var startIdx = (data.page - 1) * data.per_page;
+        var startIdx = offset;
         var html = '';
         for (var i = 0; i < hits.length; i++) {
             var h = hits[i];
@@ -1812,17 +1898,20 @@ async function loadBaryCorrectedResults(scanId, page) {
         document.getElementById('bary-corrected-tbody').innerHTML = html;
 
         // Pagination
+        var total = data.total_filtered || 0;
+        var totalPages = Math.max(1, Math.ceil(total / limit));
+        var currentPage = page;
         var pagDiv = document.getElementById('bary-corrected-pagination');
-        if (data.total_pages > 1) {
+        if (totalPages > 1) {
             pagDiv.style.display = 'flex';
             var phtml = '';
-            phtml += '<button onclick="baryCorrectedPage=1;loadBaryCorrectedResults(\'' + scanId + '\')"' + (data.page === 1 ? ' disabled' : '') + '>« First</button>';
-            phtml += '<button onclick="baryCorrectedPage=Math.max(1,' + (data.page - 1) + ');loadBaryCorrectedResults(\'' + scanId + '\')"' + (data.page === 1 ? ' disabled' : '') + '>‹ Prev</button>';
-            phtml += '<span class="bl-page-info">Page ' + data.page + ' of ' + data.total_pages +
-                ' (' + (startIdx + 1) + '-' + Math.min(startIdx + data.per_page, data.total_filtered) +
-                ' of ' + data.total_filtered.toLocaleString() + ')</span>';
-            phtml += '<button onclick="baryCorrectedPage=Math.min(' + data.total_pages + ',' + (data.page + 1) + ');loadBaryCorrectedResults(\'' + scanId + '\')"' + (data.page >= data.total_pages ? ' disabled' : '') + '>Next ›</button>';
-            phtml += '<button onclick="baryCorrectedPage=' + data.total_pages + ';loadBaryCorrectedResults(\'' + scanId + '\')"' + (data.page >= data.total_pages ? ' disabled' : '') + '>Last »</button>';
+            phtml += '<button onclick="baryCorrectedPage=1;loadBaryCorrectedResults(\'' + scanId + '\')"' + (currentPage === 1 ? ' disabled' : '') + '>« First</button>';
+            phtml += '<button onclick="baryCorrectedPage=Math.max(1,' + (currentPage - 1) + ');loadBaryCorrectedResults(\'' + scanId + '\')"' + (currentPage === 1 ? ' disabled' : '') + '>‹ Prev</button>';
+            phtml += '<span class="bl-page-info">Page ' + currentPage + ' of ' + totalPages +
+                ' (' + (startIdx + 1) + '-' + Math.min(startIdx + limit, total) +
+                ' of ' + total.toLocaleString() + ')</span>';
+            phtml += '<button onclick="baryCorrectedPage=Math.min(' + totalPages + ',' + (currentPage + 1) + ');loadBaryCorrectedResults(\'' + scanId + '\')"' + (currentPage >= totalPages ? ' disabled' : '') + '>Next ›</button>';
+            phtml += '<button onclick="baryCorrectedPage=' + totalPages + ';loadBaryCorrectedResults(\'' + scanId + '\')"' + (currentPage >= totalPages ? ' disabled' : '') + '>Last »</button>';
             pagDiv.innerHTML = phtml;
         } else {
             pagDiv.style.display = 'none';
@@ -1860,14 +1949,20 @@ async function runCrossEpoch() {
     };
 
     try {
-        var resp = await fetch('/api/barycentric/cross-epoch', {
+        // Use fast SQLite DB endpoint
+        var resp = await fetch('/api/db/cross-epoch', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(params),
         });
         var data = await resp.json();
         if (data.error) {
-            alert(data.error);
-            return;
+            // Fallback to legacy JSON endpoint
+            var resp2 = await fetch('/api/barycentric/cross-epoch', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(params),
+            });
+            data = await resp2.json();
+            if (data.error) { alert(data.error); return; }
         }
 
         document.getElementById('bary-results-container').style.display = 'block';
@@ -1940,11 +2035,21 @@ async function loadCrossEpochHistory() {
     if (!select) return;
     
     try {
-        var resp = await fetch('/api/barycentric/cross-epoch/history');
+        // Use fast SQLite DB endpoint
+        var resp = await fetch('/api/db/cross-epoch/history');
         var data = await resp.json();
         var runs = data.runs || [];
         
-        if (runs.length === 0) {
+        // Also try legacy cache files
+        if (!runs || runs.length === 0) {
+            try {
+                var resp2 = await fetch('/api/barycentric/cross-epoch/history');
+                var legacyData = await resp2.json();
+                runs = legacyData.runs || [];
+            } catch(e2) {}
+        }
+        
+        if (!runs || runs.length === 0) {
             select.innerHTML = '<option value="">No previous runs</option>';
             return;
         }
@@ -1952,31 +2057,36 @@ async function loadCrossEpochHistory() {
         var html = '<option value="">-- Select previous run --</option>';
         for (var i = 0; i < runs.length; i++) {
             var r = runs[i];
-            var label = (r.timestamp || '').substring(0, 19).replace('T', ' ');
+            var ts = r.created_at || r.timestamp || '';
+            var label = ts.substring(0, 19).replace('T', ' ');
             label += ' | SNR ' + (r.min_snr || 0);
             label += ' | tol ' + (r.tolerance_hz || 10);
             label += ' | ' + (r.candidate_count || 0) + ' cand';
-            html += '<option value="' + r.filename + '">' + escapeHtml(label) + '</option>';
+            var val = r.id || r.filename;
+            html += '<option value="' + val + '">' + escapeHtml(label) + '</option>';
         }
         select.innerHTML = html;
         
         // Auto-load most recent run
-        loadCrossEpochRun(runs[0].filename);
+        loadCrossEpochRun(runs[0].id || runs[0].filename);
     } catch(e) {
         console.error('Error loading cross-epoch history:', e);
         select.innerHTML = '<option value="">Error loading history</option>';
     }
 }
 
-async function loadCrossEpochRun(filename) {
-    if (!filename) return;
+async function loadCrossEpochRun(val) {
+    if (!val) return;
     try {
-        var resp = await fetch('/api/barycentric/cross-epoch/load?file=' + encodeURIComponent(filename));
-        var data = await resp.json();
-        if (data.error) {
-            alert(data.error);
-            return;
+        var resp;
+        // Check if val is numeric (DB id) or string (legacy filename)
+        if (/^\d+$/.test(val)) {
+            resp = await fetch('/api/db/cross-epoch/' + val);
+        } else {
+            resp = await fetch('/api/barycentric/cross-epoch/load?file=' + encodeURIComponent(val));
         }
+        var data = await resp.json();
+        if (data.error) { alert(data.error); return; }
         document.getElementById('bary-results-container').style.display = 'block';
         switchBaryTab('cross');
         renderCrossEpochResults(data);
@@ -1996,8 +2106,8 @@ async function loadCachedCorrected() {
     statusDiv.innerHTML = '<span style="color:#8ab4f8;">Loading cached correction...</span>';
     
     try {
-        // Check if correction exists via the corrected endpoint
-        var resp = await fetch('/api/barycentric/corrected/' + encodeURIComponent(currentScanId) + '?page=1&per_page=500');
+        // Use SQLite DB endpoint
+        var resp = await fetch('/api/db/scans/' + encodeURIComponent(currentScanId) + '/corrected?limit=500&offset=0');
         if (resp.status === 404) {
             statusDiv.innerHTML = '<span style="color:#ef5350;">No cached correction found for this scan. Run correction first.</span>';
             return;
@@ -2008,12 +2118,67 @@ async function loadCachedCorrected() {
             return;
         }
         statusDiv.innerHTML = '<span style="color:#66bb6a;">\u2713 Loaded cached correction: ' +
-            data.total_hits.toLocaleString() + ' hits, ' + data.files_corrected + ' files.</span>';
+            (data.total_hits || 0).toLocaleString() + ' hits.</span>';
         document.getElementById('bary-results-container').style.display = 'block';
         switchBaryTab('corrected');
         baryCorrectedPage = 1;
         loadBaryCorrectedResults(currentScanId);
     } catch(e) {
         statusDiv.innerHTML = '<span style="color:#ef5350;">Error: ' + escapeHtml(e.message) + '</span>';
+    }
+}
+
+// ── Legacy barycentric results fallback ─────────────────────────────
+
+async function loadBaryCorrectedResultsLegacy(scanId, page) {
+    if (!page) page = baryCorrectedPage || 1;
+    try {
+        var resp = await fetch('/api/barycentric/results/' + encodeURIComponent(scanId) +
+            '?page=' + page + '&per_page=' + (baryCorrectedPerPage || 500) + '&snr_min=0');
+        var data = await resp.json();
+        if (data.error) {
+            document.getElementById('bary-corrected-tbody').innerHTML =
+                '<tr><td colspan="8" class="empty">' + escapeHtml(data.error) + '</td></tr>';
+            return;
+        }
+        var summaryHtml = '';
+        summaryHtml += '<div class="bs-item"><span class="bs-label">Target:</span><span class="bs-val">' + (data.target || '?') + '</span></div>';
+        summaryHtml += '<div class="bs-item"><span class="bs-label">Total hits:</span><span class="bs-val">' + (data.total_hits || 0).toLocaleString() + '</span></div>';
+        summaryHtml += '<div class="bs-item"><span class="bs-label">Showing:</span><span class="bs-val">' + (data.total_filtered || 0).toLocaleString() + '</span></div>';
+        document.getElementById('bary-corrected-summary').innerHTML = summaryHtml;
+        var hits = data.hits || [];
+        var startIdx = (data.page - 1) * data.per_page;
+        var html = '';
+        for (var i = 0; i < hits.length; i++) {
+            var h = hits[i];
+            var rowNum = startIdx + i + 1;
+            var isOn = (h.source_file || '').indexOf('_S_') !== -1 || h.on_off === 'ON';
+            var obsFreq = h.freq || 0;
+            var baryFreq = h.barycentric_freq || 0;
+            var deltaHz = (baryFreq - obsFreq) * 1e6;
+            html += '<tr><td>' + rowNum + '</td>' +
+                '<td style="color:#4fc3f7;">' + baryFreq.toFixed(8) + '</td>' +
+                '<td>' + obsFreq.toFixed(6) + '</td>' +
+                '<td style="color:' + (deltaHz > 0 ? '#66bb6a' : '#ef5350') + ';font-size:0.85em;">' +
+                    (deltaHz > 0 ? '+' : '') + deltaHz.toFixed(1) + '</td>' +
+                '<td>' + (h.drift_rate || 0).toFixed(4) + '</td>' +
+                '<td style="color:#66bb6a;font-weight:600;">' + (h.snr || 0).toFixed(2) + '</td>' +
+                '<td><span class="on-badge ' + (isOn ? 'on' : 'off') + '">' + (isOn ? 'ON' : 'OFF') + '</span></td>' +
+                '<td style="font-size:0.8em;color:#546e7a;">' + (h.source_file || h.file || '').substring(0, 30) + '</td></tr>';
+        }
+        document.getElementById('bary-corrected-tbody').innerHTML = html;
+    } catch(e) {
+        console.error('Error loading legacy bary results:', e);
+    }
+}
+
+// ── Hits table pagination (DB-backed) ───────────────────────────────
+
+function renderHitsPagination() {
+    // If the existing hit table has a pagination div, update it
+    // For now, just note the total in the results filter area
+    var filterDiv = document.getElementById('results-filter');
+    if (filterDiv && allHitsTotal > allHits.length) {
+        // Could add pagination controls here in the future
     }
 }
