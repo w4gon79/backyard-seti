@@ -884,10 +884,25 @@ async function loadScansList() {
                 };
             });
         } else {
-            // Fallback to legacy endpoint
-            var resp2 = await fetch('/api/scans');
-            scansList = await resp2.json();
+            scansList = [];
         }
+        // Merge in disk-only scans (in-progress scans not yet in DB)
+        try {
+            var resp2 = await fetch('/api/scans');
+            var diskScans = await resp2.json();
+            if (diskScans && diskScans.length) {
+                var dbIds = new Set(scansList.map(function(s) { return s.scan_id; }));
+                for (var d = 0; d < diskScans.length; d++) {
+                    if (!dbIds.has(diskScans[d].scan_id)) {
+                        scansList.push(diskScans[d]);
+                    }
+                }
+            }
+        } catch(e) { /* disk discovery failed, use DB only */ }
+        // Sort merged list by timestamp descending (newest first)
+        scansList.sort(function(a, b) {
+            return (b.timestamp || '').localeCompare(a.timestamp || '');
+        });
         renderScanSelector();
         // Auto-select the most recent scan if none selected
         if (!currentScanId && scansList.length > 0) {
