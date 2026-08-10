@@ -20,33 +20,47 @@ Proxima Centauri is our primary testbed for proving out every phase of this
 roadmap. The BL open data catalog contains **25 complete 6-file fine-res
 cadence sets** for PROXCEN, spanning January to October 2017:
 
-| Epoch | MJD | Date | Status |
-|-------|-----|------|--------|
-| 1 | 57783 | Jan 30 | Available |
-| 2 | 57790 | Feb 6 | Available |
-| 3 | 57791 | Feb 7 | **Scanning** |
-| 4 | 57804 | Feb 20 | Available |
-| 5 | 57805 | Feb 21 | Available |
-| 6 | 57808 | Feb 24 | Available |
-| 7 | 57809 | Feb 25 | Available |
-| 8 | 57846 | Apr 3 | Available |
-| 9 | 57847 | Apr 4 | Available |
-| 10 | 57850 | Apr 7 | Available |
-| 11 | 57854 | Apr 11 | Available |
-| 12 | 57904 | May 31 | Available |
-| 13 | 57910 | Jun 6 | Available |
-| 14 | 57930 | Jun 26 | Available |
-| 15 | 57932 | Jun 28 | Available |
-| 16 | 57933 | Jun 29 | Available |
-| 17 | 57939 | Jul 5 | Available |
-| 18 | 57940 | Jul 6 | Available |
-| 19 | 57942 | Jul 8 | Available |
-| 20 | 57943 | Jul 9 | Available |
-| 21 | 58020 | Sep 24 | **Downloaded, queued** |
-| 22 | 58026 | Sep 30 | Available |
-| 23 | 58027 | Oct 1 | Available |
-| 24 | 58029 | Oct 3 | Available |
-| 25 | 58048 | Oct 22 | Available |
+| Epoch | MJD | Date | BL Server | Status |
+|-------|-----|------|-----------|--------|
+| 1 | 57783 | Jan 30 | 200 | Available |
+| 2 | 57790 | Feb 6 | 200 | Available |
+| 3 | 57791 | Feb 7 | 200 | **Scanned** |
+| 4 | 57804 | Feb 20 | 200 | Available |
+| 5 | 57805 | Feb 21 | 200 | Available |
+| 6 | 57808 | Feb 24 | 200 | Available |
+| 7 | 57809 | Feb 25 | 200 | Available |
+| 8 | 57846 | Apr 3 | 200 | **Scanning** |
+| 9 | 57847 | Apr 4 | 200 | Available |
+| 10 | 57850 | Apr 7 | 200 | Available |
+| 11 | 57854 | Apr 11 | 200 | Available |
+| 12 | 57904 | May 31 | 200 | Available |
+| 13 | 57910 | Jun 6 | 200 | Available |
+| 14 | 57930 | Jun 26 | 200 | **Downloading** |
+| 15 | 57932 | Jun 28 | 200 | Available |
+| 16 | 57933 | Jun 29 | 200 | Available |
+| 17 | 57939 | Jul 5 | 200 | Available |
+| 18 | 57940 | Jul 6 | 200 | Available |
+| 19 | 57941 | Jul 7 | **404** | Unavailable |
+| 20 | 57942 | Jul 8 | **404** | Unavailable |
+| 21 | 57943 | Jul 9 | **404** | Unavailable |
+| 22 | 57944 | Jul 10 | **404** | Unavailable |
+| 23 | 58020 | Sep 24 | 200 | **Scanned** |
+| 24 | 58026 | Sep 30 | **404** | Unavailable |
+| 25 | 58027 | Oct 1 | **404** | Unavailable |
+| 26 | 58029 | Oct 3 | **404** | Unavailable |
+| 27 | 58048 | Oct 22 | **404** | Unavailable |
+
+**Availability note (2026-08-10):** BL API lists fine-res files for all
+MJDs, but files on `blpd8.ssl.berkeley.edu/dl2/` path return 404. Only
+files on `/dl/` path are actually downloadable. 20 of 27 MJDs have
+downloadable fine-res files. The July 2017 gap (57941-57944) and October
+2017 gap (58026-58048) are currently unavailable from Berkeley.
+
+**Validation epochs (4-epoch cross-epoch test):**
+- Feb 7 (57791) - scanned
+- Apr 3 (57846) - scanning
+- Jun 26 (57930) - downloading
+- Sep 24 (58020) - scanned
 
 **Validation strategy:** Scan 3-4 well-spaced epochs first (Feb, Apr, Jul, Sep)
 to validate cross-epoch pipeline end to end. Then batch-scan remaining epochs
