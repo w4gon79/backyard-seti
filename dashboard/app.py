@@ -2707,33 +2707,62 @@ def api_stack_status(job_id):
 
 @app.route('/api/stack/results/<job_id>')
 def api_stack_results(job_id):
-    """Get full results for a completed stack job."""
+    """Get full results for a completed stack job.
+
+    Checks in-memory job tracker first, then falls back to SQLite DB
+    so results survive dashboard restarts.
+    """
+    # Try in-memory first (for freshly completed jobs)
     job = _stack_jobs.get(job_id)
-    if not job:
-        return jsonify({'error': 'Job not found'}), 404
+    if job and job['status'] == 'complete' and job.get('result'):
+        r = job['result']
+        return jsonify({
+            'job_id': job_id,
+            'success': True,
+            'target': r.get('target'),
+            'freq_center_mhz': r.get('freq_center_mhz'),
+            'width_mhz': r.get('width_mhz'),
+            'n_epochs': r.get('n_epochs'),
+            'used_epochs': r.get('used_epochs'),
+            'snr_improvement': r.get('snr_improvement'),
+            'stack_median': r.get('stack_median'),
+            'stack_sigma': r.get('stack_sigma'),
+            'peaks': r.get('peaks', []),
+            'epoch_info': r.get('epoch_info', []),
+            'grid_n_bins': r.get('grid_n_bins'),
+        })
 
-    if job['status'] != 'complete':
-        return jsonify({'error': 'Job not complete', 'status': job['status']}), 400
+    # Fall back to SQLite DB (for jobs from previous dashboard runs)
+    try:
+        from db import get_db
+        conn = get_db()
+        row = conn.execute(
+            'SELECT * FROM stack_jobs WHERE job_id = ?', (job_id,)).fetchone()
+        conn.close()
+        if row and row['status'] == 'complete':
+            peaks = json.loads(row['peaks_json'] or '[]')
+            epochs = json.loads(row['epochs'] or '[]')
+            # Reconstruct epoch_info from epochs list
+            epoch_info = [{'label': e} for e in epochs]
+            return jsonify({
+                'job_id': job_id,
+                'success': True,
+                'target': row['target'],
+                'freq_center_mhz': row['freq_center'],
+                'width_mhz': row['width_mhz'],
+                'n_epochs': row['n_epochs'],
+                'used_epochs': epochs,
+                'snr_improvement': row['snr_improvement'],
+                'stack_median': row['stack_median'],
+                'stack_sigma': row['stack_sigma'],
+                'peaks': peaks,
+                'epoch_info': epoch_info,
+                'grid_n_bins': None,
+            })
+    except Exception as e:
+        pass
 
-    r = job['result']
-    if not r:
-        return jsonify({'error': 'No result data'}), 500
-
-    return jsonify({
-        'job_id': job_id,
-        'success': True,
-        'target': r.get('target'),
-        'freq_center_mhz': r.get('freq_center_mhz'),
-        'width_mhz': r.get('width_mhz'),
-        'n_epochs': r.get('n_epochs'),
-        'used_epochs': r.get('used_epochs'),
-        'snr_improvement': r.get('snr_improvement'),
-        'stack_median': r.get('stack_median'),
-        'stack_sigma': r.get('stack_sigma'),
-        'peaks': r.get('peaks', []),
-        'epoch_info': r.get('epoch_info', []),
-        'grid_n_bins': r.get('grid_n_bins'),
-    })
+    return jsonify({'error': 'Job not found'}), 404
 
 
 @app.route('/api/stack/plot/<job_id>')
