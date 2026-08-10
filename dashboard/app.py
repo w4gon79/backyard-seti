@@ -971,6 +971,15 @@ def api_scan_start():
                 _complete_scan_meta(scan_id, elapsed)
             except Exception as e:
                 scan_state['log_lines'].append(f'WARN: Could not update scan_meta: {e}')
+            # Auto-import completed scan into SQLite DB
+            try:
+                from db import import_scan_from_json
+                scan_dir = os.path.join(RESULTS_DIR, scan_id)
+                import_stats = import_scan_from_json(scan_dir)
+                scan_state['log_lines'].append(
+                    f'DB import: {import_stats.get("hits_imported", 0)} hits imported')
+            except Exception as e:
+                scan_state['log_lines'].append(f'WARN: DB import failed: {e}')
             scan_state['active_scan_id'] = None
     
     thread = threading.Thread(target=run_scan, daemon=True)
@@ -1168,6 +1177,15 @@ def api_scan_resume():
                 _complete_scan_meta(scan_id, elapsed)
             except Exception as e:
                 scan_state['log_lines'].append(f'WARN: Could not update scan_meta: {e}')
+            # Auto-import completed scan into SQLite DB
+            try:
+                from db import import_scan_from_json
+                scan_dir = os.path.join(RESULTS_DIR, scan_id)
+                import_stats = import_scan_from_json(scan_dir)
+                scan_state['log_lines'].append(
+                    f'DB import: {import_stats.get("hits_imported", 0)} hits imported')
+            except Exception as e:
+                scan_state['log_lines'].append(f'WARN: DB import failed: {e}')
             scan_state['active_scan_id'] = None
 
     thread = threading.Thread(target=run_scan, daemon=True)
