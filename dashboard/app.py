@@ -23,10 +23,14 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from flask import Flask, render_template, jsonify, request, send_from_directory, make_response
 import numpy as np
+from dotenv import load_dotenv
 
 # Add src to path for imports
 SETI_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(SETI_ROOT, 'src'))
+
+# Load .env for local config (secondary data paths, etc.)
+load_dotenv(os.path.join(SETI_ROOT, '.env'))
 
 app = Flask(__name__, 
             template_folder='templates',
@@ -51,6 +55,43 @@ MID_DIR = os.path.join(DATA_DIR, 'mid')
 FILT_DIR = os.path.join(DATA_DIR, 'filterbank')
 H5_DIR = os.path.join(DATA_DIR, 'h5')
 PROXCEN_DIR = os.path.join(DATA_DIR, 'PROXCEN')
+
+# Secondary data storage path (for large .h5 files moved off the main drive)
+# Configured via .env: SETI_DATA_SECONDARY=D:\seti_data\fine
+DATA_DIRS_SECONDARY = [
+    d.strip() for d in os.environ.get('SETI_DATA_SECONDARY', '').split(';')
+    if d.strip() and os.path.isdir(d.strip())
+]
+
+
+def _resolve_data_file(filepath):
+    """Resolve a data file path, checking primary then secondary locations.
+
+    Checks in order:
+    1. Absolute path as-is
+    2. SETI_ROOT/filepath
+    3. SETI_ROOT/data/filepath
+    4. DATA_DIR/filepath
+    5. Each secondary data dir / filepath (e.g. D:\seti_data\fine / filepath)
+
+    Returns the first existing path, or None if not found.
+    """
+    candidates = [
+        filepath,
+        os.path.join(SETI_ROOT, filepath),
+        os.path.join(SETI_ROOT, 'data', filepath),
+        os.path.join(DATA_DIR, filepath),
+    ]
+    for sec_dir in DATA_DIRS_SECONDARY:
+        candidates.append(os.path.join(sec_dir, filepath))
+        # Also try without the 'fine/' prefix since secondary dir may already be the fine dir
+        if filepath.startswith('fine/') or filepath.startswith('fine\\'):
+            candidates.append(os.path.join(sec_dir, filepath[5:]))
+
+    for c in candidates:
+        if os.path.isfile(c):
+            return c
+    return None
 
 
 def extract_target_name(filename):
@@ -615,21 +656,10 @@ def api_header():
     if not filepath:
         return jsonify({'error': 'No file specified'}), 400
     
-    # Try multiple path resolutions
-    candidates = [
-        os.path.join(SETI_ROOT, filepath),
-        os.path.join(SETI_ROOT, 'data', filepath),
-        os.path.join(DATA_DIR, filepath),
-        filepath,  # absolute path
-    ]
-    full_path = None
-    for c in candidates:
-        if os.path.isfile(c):
-            full_path = c
-            break
+    full_path = _resolve_data_file(filepath)
     
     if not full_path:
-        return jsonify({'error': f'File not found: tried {candidates}'}), 404
+        return jsonify({'error': f'File not found: {filepath}'}), 404
     
     try:
         from blimpy import Waterfall
@@ -817,17 +847,7 @@ def api_scan_start():
     if files_list and len(files_list) > 0:
         # Scan specific files instead of entire data-dir
         for fpath in files_list:
-            # Resolve each file path
-            candidates = [
-                os.path.join(SETI_ROOT, fpath),
-                os.path.join(SETI_ROOT, 'data', fpath),
-                os.path.join(DATA_DIR, fpath),
-            ]
-            resolved = None
-            for c in candidates:
-                if os.path.isfile(c):
-                    resolved = c
-                    break
+            resolved = _resolve_data_file(fpath)
             if resolved:
                 cmd.extend(['--file', resolved])
     elif resolution == 'fine':
@@ -1035,15 +1055,9 @@ def api_scan_resume():
 
     if files_list:
         for fpath in files_list:
-            candidates = [
-                os.path.join(SETI_ROOT, fpath),
-                os.path.join(SETI_ROOT, 'data', fpath),
-                os.path.join(DATA_DIR, fpath),
-            ]
-            for c in candidates:
-                if os.path.isfile(c):
-                    cmd.extend(['--file', c])
-                    break
+            resolved = _resolve_data_file(fpath)
+            if resolved:
+                cmd.extend(['--file', resolved])
     else:
         cmd.extend(['--data-dir', FINE_DIR])
 
@@ -1187,20 +1201,14 @@ def api_delete():
     if not filepath:
         return jsonify({'error': 'No path specified'}), 400
     
-    # Resolve path safely
-    candidates = [
-        os.path.join(SETI_ROOT, filepath),
-        os.path.join(SETI_ROOT, 'data', filepath),
-        os.path.join(DATA_DIR, filepath),
-    ]
-    full_path = None
-    for c in candidates:
-        # Make sure resolved path is under DATA_DIR for safety
-        real_c = os.path.realpath(c)
-        real_data = os.path.realpath(DATA_DIR)
-        if os.path.isfile(real_c) and real_c.startswith(real_data):
-            full_path = real_c
-            break
+    # Resolve path safely (check primary + secondary data dirs)
+    full_path = _resolve_data_file(filepath)
+    if full_path:
+        # Safety: make sure resolved path is under a known data directory
+        real_path = os.path.realpath(full_path)
+        safe_roots = [os.path.realpath(DATA_DIR)] + [os.path.realpath(d) for d in DATA_DIRS_SECONDARY]
+        if not any(real_path.startswith(r) for r in safe_roots):
+            full_path = None
     
     if not full_path:
         return jsonify({'error': 'File not found or outside data directory'}), 404
@@ -2026,18 +2034,7 @@ def api_waterfall():
     if not filepath or freq_mhz is None:
         return jsonify({'error': 'Missing required params: file, freq_mhz'}), 400
 
-    # Resolve file path
-    candidates = [
-        os.path.join(SETI_ROOT, filepath),
-        os.path.join(SETI_ROOT, 'data', filepath),
-        os.path.join(DATA_DIR, filepath),
-        filepath,  # absolute
-    ]
-    full_path = None
-    for c in candidates:
-        if os.path.isfile(c):
-            full_path = c
-            break
+    full_path = _resolve_data_file(filepath)
 
     if not full_path:
         return jsonify({'error': f'File not found: {filepath}'}), 404
