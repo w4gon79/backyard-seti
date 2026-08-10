@@ -372,9 +372,15 @@ function deriveWaterfallFile() {
     var mjd = mjdMatch ? mjdMatch[1] : '57791';
     // Construct first ON file path
     // Pattern: fine/Parkes_<mjd>_<seq>_PROXCEN_S_fine.h5
-    // We don't know the seq, but try common ones or let the API figure it out
-    // Use a generic approach - the API will resolve the file
-    return 'fine/Parkes_' + mjd + '_PROXCEN_S_fine.h5';
+    // Seq numbers for each epoch's first ON file
+    var epochSeqs = {
+        '57791': '72989',
+        '57846': '49534',
+        '57930': '41709',
+        '58020': '21048'
+    };
+    var seq = epochSeqs[firstEpoch] || '72989';
+    return 'fine/Parkes_' + mjd + '_' + seq + '_PROXCEN_S_fine.h5';
 }
 
 function loadPlot(jobId) {

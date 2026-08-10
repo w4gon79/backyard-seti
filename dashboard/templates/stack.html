@@ -6,7 +6,7 @@
     <title>📊 Incoherent Stack - Phase 2C</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=8">
     <link rel="stylesheet" href="/static/css/style.css?v=31">
-    <link rel="stylesheet" href="/static/css/stack.css?v=1">
+    <link rel="stylesheet" href="/static/css/stack.css?v=3">
     <!-- Plotly for waterfall plots -->
     <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 </head>
@@ -35,35 +35,35 @@
             <div class="stack-controls">
 
                 <div class="control-group">
-                    <label for="stack-target">Target</label>
-                    <input type="text" id="stack-target" value="PROXCEN" placeholder="e.g. PROXCEN">
+                    <label for="stack-target" title="The target name must match exactly what BL uses in filenames (e.g. PROXCEN in Parkes_57791_72989_PROXCEN_S_fine.h5). The coordinate database must also have this target registered.">Target <span class="tooltip-icon">ⓘ</span></label>
+                    <input type="text" id="stack-target" value="PROXCEN" placeholder="e.g. PROXCEN" title="Must match BL filename convention exactly. Currently only PROXCEN has downloaded data.">
                 </div>
 
                 <div class="control-row">
                     <div class="control-group">
-                        <label for="stack-freq-center">Frequency Center (MHz)</label>
-                        <input type="number" id="stack-freq-center" value="3000" step="0.1" min="0">
+                        <label for="stack-freq-center" title="Center of the frequency window to stack, in MHz. The stack operates on this window after barycentric correction.">Frequency Center (MHz) <span class="tooltip-icon">ⓘ</span></label>
+                        <input type="number" id="stack-freq-center" value="3000" step="0.1" min="0" title="Center frequency in MHz. Valid range: 2744-3324 (band overlap across all epochs).">
                     </div>
                     <div class="control-group">
-                        <label for="stack-width">Width (MHz)</label>
-                        <input type="number" id="stack-width" value="10" step="0.1" min="0">
+                        <label for="stack-width" title="Width of the frequency window in MHz. Larger windows take longer to process. Full band (580 MHz) is an overnight run.">Width (MHz) <span class="tooltip-icon">ⓘ</span></label>
+                        <input type="number" id="stack-width" value="10" step="0.1" min="0" title="Window width in MHz. 10 MHz takes ~30 min with 4 epochs. Full band (580 MHz) takes hours. Use 0 for full band.">
                     </div>
                 </div>
 
-                <div class="preset-buttons">
-                    <button class="btn-preset" data-width="10" data-center="3000">10 MHz</button>
-                    <button class="btn-preset" data-width="50" data-center="3000">50 MHz</button>
-                    <button class="btn-preset" data-width="100" data-center="3000">100 MHz</button>
-                    <button class="btn-preset" data-width="580" data-center="3034">Full Band</button>
+                <div class="preset-buttons" title="Quick frequency window presets. Full Band covers the entire overlap range across all epochs (2744-3324 MHz).">
+                    <button class="btn-preset" data-width="10" data-center="3000" title="10 MHz window around 3000 MHz. ~30 min with 4 epochs.">10 MHz</button>
+                    <button class="btn-preset" data-width="50" data-center="3000" title="50 MHz window. ~2.5 hours with 4 epochs.">50 MHz</button>
+                    <button class="btn-preset" data-width="100" data-center="3000" title="100 MHz window. ~5 hours with 4 epochs.">100 MHz</button>
+                    <button class="btn-preset" data-width="580" data-center="3034" title="Full 580 MHz band. Overnight run with 4 epochs.">Full Band</button>
                 </div>
 
                 <div class="control-group">
-                    <label for="stack-n-sigma">n_sigma Threshold</label>
-                    <input type="number" id="stack-n-sigma" value="5.0" step="0.5" min="1">
+                    <label for="stack-n-sigma" title="Peak detection threshold in standard deviations above the noise. Lower = more sensitive but more false positives. Higher = only strong signals survive.">n_sigma Threshold <span class="tooltip-icon">ⓘ</span></label>
+                    <input type="number" id="stack-n-sigma" value="5.0" step="0.5" min="1" title="5.0 = 5-sigma detection (1 in 3.5M false positive per bin). Lower to 3-4 for weak signal search with many epochs. Raise to 7-10 for only the strongest peaks.">
                 </div>
 
                 <div class="control-group">
-                    <label>Epochs</label>
+                    <label title="Select which observation epochs to include in the stack. More epochs = better SNR improvement (sqrt(N)).">Epochs <span class="tooltip-icon">ⓘ</span></label>
                     <div id="stack-epochs-list" class="epochs-list">
                         <div class="epochs-loading">
                             <div class="spinner-sm"></div>
@@ -77,7 +77,7 @@
                     </div>
                 </div>
 
-                <button id="stack-run-btn" class="btn-primary btn-run">▶ Run Stack</button>
+                <button id="stack-run-btn" class="btn-primary btn-run" title="Start the incoherent stack job. Runs in the background. Progress is shown below.">▶ Run Stack</button>
 
                 <div id="stack-progress-wrapper" class="stack-progress-wrapper" style="display:none;">
                     <div class="progress-bar">
@@ -212,6 +212,6 @@
     </div>
 </div>
 
-<script src="/static/js/stack.js?v=1"></script>
+<script src="/static/js/stack.js?v=3"></script>
 </body>
 </html>
