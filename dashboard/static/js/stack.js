@@ -364,7 +364,11 @@ function renderPeaksTable() {
 
 function deriveWaterfallFile() {
     if (!currentResults) return null;
+    // epoch_info is an array of {label, median, sigma}
     var epochs = currentResults.used_epochs || [];
+    if (epochs.length === 0 && currentResults.epoch_info) {
+        epochs = currentResults.epoch_info.map(function(e) { return e.label; });
+    }
     if (epochs.length === 0) return null;
     var firstEpoch = epochs[0];
     // Parse epoch label like "MJD_57791" or "57791"
