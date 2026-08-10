@@ -1792,6 +1792,7 @@ def api_barycentric_cross_epoch():
     scan_ids = params.get('scan_ids', [])
     freq_tolerance_hz = params.get('freq_tolerance_hz', 10)
     min_epochs = params.get('min_epochs', 2)
+    min_snr = params.get('min_snr', 0)
     
     if not scan_ids or len(scan_ids) < 2:
         return jsonify({'error': 'Need at least 2 scan_ids for cross-epoch comparison'}), 400
@@ -1810,6 +1811,7 @@ def api_barycentric_cross_epoch():
             scan_dirs,
             freq_tolerance_hz=float(freq_tolerance_hz),
             min_epochs=int(min_epochs),
+            min_snr=float(min_snr),
         )
         
         return jsonify(result)

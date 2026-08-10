@@ -1855,6 +1855,7 @@ async function runCrossEpoch() {
         scan_ids: scanIds,
         freq_tolerance_hz: parseFloat(document.getElementById('bary-tolerance-hz').value) || 10,
         min_epochs: parseInt(document.getElementById('bary-min-epochs').value) || 2,
+        min_snr: parseFloat(document.getElementById('bary-min-snr').value) || 0,
     };
 
     try {
@@ -1890,6 +1891,9 @@ function renderCrossEpochResults(data) {
     summaryHtml += '<div class="bs-item"><span class="bs-label">Candidates:</span><span class="bs-val ' + (candidates.length > 0 ? 'highlight' : '') + '">' + candidates.length + '</span></div>';
     summaryHtml += '<div class="bs-item"><span class="bs-label">Tolerance:</span><span class="bs-val">' + (summary.freq_tolerance_hz || 10) + ' Hz</span></div>';
     summaryHtml += '<div class="bs-item"><span class="bs-label">Min epochs:</span><span class="bs-val">' + (summary.min_epochs || 2) + '</span></div>';
+    if (summary.min_snr && summary.min_snr > 0) {
+        summaryHtml += '<div class="bs-item"><span class="bs-label">Min SNR:</span><span class="bs-val">' + summary.min_snr + '</span></div>';
+    }
     document.getElementById('bary-cross-summary').innerHTML = summaryHtml;
 
     // Render candidate table

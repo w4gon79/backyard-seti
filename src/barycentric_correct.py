@@ -512,7 +512,7 @@ def correct_scan(scan_dir, ra_hours=None, dec_deg=None, telescope='parkes',
 
 # ─── Cross-Epoch Comparison ───────────────────────────────────────────
 
-def cross_epoch_match(scan_dirs, freq_tolerance_hz=10, min_epochs=2):
+def cross_epoch_match(scan_dirs, freq_tolerance_hz=10, min_epochs=2, min_snr=0):
     """
     Find barycentric frequencies present in ON frames across multiple epochs
     but absent from OFF frames.
@@ -542,6 +542,12 @@ def cross_epoch_match(scan_dirs, freq_tolerance_hz=10, min_epochs=2):
         At Parkes fine-res (2.79 Hz/channel), 10 Hz is ~3.6 channels.
     min_epochs : int
         Minimum number of ON epochs required for a candidate. Default 2.
+    min_snr : float
+        Post-filter threshold. Only hits with SNR >= min_snr are considered.
+        Default 0 (no filter, use all hits from the original search).
+        Since turboSETI's SNR threshold is a simple cutoff on the detection
+        statistic, post-filtering existing results is equivalent to re-running
+        turboSETI at the higher threshold. No re-scan needed.
 
     Returns
     -------
@@ -610,8 +616,10 @@ def cross_epoch_match(scan_dirs, freq_tolerance_hz=10, min_epochs=2):
                     'warning': f'Used uncorrected hits: {e}',
                 }
 
-        # Bucket hits
+        # Bucket hits (apply min_snr post-filter)
         for hit in hits:
+            if hit.get('snr', 0) < min_snr:
+                continue
             freq = hit.get('barycentric_freq', hit.get('freq', 0))
             if freq == 0:
                 continue
@@ -722,6 +730,7 @@ def cross_epoch_match(scan_dirs, freq_tolerance_hz=10, min_epochs=2):
             'total_candidates': len(candidates),
             'freq_tolerance_hz': freq_tolerance_hz,
             'min_epochs': min_epochs,
+            'min_snr': min_snr,
         },
     }
 
@@ -763,6 +772,8 @@ def main():
     p_cross.add_argument('scan_dirs', nargs='+', help='Scan directory paths')
     p_cross.add_argument('--tolerance-hz', type=float, default=10, help='Frequency tolerance in Hz')
     p_cross.add_argument('--min-epochs', type=int, default=2, help='Minimum ON epochs for candidate')
+    p_cross.add_argument('--min-snr', type=float, default=0,
+                        help='Post-filter: only use hits with SNR >= this value (no re-scan needed)')
 
     args = parser.parse_args()
 
