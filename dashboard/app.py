@@ -2771,7 +2771,7 @@ def api_stack_history():
         conn = get_db()
         rows = conn.execute('''
             SELECT job_id, target, freq_center, width_mhz, epochs, n_epochs,
-                   n_sigma, status, n_peaks as peak_count_hint,
+                   n_sigma, status,
                    stack_sigma, snr_improvement, created_at, completed_at
             FROM stack_jobs
             ORDER BY created_at DESC
