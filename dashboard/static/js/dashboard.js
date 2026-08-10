@@ -895,6 +895,7 @@ async function loadScansList() {
             renderScanSelector();
             loadScanResults(currentScanId);
             loadScanStats(currentScanId);
+            updateResumeButton();
         } else if (scansList.length === 0) {
             // No scans at all, load legacy results
             loadResults();
@@ -954,6 +955,7 @@ async function deleteCurrentScan() {
             renderScanSelector();
             loadScanResults(currentScanId);
             loadScanStats(currentScanId);
+            updateResumeButton();
         } else {
             allHits = [];
             rejectionCandidates = [];
