@@ -329,17 +329,6 @@ def _discover_scans():
         meta = _load_scan_meta(full_path)
         if meta:
             scans.append(meta)
-        elif entry == 'validation_50mhz':
-            # Legacy: create a virtual meta if none exists
-            scans.append({
-                'scan_id': 'validation_50mhz',
-                'target': 'PROXCEN',
-                'timestamp': '2026-08-06T20:00:00',
-                'status': 'complete',
-                'parameters': {},
-                'stats': {},
-                '_dir': entry,
-            })
     
     # Sort by timestamp descending (newest first)
     scans.sort(key=lambda s: s.get('timestamp', ''), reverse=True)
@@ -2175,6 +2164,19 @@ def api_db_scans():
         from db import get_all_scans
         scans = get_all_scans()
         return jsonify(scans)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/db/scans/<scan_id>', methods=['DELETE'])
+def api_db_delete_scan(scan_id):
+    """Delete a scan and all its hits from the database."""
+    if not re.match(r'^[A-Za-z0-9_-]+$', scan_id):
+        return jsonify({'error': 'Invalid scan_id'}), 400
+    try:
+        from db import delete_scan
+        result = delete_scan(scan_id)
+        return jsonify(result)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

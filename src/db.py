@@ -163,6 +163,39 @@ def get_all_scans(db_path=None):
         conn.close()
 
 
+def delete_scan(scan_id, db_path=None):
+    """Delete a scan and all its hits from the database.
+
+    Also removes any cross-epoch results that reference this scan.
+    Returns dict with counts of deleted rows.
+    """
+    conn = get_db(db_path)
+    try:
+        # Count hits before deleting
+        hit_count = conn.execute('SELECT COUNT(*) FROM hits WHERE scan_id = ?', (scan_id,)).fetchone()[0]
+
+        # Delete hits
+        conn.execute('DELETE FROM hits WHERE scan_id = ?', (scan_id,))
+
+        # Delete the scan record
+        conn.execute('DELETE FROM scans WHERE scan_id = ?', (scan_id,))
+
+        # Delete cross-epoch results that include this scan_id
+        ce_rows = conn.execute('SELECT id, scan_ids FROM cross_epoch_results').fetchall()
+        ce_deleted = 0
+        for row in ce_rows:
+            scan_ids_str = row['scan_ids'] or ''
+            scan_ids = [s.strip() for s in scan_ids_str.split(',')]
+            if scan_id in scan_ids:
+                conn.execute('DELETE FROM cross_epoch_results WHERE id = ?', (row['id'],))
+                ce_deleted += 1
+
+        conn.commit()
+        return {'scan_id': scan_id, 'hits_deleted': hit_count, 'cross_epoch_deleted': ce_deleted}
+    finally:
+        conn.close()
+
+
 def update_scan_barycentric(scan_id, velocity, mjd, ra_hours, dec_deg, telescope, db_path=None):
     """Mark a scan as barycentrically corrected."""
     conn = get_db(db_path)

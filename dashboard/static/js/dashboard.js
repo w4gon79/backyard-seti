@@ -44,6 +44,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('btn-resume-scan').onclick = resumeScan;
     document.getElementById('btn-stop-scan').onclick = stopScan;
     document.getElementById('btn-refresh').onclick = () => { loadResults(); loadStats(); loadScansList(); };
+    document.getElementById('btn-delete-scan').onclick = deleteCurrentScan;
     document.getElementById('btn-select-all').onclick = selectAllFiles;
     document.getElementById('btn-select-none').onclick = selectNoneFiles;
     document.getElementById('btn-full-band').onclick = autoFillBandRange;
@@ -910,11 +911,14 @@ async function loadScansList() {
 
 function renderScanSelector() {
     var sel = document.getElementById('scan-selector');
+    var delBtn = document.getElementById('btn-delete-scan');
     if (scansList.length === 0) {
         sel.innerHTML = '<option value="">No scans yet</option>';
         document.getElementById('scan-meta-display').innerHTML = '';
+        if (delBtn) delBtn.disabled = true;
         return;
     }
+    if (delBtn) delBtn.disabled = false;
     var html = '';
     for (var i = 0; i < scansList.length; i++) {
         var s = scansList[i];
@@ -925,6 +929,42 @@ function renderScanSelector() {
         html += '<option value="' + s.scan_id + '"' + selAttr + '>' + label + '</option>';
     }
     sel.innerHTML = html;
+}
+
+async function deleteCurrentScan() {
+    if (!currentScanId) {
+        alert('Select a scan to delete first.');
+        return;
+    }
+    if (!confirm('Delete scan "' + currentScanId + '" and all its hits from the database?\nThis cannot be undone.'))
+        return;
+    try {
+        var resp = await fetch('/api/db/scans/' + encodeURIComponent(currentScanId), {method: 'DELETE'});
+        var data = await resp.json();
+        if (data.error) {
+            alert('Error: ' + data.error);
+            return;
+        }
+        // Clear selection and reload
+        currentScanId = null;
+        await loadScansList();
+        // Auto-select newest if available
+        if (scansList.length > 0) {
+            currentScanId = scansList[0].scan_id;
+            renderScanSelector();
+            loadScanResults(currentScanId);
+            loadScanStats(currentScanId);
+        } else {
+            allHits = [];
+            rejectionCandidates = [];
+            loadResults();
+            loadStats();
+            document.getElementById('scan-meta-display').innerHTML = '';
+        }
+    } catch(e) {
+        console.error('Delete scan error:', e);
+        alert('Failed to delete scan: ' + e.message);
+    }
 }
 
 function onScanSelected() {

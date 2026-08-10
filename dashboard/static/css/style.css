@@ -183,6 +183,8 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
     background: #c62828;
     color: white;
 }
+.btn-danger:hover:not(:disabled) { background: #d32f2f; }
+.btn-danger:disabled { opacity: 0.4; cursor: not-allowed; }
 .btn-secondary {
     background: #37474f;
     color: #b0bec5;
