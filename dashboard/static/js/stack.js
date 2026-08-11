@@ -492,6 +492,10 @@ function renderInteractiveSpectrum(data) {
     var plotDiv = document.getElementById('stack-plot-div');
     if (!plotDiv) return;
 
+    // Hide the PNG fallback image when Plotly is active
+    var imgEl = document.getElementById('stack-plot-img');
+    if (imgEl) imgEl.style.display = 'none';
+
     // Downsample if too many points (Plotly struggles with >100k points)
     var maxPoints = 50000;
     var step = Math.ceil(freqs.length / maxPoints);
@@ -689,6 +693,7 @@ function renderStackedWaterfallPlot(data) {
     }
     html += '</div>';
     html += '<div id="wf-compare-view" class="wf-view">';
+    html += '<div class="wf-pair-wrap">';
     html += '<div class="wf-pair">';
     html += '<div class="wf-panel-label">' + escapeHtml(single.label) + ' (raw)</div>';
     html += '<div id="wf-single-plot" class="wf-plot"></div>';
@@ -696,6 +701,7 @@ function renderStackedWaterfallPlot(data) {
     html += '<div class="wf-pair">';
     html += '<div class="wf-panel-label">' + escapeHtml(stacked.label) + ' (SNR boosted)</div>';
     html += '<div id="wf-stacked-plot" class="wf-plot"></div>';
+    html += '</div>';
     html += '</div>';
     html += '</div>';
     if (allEpochs.length > 2) {
@@ -795,13 +801,31 @@ function renderWaterfallHeatmap(divId, zData, freqs, times, centerFreq, zmin, zm
         hoverlabel: {
             bgcolor: '#0d1b2a',
             bordercolor: '#4fc3f7',
-            font: { color: '#c8c8e0', size: 11 }
+            font: { color: '#c8c8e0', size: 11 },
+            align: 'auto'
         }
     };
 
     Plotly.newPlot(plotDiv, traces, layout, {
         displayModeBar: false,
         responsive: true
+    });
+
+    // Shift hover label left when it would overflow right edge
+    plotDiv.on('plotly_hover', function(eventData) {
+        var hoverText = plotDiv.querySelector('.hovertext');
+        if (!hoverText) return;
+        var pt = eventData.points && eventData.points[0];
+        if (!pt) return;
+        var plotRect = plotDiv.getBoundingClientRect();
+        // If hover point is in the right 40% of the plot, flip label to left side
+        var pixelX = pt.xaxis && pt.xaxis.l2p ? pt.xaxis.l2p(pt.x) : 0;
+        var plotWidth = plotDiv._fullLayout.width || plotRect.width;
+        if (pixelX > plotWidth * 0.5) {
+            hoverText.style.transform = 'translateX(-110%)';
+        } else {
+            hoverText.style.transform = '';
+        }
     });
 }
 

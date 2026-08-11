@@ -766,13 +766,18 @@
 .wf-view {
     width: 100%;
 }
-.wf-pair {
+.wf-pair-wrap {
     display: flex;
     gap: 16px;
     margin-bottom: 8px;
 }
+.wf-pair {
+    flex: 1 1 50%;
+    min-width: 0;
+    overflow: hidden;
+}
 .wf-pair > .wf-pair {
-    flex: 1;
+    flex: 1 1 50%;
 }
 .wf-panel-label {
     color: #82b1ff;
