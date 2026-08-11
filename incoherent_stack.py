@@ -572,6 +572,8 @@ def run_stack_job(params, progress_callback=None):
         'stack_sigma': sigma,
         'epoch_info': epoch_info,
         'grid_n_bins': len(common_grid),
+        'grid_freqs': common_grid.tolist(),
+        'stack_power': stack.tolist(),
     }
 
     # Save JSON

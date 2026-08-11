@@ -2960,6 +2960,8 @@ def api_stack_results(job_id):
             'peaks': r.get('peaks', []),
             'epoch_info': r.get('epoch_info', []),
             'grid_n_bins': r.get('grid_n_bins'),
+            'grid_freqs': r.get('grid_freqs'),
+            'stack_power': r.get('stack_power'),
         })
 
     # Fall back to SQLite DB (for jobs from previous dashboard runs)

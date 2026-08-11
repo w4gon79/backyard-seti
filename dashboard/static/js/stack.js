@@ -388,15 +388,104 @@ function deriveWaterfallFile() {
 }
 
 function loadPlot(jobId) {
+    // Try interactive Plotly chart first (needs grid_freqs + stack_power from API)
+    if (currentResults && currentResults.grid_freqs && currentResults.stack_power) {
+        renderInteractiveSpectrum(currentResults);
+        return;
+    }
+    // Fallback to static PNG
     var img = document.getElementById('stack-plot-img');
     img.src = '/api/stack/plot/' + jobId + '?t=' + Date.now();
     img.style.display = 'none';
-    img.onload = function() {
-        img.style.display = 'block';
+    img.onload = function() { img.style.display = 'block'; };
+    img.onerror = function() { img.style.display = 'none'; };
+}
+
+function renderInteractiveSpectrum(data) {
+    var freqs = data.grid_freqs;
+    var power = data.stack_power;
+    var peaks = data.peaks || [];
+    var median = data.stack_median || 0;
+    var sigma = data.stack_sigma || 1;
+
+    var plotDiv = document.getElementById('stack-plot-div');
+    if (!plotDiv) return;
+
+    // Downsample if too many points (Plotly struggles with >100k points)
+    var maxPoints = 50000;
+    var step = Math.ceil(freqs.length / maxPoints);
+    var fPlot = [], pPlot = [];
+    for (var i = 0; i < freqs.length; i += step) {
+        fPlot.push(freqs[i]);
+        pPlot.push(power[i]);
+    }
+
+    var traces = [{
+        x: fPlot,
+        y: pPlot,
+        type: 'scatter',
+        mode: 'lines',
+        line: { color: '#4fc3f7', width: 0.5 },
+        name: 'Stacked spectrum',
+        hovertemplate: '%{x:.6f} MHz<br>Power: %{y:.2e}<extra></extra>'
+    }];
+
+    // Add peak markers
+    if (peaks.length > 0) {
+        var peakX = [], peakY = [];
+        for (var i = 0; i < peaks.length && i < 50; i++) {
+            var pf = peaks[i].freq_mhz || peaks[i].freq || 0;
+            // Find nearest power value
+            var idx = Math.round((pf - freqs[0]) / (freqs[freqs.length - 1] - freqs[0]) * (freqs.length - 1));
+            if (idx >= 0 && idx < power.length) {
+                peakX.push(pf);
+                peakY.push(power[idx]);
+            }
+        }
+        if (peakX.length > 0) {
+            traces.push({
+                x: peakX,
+                y: peakY,
+                type: 'scatter',
+                mode: 'markers',
+                marker: { color: '#ffeb3b', size: 8, symbol: 'triangle-up' },
+                name: 'Peaks (>' + (data.n_sigma || 5) + '\u03c3)',
+                hovertemplate: '%{x:.6f} MHz<br>Peak<extra></extra>'
+            });
+        }
+    }
+
+    // Noise threshold line
+    if (sigma > 0) {
+        var threshY = median + (data.n_sigma || 5) * sigma;
+        traces.push({
+            x: [fPlot[0], fPlot[fPlot.length - 1]],
+            y: [threshY, threshY],
+            type: 'scatter',
+            mode: 'lines',
+            line: { color: '#ef5350', width: 1, dash: 'dash' },
+            name: (data.n_sigma || 5) + '\u03c3 threshold',
+            hoverinfo: 'skip'
+        });
+    }
+
+    var layout = {
+        paper_bgcolor: 'transparent',
+        plot_bgcolor: '#0d1b2a',
+        font: { color: '#c8c8e0', size: 11 },
+        xaxis: { title: 'Barycentric Frequency (MHz)', gridcolor: '#1e3a5f', tickformat: '.4f' },
+        yaxis: { title: 'Power (dB above median)', gridcolor: '#1e3a5f' },
+        margin: { l: 60, r: 20, t: 30, b: 50 },
+        showlegend: true,
+        legend: { x: 0.02, y: 0.98, bgcolor: 'rgba(13,27,42,0.8)' },
+        hovermode: 'closest'
     };
-    img.onerror = function() {
-        img.style.display = 'none';
-    };
+
+    Plotly.newPlot(plotDiv, traces, layout, {
+        displayModeBar: true,
+        responsive: true,
+        modeBarButtonsToRemove: ['lasso2d', 'autoScale2d']
+    });
 }
 
 // ─── Waterfall Modal ──────────────────────────────────────────────────
