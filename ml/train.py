@@ -47,8 +47,13 @@ def load_crops(target='PROXCEN', crop_size=64):
 def train_autoencoder(crops_tensor, crop_size=64, latent_dim=32, 
                       epochs=50, batch_size=256, lr=0.001, 
                       weight_decay=0.0001, train_split=0.8,
-                      early_stop_patience=10, device='auto'):
-    """Train the autoencoder and return the model + training history."""
+                      early_stop_patience=10, device='auto',
+                      resume_checkpoint=None):
+    """Train the autoencoder and return the model + training history.
+    
+    If resume_checkpoint is provided, loads model weights + optimizer state
+    + scheduler state and continues training (incremental/transfer learning).
+    """
     
     # Device selection
     if device == 'auto':
@@ -89,11 +94,30 @@ def train_autoencoder(crops_tensor, crop_size=64, latent_dim=32,
     best_val_loss = float('inf')
     best_state = None
     patience_counter = 0
+    start_epoch = 1
+    
+    # Resume from checkpoint if provided (incremental training)
+    if resume_checkpoint and os.path.isfile(resume_checkpoint):
+        print(f"Resuming from checkpoint: {resume_checkpoint}")
+        ckpt = torch.load(resume_checkpoint, map_location=device, weights_only=False)
+        model.load_state_dict(ckpt['model_state'])
+        if 'optimizer_state' in ckpt:
+            optimizer.load_state_dict(ckpt['optimizer_state'])
+        if 'scheduler_state' in ckpt:
+            scheduler.load_state_dict(ckpt['scheduler_state'])
+        if 'best_val_loss' in ckpt:
+            best_val_loss = ckpt['best_val_loss']
+        if 'history' in ckpt:
+            history = ckpt['history']
+            start_epoch = len(history.get('train_loss', [])) + 1
+        print(f"  Loaded: start_epoch={start_epoch}, best_val_loss={best_val_loss:.6f}")
+    elif resume_checkpoint:
+        print(f"  WARNING: Checkpoint not found at {resume_checkpoint}, starting fresh")
     
     ckpt_dir = os.path.join(SETI_ROOT, 'ml', 'checkpoints')
     os.makedirs(ckpt_dir, exist_ok=True)
     
-    for epoch in range(1, epochs + 1):
+    for epoch in range(start_epoch, start_epoch + epochs):
         # Train
         model.train()
         train_losses = []
@@ -136,22 +160,26 @@ def train_autoencoder(crops_tensor, crop_size=64, latent_dim=32,
             patience_counter += 1
         
         # Print progress
-        if epoch % 5 == 0 or epoch == 1 or patience_counter >= early_stop_patience:
-            print(f"  Epoch {epoch:3d}/{epochs}: train={train_loss:.6f} val={val_loss:.6f} lr={current_lr:.6f} {'*' if val_loss == best_val_loss else ''}")
+        if epoch % 5 == 0 or epoch == start_epoch or patience_counter >= early_stop_patience:
+            print(f"  Epoch {epoch:3d}/{start_epoch + epochs - 1}: train={train_loss:.6f} val={val_loss:.6f} lr={current_lr:.6f} {'*' if val_loss == best_val_loss else ''}")
         
         # Early stopping
         if patience_counter >= early_stop_patience:
             print(f"  Early stopping at epoch {epoch} (patience={early_stop_patience})")
             break
     
+    final_epoch = epoch
+    
     # Restore best model
     if best_state:
         model.load_state_dict(best_state)
     
-    # Save checkpoint
+    # Save checkpoint (includes optimizer + scheduler state for resume)
     ckpt_path = os.path.join(ckpt_dir, 'autoencoder_best.pt')
     torch.save({
         'model_state': model.state_dict(),
+        'optimizer_state': optimizer.state_dict(),
+        'scheduler_state': scheduler.state_dict(),
         'config': {
             'crop_size': crop_size,
             'latent_dim': latent_dim,
@@ -160,6 +188,7 @@ def train_autoencoder(crops_tensor, crop_size=64, latent_dim=32,
         },
         'best_val_loss': best_val_loss,
         'history': history,
+        'last_epoch': final_epoch,
     }, ckpt_path)
     
     print(f"\nBest val loss: {best_val_loss:.6f}")
@@ -203,9 +232,14 @@ if __name__ == '__main__':
     parser.add_argument('--epochs', type=int, default=50)
     parser.add_argument('--batch-size', type=int, default=256)
     parser.add_argument('--lr', type=float, default=0.001)
+    parser.add_argument('--resume', action='store_true', help='Continue training from last checkpoint')
     args = parser.parse_args()
     
     crops, labels, hit_ids = load_crops(args.target, args.crop_size)
+    
+    resume_ckpt = None
+    if args.resume:
+        resume_ckpt = os.path.join(SETI_ROOT, 'ml', 'checkpoints', 'autoencoder_best.pt')
     
     model, history = train_autoencoder(
         crops,
@@ -214,4 +248,5 @@ if __name__ == '__main__':
         epochs=args.epochs,
         batch_size=args.batch_size,
         lr=args.lr,
+        resume_checkpoint=resume_ckpt,
     )

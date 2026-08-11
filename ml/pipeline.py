@@ -23,7 +23,7 @@ from ml.infer import score_all_hits
 
 def run_pipeline(target='PROXCEN', crop_size=64, epochs=50, 
                  latent_dim=32, batch_size=256, lr=0.001,
-                 top_percent=5, max_per_file=5000):
+                 top_percent=5, max_per_file=5000, resume=False):
     """Run the full ML pipeline end-to-end."""
     
     total_start = time.time()
@@ -48,11 +48,15 @@ def run_pipeline(target='PROXCEN', crop_size=64, epochs=50,
     
     # ─── Phase 2: Train ──────────────────────────────────────────────
     print("=" * 60)
-    print("PHASE 2: TRAINING")
+    print("PHASE 2: TRAINING" + (" (RESUME)" if resume else ""))
     print("=" * 60)
     
     t0 = time.time()
     crops_tensor, labels, hit_ids = load_crops(target, crop_size)
+    
+    resume_ckpt = None
+    if resume:
+        resume_ckpt = os.path.join(SETI_ROOT, 'ml', 'checkpoints', 'autoencoder_best.pt')
     
     model, history = train_autoencoder(
         crops_tensor,
@@ -61,6 +65,7 @@ def run_pipeline(target='PROXCEN', crop_size=64, epochs=50,
         epochs=epochs,
         batch_size=batch_size,
         lr=lr,
+        resume_checkpoint=resume_ckpt,
     )
     
     print(f"\nTraining complete: {time.time()-t0:.1f}s\n")
@@ -105,6 +110,7 @@ if __name__ == '__main__':
     parser.add_argument('--lr', type=float, default=0.001)
     parser.add_argument('--top-percent', type=float, default=5)
     parser.add_argument('--max-per-file', type=int, default=5000)
+    parser.add_argument('--resume', action='store_true', help='Continue training from last checkpoint')
     args = parser.parse_args()
     
     run_pipeline(
@@ -116,4 +122,5 @@ if __name__ == '__main__':
         lr=args.lr,
         top_percent=args.top_percent,
         max_per_file=args.max_per_file,
+        resume=args.resume,
     )
