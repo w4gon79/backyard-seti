@@ -3147,6 +3147,239 @@ def api_stack_history():
         return jsonify({'error': str(e)}), 500
 
 
+# ─── API: Stack Peak Classification & Cross-Reference ────────────────
+
+@app.route('/api/stack/peaks/<job_id>/classify')
+def api_stack_classify(job_id):
+    """Classify stack peaks as Candidate/Possible/RFI.
+
+    Uses peak width, OFF-frame contamination, and multi-epoch presence
+    to assign a classification badge.
+    """
+    try:
+        from db import get_db
+        conn = get_db()
+
+        # Load the stack job's peaks
+        row = conn.execute(
+            'SELECT peaks_json, target FROM stack_jobs WHERE job_id = ?', (job_id,)
+        ).fetchone()
+        if not row:
+            conn.close()
+            return jsonify({'error': 'Job not found'}), 404
+
+        peaks = json.loads(row['peaks_json'] or '[]')
+        if not peaks:
+            conn.close()
+            return jsonify({'classifications': [], 'summary': {'candidate': 0, 'possible': 0, 'rfi': 0}})
+
+        target = row['target'] or ''
+
+        # Determine scan_ids associated with this target
+        scan_rows = conn.execute(
+            'SELECT scan_id FROM scans WHERE target = ?', (target,)
+        ).fetchall()
+        scan_ids = [r['scan_id'] for r in scan_rows]
+        n_scans = len(scan_ids)
+
+        # Tolerance for frequency matching: 0.001 MHz (1 kHz) for cross-ref,
+        # but wider (0.01 MHz / 10 kHz) for OFF contamination check since
+        # we're looking at whether the frequency region is polluted
+        off_tol_mhz = 0.01
+        on_tol_mhz = 0.005
+
+        # Classify each peak
+        classifications = []
+        for p in peaks:
+            freq = p.get('freq_mhz', 0)
+            width = p.get('width_chans', 0)
+
+            # Check OFF contamination: count OFF hits within ±off_tol
+            off_count = 0
+            off_max_snr = 0
+            if scan_ids:
+                placeholders = ','.join('?' * len(scan_ids))
+                off_row = conn.execute(
+                    f"SELECT COUNT(*) as cnt, MAX(snr) as max_snr FROM hits "
+                    f"WHERE scan_id IN ({placeholders}) AND on_off = 'OFF' "
+                    f"AND barycentric_freq BETWEEN ? AND ?",
+                    scan_ids + [freq - off_tol_mhz, freq + off_tol_mhz]
+                ).fetchone()
+                off_count = off_row['cnt'] if off_row else 0
+                off_max_snr = off_row['max_snr'] if off_row and off_row['max_snr'] else 0
+
+            # Check multi-epoch presence: how many distinct scans have ON hits near this freq?
+            epoch_presence = 0
+            if scan_ids:
+                placeholders = ','.join('?' * len(scan_ids))
+                presence_row = conn.execute(
+                    f"SELECT COUNT(DISTINCT scan_id) as cnt FROM hits "
+                    f"WHERE scan_id IN ({placeholders}) AND on_off = 'ON' "
+                    f"AND barycentric_freq BETWEEN ? AND ?",
+                    scan_ids + [freq - on_tol_mhz, freq + on_tol_mhz]
+                ).fetchone()
+                epoch_presence = presence_row['cnt'] if presence_row else 0
+
+            # Classification logic
+            score = 0
+            reasons = []
+
+            # Width scoring
+            if 3 <= width <= 10:
+                score += 2
+                reasons.append('good width')
+            elif width == 1 or width == 2:
+                score += 1
+                reasons.append('narrow (noise spike?)')
+            elif width > 10:
+                score -= 2
+                reasons.append(f'wide ({width} chans)')
+            elif width > 20:
+                score -= 3
+                reasons.append(f'very wide ({width} chans)')
+
+            # OFF contamination scoring
+            if off_count > 10 or off_max_snr > 100:
+                score -= 3
+                reasons.append(f'OFF contamination ({off_count} hits, SNR {off_max_snr:.0f})')
+            elif off_count > 0:
+                score -= 1
+                reasons.append(f'weak OFF presence ({off_count} hits)')
+            else:
+                score += 2
+                reasons.append('no OFF contamination')
+
+            # Multi-epoch presence scoring
+            if n_scans > 0:
+                presence_ratio = epoch_presence / n_scans
+                if presence_ratio >= 0.5:
+                    score += 2
+                    reasons.append(f'in {epoch_presence}/{n_scans} scans')
+                elif epoch_presence >= 1:
+                    score += 0
+                    reasons.append(f'in {epoch_presence}/{n_scans} scans')
+                else:
+                    # Only in the stack, not in individual scan hits
+                    # Could be below threshold individually
+                    score += 1
+                    reasons.append('below individual threshold')
+
+            # Assign class
+            if score >= 4:
+                cls = 'candidate'
+            elif score >= 1:
+                cls = 'possible'
+            else:
+                cls = 'rfi'
+
+            classifications.append({
+                'freq_mhz': freq,
+                'class': cls,
+                'score': score,
+                'reasons': reasons,
+                'off_count': off_count,
+                'off_max_snr': round(off_max_snr, 2) if off_max_snr else 0,
+                'epoch_presence': epoch_presence,
+                'n_scans': n_scans,
+            })
+
+        conn.close()
+
+        summary = {
+            'candidate': sum(1 for c in classifications if c['class'] == 'candidate'),
+            'possible': sum(1 for c in classifications if c['class'] == 'possible'),
+            'rfi': sum(1 for c in classifications if c['class'] == 'rfi'),
+        }
+
+        return jsonify({'classifications': classifications, 'summary': summary})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/stack/peaks/<job_id>/crossref')
+def api_stack_crossref(job_id):
+    """Cross-reference stack peaks against cross_epoch_candidates.
+
+    Matches peak frequencies within ±tolerance (default 1 kHz = 0.001 MHz)
+    against known cross-epoch candidates from the database.
+    """
+    try:
+        from db import get_db
+        conn = get_db()
+
+        # Load the stack job's peaks
+        row = conn.execute(
+            'SELECT peaks_json FROM stack_jobs WHERE job_id = ?', (job_id,)
+        ).fetchone()
+        if not row:
+            conn.close()
+            return jsonify({'error': 'Job not found'}), 404
+
+        peaks = json.loads(row['peaks_json'] or '[]')
+        if not peaks:
+            conn.close()
+            return jsonify({'matches': [], 'n_matched': 0})
+
+        # Load all cross-epoch candidates
+        ce_rows = conn.execute(
+            'SELECT id, result_json, tolerance_hz, min_epochs, candidate_count, created_at FROM cross_epoch_results'
+        ).fetchall()
+
+        # Parse all candidates from all cross-epoch results
+        all_candidates = []
+        for ce_row in ce_rows:
+            try:
+                result = json.loads(ce_row['result_json'] or '{}')
+                for cand in result.get('candidates', []):
+                    all_candidates.append({
+                        'freq_mhz': cand.get('barycentric_freq_mhz', 0),
+                        'epoch_count': cand.get('epoch_count', 0),
+                        'max_snr': cand.get('max_snr', 0),
+                        'mean_drift': cand.get('mean_drift_rate', 0),
+                        'ce_result_id': ce_row['id'],
+                        'tolerance_hz': ce_row['tolerance_hz'],
+                        'min_epochs': ce_row['min_epochs'],
+                        'created_at': ce_row['created_at'],
+                    })
+            except (json.JSONDecodeError, TypeError):
+                continue
+
+        # Match peaks to candidates
+        tolerance_mhz = 0.001  # 1 kHz default tolerance
+        matches = []
+
+        for p in peaks:
+            freq = p.get('freq_mhz', 0)
+            matched_cands = []
+            for cand in all_candidates:
+                if abs(cand['freq_mhz'] - freq) <= tolerance_mhz:
+                    matched_cands.append(cand)
+
+            if matched_cands:
+                matches.append({
+                    'freq_mhz': freq,
+                    'matched': True,
+                    'candidates': matched_cands,
+                })
+            else:
+                matches.append({
+                    'freq_mhz': freq,
+                    'matched': False,
+                    'candidates': [],
+                })
+
+        conn.close()
+
+        n_matched = sum(1 for m in matches if m['matched'])
+        return jsonify({
+            'matches': matches,
+            'n_matched': n_matched,
+            'n_total_candidates': len(all_candidates),
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 # ─── Main ─────────────────────────────────────────────────────────────
 
 # Ensure DB schema is up to date (creates stack_jobs table if missing)

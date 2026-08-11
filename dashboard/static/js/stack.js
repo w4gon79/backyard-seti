@@ -15,7 +15,10 @@ var currentResults = null;
 // ─── Init ─────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', function() {
     loadEpochs();
-    loadHistory();
+    loadHistory().then(function() {
+        // After history loads, check for any running job and auto-connect
+        autoConnectToRunningJob();
+    });
 
     // Event handlers
     document.getElementById('stack-run-btn').onclick = runStack;
@@ -245,6 +248,10 @@ async function loadResults(jobId) {
         renderPeaksTable();
         loadPlot(jobId);
 
+        // Async load classification + cross-ref (post-processing features)
+        loadClassifications(jobId);
+        loadCrossRef(jobId);
+
         // Re-enable run button
         var btn = document.getElementById('stack-run-btn');
         btn.disabled = false;
@@ -337,12 +344,32 @@ function renderPeaksTable() {
 
     if (display.length === 0) {
         document.getElementById('stack-peaks-tbody').innerHTML =
-            '<tr><td colspan="5" style="color:#546e7a;text-align:center;padding:20px;">No peaks above threshold</td></tr>';
+            '<tr><td colspan="7" style="color:#546e7a;text-align:center;padding:20px;">No peaks above threshold</td></tr>';
         return;
     }
 
     // Derive the first ON file for waterfall
     var waterfallFile = deriveWaterfallFile();
+
+    // Classification data (loaded async after render)
+    var classData = currentResults._classifications || {};
+    var classMap = {};
+    if (classData.classifications) {
+        for (var i = 0; i < classData.classifications.length; i++) {
+            var c = classData.classifications[i];
+            classMap[c.freq_mhz.toFixed(6)] = c;
+        }
+    }
+
+    // Cross-ref data
+    var xrefData = currentResults._crossref || {};
+    var xrefMap = {};
+    if (xrefData.matches) {
+        for (var i = 0; i < xrefData.matches.length; i++) {
+            var m = xrefData.matches[i];
+            if (m.matched) xrefMap[m.freq_mhz.toFixed(6)] = m;
+        }
+    }
 
     var html = '';
     for (var i = 0; i < display.length; i++) {
@@ -351,15 +378,49 @@ function renderPeaksTable() {
         var snr = p.snr || 0;
         var width = p.width_chans || p.width || 0;
         var peakJson = encodeURIComponent(JSON.stringify({ freq: freq, file: waterfallFile }));
+
+        // Classification badge
+        var freqKey = freq.toFixed(6);
+        var cls = classMap[freqKey];
+        var classBadge = '<span class="peak-class pending" data-freq="' + freqKey + '">···</span>';
+        if (cls) {
+            var clsIcon = cls.class === 'candidate' ? '●' : (cls.class === 'possible' ? '●' : '●');
+            classBadge = '<span class="peak-class ' + cls.class + '" title="' + escapeHtml(cls.reasons.join('; ')) + '" data-freq="' + freqKey + '">' + clsIcon + '</span>';
+        }
+
+        // Cross-epoch badge
+        var xref = xrefMap[freqKey];
+        var xrefBadge = '<span class="xref-badge none">—</span>';
+        if (xref) {
+            var nCands = xref.candidates.length;
+            var topCand = xref.candidates[0];
+            var title = topCand.epoch_count + ' epochs, SNR ' + (topCand.max_snr || 0).toFixed(1) + ', drift ' + (topCand.mean_drift || 0).toFixed(2) + ' Hz/s';
+            xrefBadge = '<span class="xref-badge match" title="' + escapeHtml(title) + '" data-candidates=\'' + encodeURIComponent(JSON.stringify(xref.candidates)) + '\' onclick="showXrefDetail(this)">🔗 ' + nCands + '</span>';
+        }
+
         html += '<tr data-peak="' + peakJson + '">' +
             '<td style="color:#546e7a;">' + (i + 1) + '</td>' +
             '<td class="peak-freq">' + freq.toFixed(6) + '</td>' +
             '<td class="peak-snr">' + snr.toFixed(2) + '</td>' +
             '<td class="peak-width">' + width + '</td>' +
+            '<td class="peak-class-cell">' + classBadge + '</td>' +
+            '<td class="xref-cell">' + xrefBadge + '</td>' +
             '<td><button class="btn-waterfall" onclick="event.stopPropagation(); showStackWaterfall(this.closest(\'tr\'));">🔍 View</button></td>' +
             '</tr>';
     }
     document.getElementById('stack-peaks-tbody').innerHTML = html;
+
+    // Update classification summary if available
+    if (classData.summary) {
+        var s = classData.summary;
+        var sumEl = document.getElementById('stack-class-summary');
+        if (sumEl) {
+            sumEl.innerHTML = '<span class="class-sum candidate">' + s.candidate + ' candidates</span>' +
+                '<span class="class-sum possible">' + s.possible + ' possible</span>' +
+                '<span class="class-sum rfi">' + s.rfi + ' RFI</span>';
+            sumEl.style.display = '';
+        }
+    }
 }
 
 function deriveWaterfallFile() {
@@ -610,6 +671,89 @@ function closeWaterfallModal() {
     if (plotDiv && plotDiv.data) Plotly.purge(plotDiv);
 }
 
+// ─── Peak Classification Loader ─────────────────────────────────────
+async function loadClassifications(jobId) {
+    try {
+        var resp = await fetch('/api/stack/peaks/' + jobId + '/classify');
+        var data = await resp.json();
+        if (data.error) return;
+        if (currentResults) {
+            currentResults._classifications = data;
+            renderPeaksTable();
+        }
+    } catch(err) {
+        console.error('Classification load error:', err);
+    }
+}
+
+// ─── Cross-Epoch Reference Loader ────────────────────────────────────
+async function loadCrossRef(jobId) {
+    try {
+        var resp = await fetch('/api/stack/peaks/' + jobId + '/crossref');
+        var data = await resp.json();
+        if (data.error) return;
+        if (currentResults) {
+            currentResults._crossref = data;
+            renderPeaksTable();
+        }
+    } catch(err) {
+        console.error('Cross-ref load error:', err);
+    }
+}
+
+// ─── Cross-Epoch Detail Modal ────────────────────────────────────────
+window.showXrefDetail = function(el) {
+    var encoded = el.getAttribute('data-candidates');
+    if (!encoded) return;
+    var cands;
+    try { cands = JSON.parse(decodeURIComponent(encoded)); }
+    catch(e) { return; }
+
+    var modal = document.getElementById('waterfall-modal');
+    var title = document.getElementById('waterfall-title');
+    var metaDiv = document.getElementById('waterfall-meta');
+    var bodyDiv = document.getElementById('waterfall-body');
+
+    title.textContent = '🔗 Cross-Epoch Candidates';
+
+    var metaHtml = '<div class="wm-item"><span class="wm-label">Matched peaks:</span><span class="wm-val">' + cands.length + '</span></div>';
+    metaDiv.innerHTML = metaHtml;
+
+    var html = '<div style="padding:16px;color:#c8c8e0;">';
+    html += '<table style="width:100%;border-collapse:collapse;font-size:0.9em;">';
+    html += '<tr style="border-bottom:1px solid #1e3a5f;color:#90a4ae;"><th style="text-align:left;padding:6px;">Freq (MHz)</th><th>Epochs</th><th>Max SNR</th><th>Drift (Hz/s)</th></tr>';
+    for (var i = 0; i < cands.length; i++) {
+        var c = cands[i];
+        html += '<tr style="border-bottom:1px solid #112233;">';
+        html += '<td style="padding:6px;color:#4fc3f7;font-family:Consolas,monospace;">' + (c.freq_mhz || 0).toFixed(6) + '</td>';
+        html += '<td style="text-align:center;color:#a5d6a7;">' + (c.epoch_count || 0) + '</td>';
+        html += '<td style="text-align:center;color:#ffeb3b;">' + (c.max_snr || 0).toFixed(1) + '</td>';
+        html += '<td style="text-align:center;color:#90a4ae;">' + (c.mean_drift || 0).toFixed(2) + '</td>';
+        html += '</tr>';
+    }
+    html += '</table></div>';
+    bodyDiv.innerHTML = html;
+    modal.style.display = 'flex';
+};
+
+// ─── Auto-connect to running job on page load ─────────────────────────
+function autoConnectToRunningJob() {
+    var items = document.querySelectorAll('.history-item');
+    for (var i = 0; i < items.length; i++) {
+        var status = items[i].getAttribute('data-status');
+        if (status === 'running' || status === 'pending') {
+            var jobId = items[i].getAttribute('data-job');
+            currentJobId = jobId;
+            showView('running');
+            document.getElementById('stack-running-status').textContent = 'Connected to running job ' + jobId + '...';
+            document.getElementById('stack-running-fill').style.width = '0%';
+            document.getElementById('stack-running-epoch').textContent = '';
+            startPolling();
+            break; // Only auto-connect to the first running job
+        }
+    }
+}
+
 // ─── History ──────────────────────────────────────────────────────────
 async function loadHistory() {
     try {
@@ -674,6 +818,22 @@ function renderHistory(jobs) {
             var status = this.getAttribute('data-status');
             if (status === 'complete') {
                 loadResults(jobId);
+            } else if (status === 'running' || status === 'pending') {
+                // Show live progress for in-progress jobs
+                currentJobId = jobId;
+                showView('running');
+                document.getElementById('stack-running-status').textContent = 'Connected to running job ' + jobId + '...';
+                document.getElementById('stack-running-fill').style.width = '0%';
+                document.getElementById('stack-running-epoch').textContent = '';
+                startPolling();
+            } else if (status === 'interrupted' || status === 'error') {
+                // Show error view for failed jobs
+                currentJobId = jobId;
+                fetch('/api/stack/status/' + jobId).then(function(r) { return r.json(); }).then(function(data) {
+                    showError(data.progress_msg || data.error || 'Job ' + status);
+                }).catch(function() {
+                    showError('Could not load job details');
+                });
             }
         };
     }

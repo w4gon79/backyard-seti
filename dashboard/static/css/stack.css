@@ -669,6 +669,73 @@
 }
 #waterfall-plot { width: 100%; min-height: 400px; }
 
+/* ─── Peak Classification Badges ───────────────────────────────────── */
+.peak-class {
+    display: inline-block;
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    text-align: center;
+    line-height: 16px;
+    font-size: 10px;
+    cursor: help;
+    vertical-align: middle;
+}
+.peak-class.candidate {
+    background: #1b5e20;
+    color: #a5d6a7;
+    box-shadow: 0 0 6px rgba(76, 175, 80, 0.5);
+}
+.peak-class.possible {
+    background: #4e342e;
+    color: #ffcc02;
+}
+.peak-class.rfi {
+    background: #4a1010;
+    color: #ef5350;
+}
+.peak-class.pending {
+    background: #37474f;
+    color: #546e7a;
+}
+.peak-class-cell { text-align: center; }
+
+/* ─── Cross-Epoch Badges ───────────────────────────────────────────── */
+.xref-badge {
+    font-size: 0.85em;
+    padding: 2px 6px;
+    border-radius: 4px;
+    white-space: nowrap;
+}
+.xref-badge.match {
+    background: #1a237e;
+    color: #82b1ff;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+.xref-badge.match:hover {
+    background: #283593;
+}
+.xref-badge.none {
+    color: #37474f;
+}
+.xref-cell { text-align: center; }
+
+/* ─── Classification Summary Bar ───────────────────────────────────── */
+.class-summary-bar {
+    display: inline-flex;
+    gap: 10px;
+    margin-left: 12px;
+    font-size: 0.85em;
+}
+.class-sum {
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-weight: 600;
+}
+.class-sum.candidate { background: #1b5e20; color: #a5d6a7; }
+.class-sum.possible { background: #4e342e; color: #ffcc02; }
+.class-sum.rfi { background: #4a1010; color: #ef5350; }
+
 /* Responsive */
 @media (max-width: 900px) {
     .stack-row { flex-direction: column; }

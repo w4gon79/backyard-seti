@@ -6,7 +6,7 @@
     <title>📊 Incoherent Stack - Phase 2C</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=8">
     <link rel="stylesheet" href="/static/css/style.css?v=31">
-    <link rel="stylesheet" href="/static/css/stack.css?v=7">
+    <link rel="stylesheet" href="/static/css/stack.css?v=9">
     <!-- Plotly for waterfall plots -->
     <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 </head>
@@ -156,6 +156,7 @@
                         <div class="stack-subsection-header">
                             <span>🌟 Top Peaks</span>
                             <span id="stack-peak-count" class="peak-count-badge"></span>
+                            <span id="stack-class-summary" class="class-summary-bar" style="display:none;"></span>
                         </div>
                         <div class="stack-peaks-wrap">
                             <table class="stack-peaks-table" id="stack-peaks-table">
@@ -164,7 +165,9 @@
                                         <th data-sort="index" class="sortable">#</th>
                                         <th data-sort="freq" class="sortable sorted-desc">Freq (MHz) ▼</th>
                                         <th data-sort="snr" class="sortable">SNR</th>
-                                        <th data-sort="width" class="sortable">Width (chans)</th>
+                                        <th data-sort="width" class="sortable">Width</th>
+                                        <th>Class</th>
+                                        <th>Cross-Epoch</th>
                                         <th>Action</th>
                                     </tr>
                                 </thead>
@@ -213,6 +216,6 @@
     </div>
 </div>
 
-<script src="/static/js/stack.js?v=8"></script>
+<script src="/static/js/stack.js?v=10"></script>
 </body>
 </html>
