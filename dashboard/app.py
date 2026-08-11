@@ -2678,7 +2678,8 @@ def api_stack_run():
                     status = ?, progress = ?, progress_msg = ?,
                     peaks_json = ?, plot_path = ?,
                     stack_median = ?, stack_sigma = ?,
-                    snr_improvement = ?, completed_at = datetime('now')
+                    snr_improvement = ?, epoch_info_json = ?,
+                    completed_at = datetime('now')
                     WHERE job_id = ?
                 ''', (
                     job_state['status'], job_state['progress'],
@@ -2687,6 +2688,7 @@ def api_stack_run():
                     plot_path if os.path.isfile(plot_path) else None,
                     result.get('stack_median'), result.get('stack_sigma'),
                     result.get('snr_improvement'),
+                    json.dumps(result.get('epoch_info', [])),
                     job_id,
                 ))
                 conn.commit()
@@ -2858,8 +2860,9 @@ def api_stack_resume(job_id):
                     INSERT INTO stack_jobs
                     (job_id, target, freq_center, width_mhz, epochs, n_epochs,
                      n_sigma, status, progress, progress_msg, peaks_json,
-                     plot_path, stack_median, stack_sigma, snr_improvement, completed_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                     plot_path, stack_median, stack_sigma, snr_improvement,
+                     epoch_info_json, completed_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
                 ''', (
                     new_job_id, target, freq_center, width,
                     json.dumps(epochs), len(epochs), n_sigma,
@@ -2869,6 +2872,7 @@ def api_stack_resume(job_id):
                     plot_path if os.path.isfile(plot_path) else None,
                     result.get('stack_median'), result.get('stack_sigma'),
                     result.get('snr_improvement'),
+                    json.dumps(result.get('epoch_info', [])),
                 ))
                 conn.commit()
                 conn.close()
@@ -2993,8 +2997,14 @@ def api_stack_results(job_id):
         if row and row['status'] == 'complete':
             peaks = json.loads(row['peaks_json'] or '[]')
             epochs = json.loads(row['epochs'] or '[]')
-            # Reconstruct epoch_info from epochs list
-            epoch_info = [{'label': e} for e in epochs]
+            # Load epoch_info from DB if available, otherwise reconstruct labels only
+            epoch_info = []
+            try:
+                epoch_info = json.loads(row['epoch_info_json'] or '[]')
+            except (KeyError, TypeError, json.JSONDecodeError):
+                pass
+            if not epoch_info:
+                epoch_info = [{'label': e} for e in epochs]
             return jsonify({
                 'job_id': job_id,
                 'success': True,

@@ -117,12 +117,20 @@ def init_db(db_path=None):
                 stack_median    REAL,
                 stack_sigma     REAL,
                 snr_improvement REAL,
+                epoch_info_json TEXT,
                 created_at      TEXT DEFAULT (datetime('now')),
                 completed_at    TEXT
             );
 
             CREATE INDEX IF NOT EXISTS idx_stack_jobs_status ON stack_jobs(status);
         ''')
+        # Migration: add epoch_info_json column if missing
+        try:
+            cols = [r[1] for r in conn.execute('PRAGMA table_info(stack_jobs)').fetchall()]
+            if 'epoch_info_json' not in cols:
+                conn.execute('ALTER TABLE stack_jobs ADD COLUMN epoch_info_json TEXT')
+        except Exception:
+            pass
         conn.commit()
     finally:
         conn.close()
