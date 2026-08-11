@@ -747,6 +747,8 @@ function renderWaterfallHeatmap(divId, zData, freqs, times, centerFreq, zmin, zm
     var plotDiv = document.getElementById(divId);
     if (!plotDiv) return;
 
+    var isSmall = divId.indexOf('epoch-') >= 0;
+
     var traces = [{
         type: 'heatmap',
         z: zData,
@@ -772,16 +774,29 @@ function renderWaterfallHeatmap(divId, zData, freqs, times, centerFreq, zmin, zm
         showlegend: false
     });
 
-    var isSmall = divId.indexOf('epoch-') >= 0;
     var layout = {
         paper_bgcolor: 'transparent',
         plot_bgcolor: '#0a0e14',
         font: { color: '#c8c8e0', size: isSmall ? 9 : 11 },
-        xaxis: { title: isSmall ? '' : 'Frequency (MHz)', gridcolor: '#1e3a5f', tickformat: '.4f' },
-        yaxis: { title: isSmall ? '' : 'Time (s)', gridcolor: '#1e3a5f', autorange: 'reversed' },
+        xaxis: {
+            title: isSmall ? '' : 'Frequency (MHz)',
+            gridcolor: '#1e3a5f',
+            tickformat: '.4f'
+        },
+        yaxis: {
+            title: isSmall ? '' : 'Time (s)',
+            gridcolor: '#1e3a5f',
+            autorange: 'reversed'
+        },
         margin: { l: 50, r: 10, t: 10, b: isSmall ? 30 : 50 },
         height: isSmall ? 200 : 350,
-        showlegend: false
+        showlegend: false,
+        hovermode: 'closest',
+        hoverlabel: {
+            bgcolor: '#0d1b2a',
+            bordercolor: '#4fc3f7',
+            font: { color: '#c8c8e0', size: 11 }
+        }
     };
 
     Plotly.newPlot(plotDiv, traces, layout, {

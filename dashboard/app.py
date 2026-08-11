@@ -2669,6 +2669,18 @@ def api_stack_run():
                 job_state['status'] = 'error'
                 job_state['progress_msg'] = result.get('error', 'Unknown error')
 
+            # Save spectrum .npz for Plotly rendering (non-chunked path)
+            if result.get('grid_freqs') and result.get('stack_power'):
+                try:
+                    import numpy as np
+                    npz_path = os.path.join(STACK_OUTPUT_DIR, f'stack_{job_id}.npz')
+                    np.savez_compressed(npz_path,
+                                       grid_freqs=np.array(result['grid_freqs']),
+                                       stack_power=np.array(result['stack_power']))
+                    print(f"  Spectrum saved: {npz_path}")
+                except Exception as e:
+                    print(f"  Spectrum save failed: {e}")
+
             # Update DB row with final results
             try:
                 from db import get_db
