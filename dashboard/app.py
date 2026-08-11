@@ -3557,11 +3557,18 @@ def api_stack_stacked_waterfall(job_id):
     stacked = np.mean(epoch_spectra_2d, axis=0)
 
     # Convert both to dB above median for visualization
+    # ON-OFF residuals can be negative, so we shift to positive before log
     def to_db(arr):
-        med = np.median(arr[arr != 0]) if np.any(arr != 0) else 1.0
+        med = np.median(arr)
         if med == 0:
-            med = 1.0
-        return 10.0 * np.log10(np.maximum(arr, 1.0) / med)
+            med = np.median(np.abs(arr)) or 1.0
+        shifted = arr - med  # center on zero
+        # Use symmetric dynamic range: map to dB relative to median
+        # Positive values = signal above noise floor
+        # Negative values = noise dips
+        abs_shifted = np.abs(shifted)
+        db = np.sign(shifted) * 10.0 * np.log10(np.maximum(abs_shifted, 1e-6) / (np.median(abs_shifted) or 1.0))
+        return db
 
     single_db = to_db(single)
     stacked_db = to_db(stacked)

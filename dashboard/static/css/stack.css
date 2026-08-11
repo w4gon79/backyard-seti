@@ -787,17 +787,22 @@
 }
 .wf-plot-small {
     min-height: 200px;
+    max-width: 100%;
 }
 .wf-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
     gap: 12px;
+    max-width: 100%;
+    overflow: hidden;
 }
 .wf-grid-item {
     background: #0d1b2a;
     border: 1px solid #1e3a5f;
     border-radius: 6px;
     padding: 8px;
+    overflow: hidden;
+    min-width: 0;
 }
 
 /* Responsive */
