@@ -3397,13 +3397,16 @@ def api_stack_stacked_waterfall(job_id):
     """Return side-by-side waterfalls for a stack peak: single epoch (raw)
     vs stacked average (SNR-boosted).
 
+    Uses hdf5_reader.read_channel_slice() for memory-efficient reads
+    (~16 KB per file instead of loading 12 GB via blimpy).
+
     Query params:
       - freq_mhz: peak frequency in MHz (barycentric)
       - width_chans: half-width in channels (default 200)
       - max_tints: max time integrations per epoch (default 20)
     """
-    from blimpy import Waterfall
     import numpy as np
+    import gc
 
     freq_mhz = request.args.get('freq_mhz', type=float)
     width_chans = request.args.get('width_chans', default=200, type=int)
@@ -3431,10 +3434,12 @@ def api_stack_stacked_waterfall(job_id):
     if not epochs:
         return jsonify({'error': 'No epochs in stack job'}), 400
 
-    # Get epoch definitions from incoherent_stack
+    # Get epoch definitions and coordinates
     sys.path.insert(0, SETI_ROOT)
-    from incoherent_stack import EPOCHS, find_h5, FINE_DIRS
+    sys.path.insert(0, os.path.join(SETI_ROOT, 'src'))
+    from incoherent_stack import EPOCHS, find_h5
     from barycentric_correct import compute_barycentric_velocity, extract_mjd_from_filename, TARGET_COORDS
+    from hdf5_reader import read_channel_slice, freq_to_chan, get_header
 
     coords = TARGET_COORDS.get(target, TARGET_COORDS.get('PROXCEN', (14.49, -62.68)))
     if isinstance(coords, (tuple, list)):
@@ -3443,13 +3448,7 @@ def api_stack_stacked_waterfall(job_id):
         target_ra = coords.get('ra', 14.49)
         target_dec = coords.get('dec', -62.68)
 
-    # Barycentric correction is small (~0.002%), so the observed freq
-    # window is approximately the same as the barycentric window.
-    # We load a slightly wider window to be safe.
     chan_width_mhz = 2.7939677e-6  # Parkes fine-res channel width
-    half_width_mhz = (width_chans + 50) * chan_width_mhz
-    f_start_obs = freq_mhz - half_width_mhz
-    f_stop_obs = freq_mhz + half_width_mhz
 
     # Build common barycentric grid for the narrow window
     target_chans = 2 * width_chans
@@ -3457,9 +3456,9 @@ def api_stack_stacked_waterfall(job_id):
     f_max_bary = freq_mhz + width_chans * chan_width_mhz
     common_grid = np.linspace(f_min_bary, f_max_bary, target_chans)
 
-    epoch_spectra_2d = []  # list of (n_tints, target_chans) arrays
+    epoch_spectra_2d = []
     epoch_labels = []
-    tsamp = 18.25  # default, overwritten by header
+    tsamp = 18.25
 
     for ep_label in epochs:
         ep_def = EPOCHS.get(ep_label)
@@ -3476,81 +3475,66 @@ def api_stack_stacked_waterfall(job_id):
         c = 299792458.0
         corr = 1.0 - v_bary / c
 
-        # Load ON/OFF pairs, subtract, keep 2D (time x freq)
-        pair_residuals_2d = []
-        ref_freqs = None
-        ref_times = None
-
-        for on_seq, off_seq in seqs:
-            on_file = f"Parkes_{mjd_int}_{on_seq}_PROXCEN_S_fine.h5"
-            off_file = f"Parkes_{mjd_int}_{off_seq}_PROXCEN_R_fine.h5"
-            on_path = find_h5(on_file)
-            off_path = find_h5(off_file)
-            if not on_path or not off_path:
-                continue
-
-            try:
-                wf_on = Waterfall(on_path, load_data=True, f_start=f_start_obs, f_stop=f_stop_obs)
-                on_data = np.array(wf_on.data, dtype=np.float64)
-                if on_data.ndim == 3:
-                    on_data = on_data[:, 0, :]
-                # Build freq axis from header (sf_freqs is unreliable)
-                h = wf_on.header
-                tsamp = float(h.get('tsamp', 18.25))
-                fch1 = float(h.get('fch1', 0))
-                nchans_file = int(h.get('nchans', 1))
-                foff = float(h.get('foff', 0))
-                n_chans_loaded = on_data.shape[1]
-                # Compute freqs for the loaded sub-band
-                if n_chans_loaded > 1:
-                    on_freqs = np.linspace(f_start_obs, f_stop_obs, n_chans_loaded)
-                else:
-                    on_freqs = np.array([f_start_obs])
-
-                wf_off = Waterfall(off_path, load_data=True, f_start=f_start_obs, f_stop=f_stop_obs)
-                off_data = np.array(wf_off.data, dtype=np.float64)
-                if off_data.ndim == 3:
-                    off_data = off_data[:, 0, :]
-            except Exception as e:
-                print(f"  Error loading {on_file}: {e}")
-                continue
-
-            # Align time dimensions
-            n_t = min(on_data.shape[0], off_data.shape[0])
-            on_data = on_data[:n_t]
-            off_data = off_data[:n_t]
-
-            # Subtract OFF from ON (kills steady RFI)
-            residual = on_data - off_data
-
-            if ref_freqs is None:
-                ref_freqs = on_freqs
-                ref_times = np.arange(n_t, dtype=np.float64) * tsamp
-
-            pair_residuals_2d.append(residual)
-
-        if not pair_residuals_2d:
+        # Load ON and OFF using the efficient hdf5_reader
+        on_seq, off_seq = seqs[0]
+        on_file = f"Parkes_{mjd_int}_{on_seq}_PROXCEN_S_fine.h5"
+        off_file = f"Parkes_{mjd_int}_{off_seq}_PROXCEN_R_fine.h5"
+        on_path = find_h5(on_file)
+        off_path = find_h5(off_file)
+        if not on_path or not off_path:
             continue
 
-        # Average across ON/OFF pairs within this epoch (keep 2D)
-        avg_2d = np.mean(pair_residuals_2d, axis=0)  # shape: (n_tints, n_chans)
+        try:
+            # Read header for tsamp and channel mapping
+            hdr = get_header(on_path)
+            tsamp = float(hdr.get('tsamp', 18.25))
 
-        # Apply barycentric correction to frequency axis
-        bary_freqs = ref_freqs * corr
+            # Convert barycentric freq to observed freq for channel lookup
+            # f_obs = f_bary / corr
+            obs_freq = freq_mhz / corr
+            center_chan = freq_to_chan(obs_freq, h5_path=on_path)
 
-        # For each time row, interpolate onto common barycentric grid
+            # Read ON slice: (n_tints, 2*width_chans)
+            on_data = read_channel_slice(on_path, center_chan, half_width=width_chans)
+            # Read OFF slice
+            off_data = read_channel_slice(off_path, center_chan, half_width=width_chans)
+        except Exception as e:
+            print(f"  Error loading {on_file}: {e}")
+            continue
+
+        # Align time dimensions
+        n_t = min(on_data.shape[0], off_data.shape[0])
+        on_data = on_data[:n_t]
+        off_data = off_data[:n_t]
+
+        # Subtract OFF from ON (kills steady RFI)
+        residual = on_data - off_data
+        del on_data, off_data
+
+        # Build observed frequency axis for the loaded channels
+        fch1 = float(hdr.get('fch1', 0))
+        foff = float(hdr.get('foff', chan_width_mhz))
+        chan_start = center_chan - width_chans
+        obs_freqs = np.array([fch1 + (chan_start + i) * foff for i in range(2 * width_chans)])
+
+        # Apply barycentric correction
+        bary_freqs = obs_freqs * corr
+
+        # Interpolate each time row onto common barycentric grid
         sort_idx = np.argsort(bary_freqs)
         bary_sorted = bary_freqs[sort_idx]
 
-        interp_2d = np.zeros((avg_2d.shape[0], target_chans))
-        for t_idx in range(avg_2d.shape[0]):
-            row_sorted = avg_2d[t_idx, sort_idx]
+        interp_2d = np.zeros((n_t, target_chans), dtype=np.float32)
+        for t_idx in range(n_t):
+            row_sorted = residual[t_idx, sort_idx]
             interp_2d[t_idx] = np.interp(common_grid, bary_sorted, row_sorted)
 
+        del residual
+        gc.collect()
+
         # Limit time integrations
-        n_tints = interp_2d.shape[0]
-        if n_tints > max_tints:
-            indices = np.linspace(0, n_tints - 1, max_tints, dtype=int)
+        if interp_2d.shape[0] > max_tints:
+            indices = np.linspace(0, interp_2d.shape[0] - 1, max_tints, dtype=int)
             interp_2d = interp_2d[indices]
 
         epoch_spectra_2d.append(interp_2d)

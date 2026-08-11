@@ -24,97 +24,62 @@ sys.path.insert(0, os.path.join(SETI_ROOT, 'src'))
 def extract_crops_from_file(h5_path, hit_freqs, crop_size=64, max_tints=None):
     """Extract waterfall crops from an HDF5 file at given hit frequencies.
 
-    Returns array of shape (n_hits, 1, crop_size, crop_size).
+    Uses hdf5_reader.read_channel_slice() for memory-efficient reads
+    (~16 KB per crop instead of loading 12 GB via blimpy).
+
+    Returns array of shape (n_hits, crop_size, crop_size).
     """
-    from blimpy import Waterfall
+    import sys, os
+    SETI_ROOT_LOCAL = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    sys.path.insert(0, os.path.join(SETI_ROOT_LOCAL, 'src'))
+    from hdf5_reader import read_channel_slice, freq_to_chan, get_header
 
-    # Read header to get channel width and file dimensions
-    wf_hdr = Waterfall(h5_path, load_data=False)
-    h = wf_hdr.header
-    fch1 = float(h['fch1'])
-    foff = float(h['foff'])  # MHz per channel
-    nchans = int(h['nchans'])
-    tsamp = float(h.get('tsamp', 18.25))
+    # Read header
+    hdr = get_header(h5_path)
+    fch1 = float(hdr.get('fch1', 0))
+    foff = float(hdr.get('foff', 0))
+    nchans = int(hdr.get('nchans', 207618048))
+    tsamp = float(hdr.get('tsamp', 18.25))
 
-    chan_width_mhz = abs(foff)
-    half_crop_mhz = (crop_size // 2) * chan_width_mhz
-
-    # Load the full frequency range needed (min to max hit freq + padding)
-    freq_min = min(hit_freqs) - half_crop_mhz
-    freq_max = max(hit_freqs) + half_crop_mhz
-
-    # Clamp to file range
-    f_min_file = min(fch1, fch1 + nchans * foff)
-    f_max_file = max(fch1, fch1 + nchans * foff)
-    freq_min = max(freq_min, f_min_file)
-    freq_max = min(freq_max, f_max_file)
-
-    del wf_hdr
-
-    # Load the data
-    try:
-        wf = Waterfall(h5_path, load_data=True, f_start=freq_min, f_stop=freq_max)
-        data = np.array(wf.data, dtype=np.float32)
-        if data.ndim == 3:
-            data = data[:, 0, :]  # (n_tints, n_chans)
-
-        # Get frequency axis
-        try:
-            freqs = np.array(wf.container.sf_freqs, dtype=np.float64)
-        except Exception:
-            freqs = np.linspace(freq_min, freq_max, data.shape[1])
-
-        del wf
-    except Exception as e:
-        print(f"    ERROR loading {os.path.basename(h5_path)}: {e}")
-        return None
-
-    n_tints, n_chans = data.shape
-
-    # Limit time integrations
-    if max_tints and n_tints > max_tints:
-        indices = np.linspace(0, n_tints - 1, max_tints, dtype=int)
-        data = data[indices]
-        n_tints = len(indices)
-
-    # Extract crops
     crops = []
-    for hit_freq in hit_freqs:
-        # Find center channel in the loaded data
-        center_idx = np.argmin(np.abs(freqs - hit_freq))
-        half = crop_size // 2
+    half = crop_size // 2
 
-        chan_start = center_idx - half
-        chan_stop = center_idx + half
+    for hit_freq in hit_freqs:
+        center_chan = freq_to_chan(hit_freq, fch1=fch1, foff=foff, nchans=nchans)
 
         # Skip if too close to edge
-        if chan_start < 0 or chan_stop > n_chans:
+        if center_chan - half < 0 or center_chan + half > nchans:
             continue
 
-        crop = data[:, chan_start:chan_stop]  # (n_tints, crop_size)
+        try:
+            data = read_channel_slice(h5_path, center_chan, half_width=half)
+        except Exception as e:
+            print(f"      Error reading chan {center_chan}: {e}")
+            continue
 
-        # If we have more tints than crop_size, sample evenly
-        if crop.shape[0] > crop_size:
-            indices = np.linspace(0, crop.shape[0] - 1, crop_size, dtype=int)
-            crop = crop[indices]
-        elif crop.shape[0] < crop_size:
-            # Pad with edge values
-            pad = np.tile(crop[-1:], (crop_size - crop.shape[0], 1))
-            crop = np.vstack([crop, pad])
+        n_tints = data.shape[0]
+
+        # Sample or pad time dimension to crop_size
+        if n_tints > crop_size:
+            indices = np.linspace(0, n_tints - 1, crop_size, dtype=int)
+            data = data[indices]
+        elif n_tints < crop_size:
+            pad = np.tile(data[-1:], (crop_size - n_tints, 1))
+            data = np.vstack([data, pad])
 
         # Normalize to [0, 1]
-        c_min, c_max = crop.min(), crop.max()
+        c_min, c_max = data.min(), data.max()
         if c_max > c_min:
-            crop = (crop - c_min) / (c_max - c_min)
+            data = (data - c_min) / (c_max - c_min)
         else:
-            crop = np.zeros_like(crop)
+            data = np.zeros_like(data)
 
-        crops.append(crop)
+        crops.append(data)
 
     if not crops:
         return None
 
-    return np.array(crops, dtype=np.float32)  # (n_hits, crop_size, crop_size)
+    return np.array(crops, dtype=np.float32)
 
 
 def find_h5_for_hit(hit_row, fine_dirs):
