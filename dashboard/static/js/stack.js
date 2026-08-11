@@ -625,6 +625,11 @@ function renderHistory(jobs) {
             peakInfo = '<span class="history-peaks">' + j.n_peaks + ' peaks</span>';
         }
 
+        var resumeBtn = '';
+        if (j.status === 'error' || j.status === 'interrupted') {
+            resumeBtn = '<button class="btn-resume-small" data-resume="' + j.job_id + '">▶ Resume</button>';
+        }
+
         html += '<div class="history-item" data-job="' + j.job_id + '" data-status="' + j.status + '">' +
             '<span class="history-status ' + statusClass + '">' + statusIcon + '</span>' +
             '<div class="history-info">' +
@@ -633,6 +638,7 @@ function renderHistory(jobs) {
                 '<span class="history-epochs">' + (j.n_epochs || 0) + ' epochs</span>' +
                 peakInfo +
             '</div>' +
+            resumeBtn +
             '<span class="history-time">' + time + '</span>' +
             '</div>';
     }
@@ -648,6 +654,43 @@ function renderHistory(jobs) {
                 loadResults(jobId);
             }
         };
+    }
+
+    // Resume button handlers
+    var resumeBtns = container.querySelectorAll('.btn-resume-small');
+    for (var i = 0; i < resumeBtns.length; i++) {
+        resumeBtns[i].onclick = function(e) {
+            e.stopPropagation();
+            var oldJobId = this.getAttribute('data-resume');
+            resumeStackJob(oldJobId);
+        };
+    }
+}
+
+async function resumeStackJob(oldJobId) {
+    var btn = document.getElementById('stack-run-btn');
+    btn.disabled = true;
+    btn.textContent = 'Resuming...';
+    showView('running');
+    document.getElementById('stack-running-status').textContent = 'Resuming job ' + oldJobId + '...';
+    document.getElementById('stack-running-fill').style.width = '0%';
+
+    try {
+        var resp = await fetch('/api/stack/resume/' + oldJobId, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        var data = await resp.json();
+        if (data.error) throw new Error(data.error);
+
+        currentJobId = data.job_id;
+        document.getElementById('stack-running-status').textContent = 'Resumed as job ' + currentJobId + '...';
+        startPolling();
+        loadHistory();
+    } catch(err) {
+        showError(err.message);
+        btn.disabled = false;
+        btn.textContent = '▶ Run Stack';
     }
 }
 

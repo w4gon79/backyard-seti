@@ -80,7 +80,7 @@
     overflow: hidden;
 }
 .stack-panel-left {
-    width: 340px;
+    width: 380px;
     flex-shrink: 0;
 }
 .stack-panel-right {
@@ -130,6 +130,14 @@
     gap: 10px;
 }
 .control-row .control-group { flex: 1; }
+
+/* Tooltip icon */
+.tooltip-icon {
+    font-size: 0.75em;
+    color: #546e7a;
+    cursor: help;
+    margin-left: 2px;
+}
 
 /* Preset buttons */
 .preset-buttons {
@@ -581,6 +589,20 @@
     color: #546e7a;
     font-size: 0.85em;
     font-family: 'Consolas', monospace;
+}
+.btn-resume-small {
+    padding: 4px 12px;
+    background: #1b5e20;
+    color: #a5d6a7;
+    border: 1px solid #2e7d32;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.8em;
+    margin-left: 8px;
+}
+.btn-resume-small:hover {
+    background: #2e7d32;
+    color: #c8e6c9;
 }
 
 /* Waterfall modal (reused pattern) */
