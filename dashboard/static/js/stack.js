@@ -811,22 +811,25 @@ function renderWaterfallHeatmap(divId, zData, freqs, times, centerFreq, zmin, zm
         responsive: true
     });
 
-    // Shift hover label left when it would overflow right edge
-    plotDiv.on('plotly_hover', function(eventData) {
-        var hoverText = plotDiv.querySelector('.hovertext');
-        if (!hoverText) return;
-        var pt = eventData.points && eventData.points[0];
-        if (!pt) return;
+    // Force hover labels to stay within plot bounds using CSS
+    // Plotly rebuilds .hovertext on each move, so we use a MutationObserver
+    // to reposition any label that would overflow the right edge
+    var observer = new MutationObserver(function() {
+        var labels = plotDiv.querySelectorAll('.hovertext');
         var plotRect = plotDiv.getBoundingClientRect();
-        // If hover point is in the right 40% of the plot, flip label to left side
-        var pixelX = pt.xaxis && pt.xaxis.l2p ? pt.xaxis.l2p(pt.x) : 0;
-        var plotWidth = plotDiv._fullLayout.width || plotRect.width;
-        if (pixelX > plotWidth * 0.5) {
-            hoverText.style.transform = 'translateX(-110%)';
-        } else {
-            hoverText.style.transform = '';
+        for (var i = 0; i < labels.length; i++) {
+            var labelRect = labels[i].getBoundingClientRect();
+            // If label extends past right edge of plot, shift it left
+            if (labelRect.right > plotRect.right - 5) {
+                var overflow = labelRect.right - plotRect.right + 10;
+                var currentTransform = labels[i].style.transform || '';
+                if (currentTransform.indexOf('translateX') === -1) {
+                    labels[i].style.transform = currentTransform + ' translateX(-' + overflow + 'px)';
+                }
+            }
         }
     });
+    observer.observe(plotDiv, { childList: true, subtree: true });
 }
 
 function renderWaterfallPlot(data, centerFreq) {
