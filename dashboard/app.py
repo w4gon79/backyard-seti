@@ -3156,25 +3156,28 @@ try:
 except Exception as _db_err:
     print(f"  WARNING: DB init error: {_db_err}")
 
-# Orphan recovery: mark any running stack jobs as interrupted
-try:
-    from db import get_db
-    conn = get_db()
-    orphans = conn.execute(
-        "SELECT job_id, target FROM stack_jobs WHERE status = 'running'"
-    ).fetchall()
-    for o in orphans:
-        conn.execute(
-            "UPDATE stack_jobs SET status = 'interrupted', progress_msg = 'Interrupted by dashboard restart' WHERE job_id = ?",
-            (o['job_id'],))
-        print(f"  Orphan recovery: stack job {o['job_id']} ({o['target']}) marked as interrupted")
-    conn.commit()
-    conn.close()
-except Exception as _orphan_err:
-    print(f"  Orphan recovery error: {_orphan_err}")
+# Orphan recovery moved to __main__ block for reliable execution
 
 if __name__ == '__main__':
     import numpy as np  # needed by header endpoint
+
+    # Orphan recovery: mark any running stack jobs as interrupted
+    try:
+        from db import get_db
+        conn = get_db()
+        orphans = conn.execute(
+            "SELECT job_id, target FROM stack_jobs WHERE status = 'running'"
+        ).fetchall()
+        for o in orphans:
+            conn.execute(
+                "UPDATE stack_jobs SET status = 'interrupted', progress_msg = 'Interrupted by dashboard restart' WHERE job_id = ?",
+                (o['job_id'],))
+            print(f"  Orphan recovery: stack job {o['job_id']} ({o['target']}) marked as interrupted")
+        conn.commit()
+        conn.close()
+    except Exception as _orphan_err:
+        print(f"  Orphan recovery error: {_orphan_err}")
+
     print(f"SETI Dashboard starting on http://localhost:8070")
     print(f"  Data dir: {DATA_DIR}")
     print(f"  Results dir: {RESULTS_DIR}")
