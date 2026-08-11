@@ -2962,6 +2962,7 @@ def api_stack_results(job_id):
             'grid_n_bins': r.get('grid_n_bins'),
             'grid_freqs': r.get('grid_freqs'),
             'stack_power': r.get('stack_power'),
+            'has_spectrum': True,
         })
 
     # Fall back to SQLite DB (for jobs from previous dashboard runs)
@@ -2990,6 +2991,7 @@ def api_stack_results(job_id):
                 'peaks': peaks,
                 'epoch_info': epoch_info,
                 'grid_n_bins': None,
+                'has_spectrum': os.path.isfile(os.path.join(STACK_OUTPUT_DIR, f'stack_{job_id}.npz')),
             })
     except Exception as e:
         pass
@@ -3022,6 +3024,42 @@ def api_stack_plot(job_id):
     if os.path.isfile(plot_path):
         return send_from_directory(os.path.dirname(plot_path), os.path.basename(plot_path))
     return jsonify({'error': 'Plot not found'}), 404
+
+
+@app.route('/api/stack/spectrum/<job_id>')
+def api_stack_spectrum(job_id):
+    """Serve spectrum data (freqs + power) as JSON for Plotly rendering.
+    Loads from .npz file on disk so it survives dashboard restarts.
+    """
+    import numpy as np
+    # Try in-memory first
+    job = _stack_jobs.get(job_id)
+    if job and job.get('result') and job['result'].get('grid_freqs'):
+        r = job['result']
+        return jsonify({
+            'job_id': job_id,
+            'grid_freqs': r.get('grid_freqs'),
+            'stack_power': r.get('stack_power'),
+            'n_bins': r.get('grid_n_bins', len(r.get('grid_freqs', []))),
+        })
+
+    # Fall back to .npz file on disk
+    npz_path = os.path.join(STACK_OUTPUT_DIR, f'stack_{job_id}.npz')
+    if os.path.isfile(npz_path):
+        try:
+            data = np.load(npz_path)
+            freqs = data['grid_freqs'].tolist()
+            power = data['stack_power'].tolist()
+            return jsonify({
+                'job_id': job_id,
+                'grid_freqs': freqs,
+                'stack_power': power,
+                'n_bins': len(freqs),
+            })
+        except Exception as e:
+            return jsonify({'error': f'Failed to load spectrum: {e}'}), 500
+
+    return jsonify({'error': 'Spectrum data not found'}), 404
 
 
 @app.route('/api/stack/history')
@@ -3068,6 +3106,23 @@ try:
     init_db()
 except Exception as _db_err:
     print(f"  WARNING: DB init error: {_db_err}")
+
+# Orphan recovery: mark any running stack jobs as interrupted
+try:
+    from db import get_db
+    conn = get_db()
+    orphans = conn.execute(
+        "SELECT job_id, target FROM stack_jobs WHERE status = 'running'"
+    ).fetchall()
+    for o in orphans:
+        conn.execute(
+            "UPDATE stack_jobs SET status = 'interrupted', progress_msg = 'Interrupted by dashboard restart' WHERE job_id = ?",
+            (o['job_id'],))
+        print(f"  Orphan recovery: stack job {o['job_id']} ({o['target']}) marked as interrupted")
+    conn.commit()
+    conn.close()
+except Exception as _orphan_err:
+    print(f"  Orphan recovery error: {_orphan_err}")
 
 if __name__ == '__main__':
     import numpy as np  # needed by header endpoint

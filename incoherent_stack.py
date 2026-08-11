@@ -576,11 +576,24 @@ def run_stack_job(params, progress_callback=None):
         'stack_power': stack.tolist(),
     }
 
-    # Save JSON
+    # Save JSON (without large arrays for readability)
     if output_json:
+        results_compact = {k: v for k, v in results.items()
+                          if k not in ('grid_freqs', 'stack_power')}
         with open(output_json, 'w') as f:
-            json.dump(results, f, indent=2)
+            json.dump(results_compact, f, indent=2)
         print(f"Results saved: {output_json}")
+
+    # Save spectrum data as .npz for Plotly rendering across restarts
+    if output_json:
+        npz_path = output_json.replace('.json', '.npz')
+        try:
+            np.savez_compressed(npz_path,
+                               grid_freqs=common_grid,
+                               stack_power=stack)
+            print(f"Spectrum saved: {npz_path}")
+        except Exception as e:
+            print(f"Spectrum save failed: {e}")
 
     _cb({'phase': 'complete', 'results': {k: v for k, v in results.items()
                                           if k != 'peaks'},

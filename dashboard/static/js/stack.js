@@ -388,12 +388,32 @@ function deriveWaterfallFile() {
 }
 
 function loadPlot(jobId) {
-    // Try interactive Plotly chart first (needs grid_freqs + stack_power from API)
+    // Try interactive Plotly chart first (needs grid_freqs + stack_power)
     if (currentResults && currentResults.grid_freqs && currentResults.stack_power) {
         renderInteractiveSpectrum(currentResults);
         return;
     }
-    // Fallback to static PNG
+    // Try loading spectrum data from API (for jobs restored from DB)
+    if (currentResults && currentResults.has_spectrum) {
+        fetch('/api/stack/spectrum/' + jobId).then(function(resp) {
+            return resp.json();
+        }).then(function(data) {
+            if (data.error) {
+                fallbackToPNG(jobId);
+                return;
+            }
+            currentResults.grid_freqs = data.grid_freqs;
+            currentResults.stack_power = data.stack_power;
+            renderInteractiveSpectrum(currentResults);
+        }).catch(function() {
+            fallbackToPNG(jobId);
+        });
+        return;
+    }
+    fallbackToPNG(jobId);
+}
+
+function fallbackToPNG(jobId) {
     var img = document.getElementById('stack-plot-img');
     img.src = '/api/stack/plot/' + jobId + '?t=' + Date.now();
     img.style.display = 'none';
@@ -614,7 +634,7 @@ function renderHistory(jobs) {
     var html = '';
     for (var i = 0; i < jobs.length; i++) {
         var j = jobs[i];
-        var statusIcon = j.status === 'complete' ? '✅' : (j.status === 'error' ? '❌' : '⏳');
+        var statusIcon = j.status === 'complete' ? '✅' : (j.status === 'error' ? '❌' : (j.status === 'interrupted' ? '⏸️' : '⏳'));
         var statusClass = j.status || 'unknown';
         var time = j.created_at || '';
         // Truncate time to just date + HH:MM
