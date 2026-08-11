@@ -585,10 +585,10 @@ window.showStackWaterfall = function(rowEl) {
 
     title.textContent = 'Waterfall — ' + freq.toFixed(6) + ' MHz';
 
-    // If we have a stack job context, use the stacked waterfall endpoint
-    // (shows single epoch vs stacked average side by side)
+    // If we have a stack job context, try the stacked waterfall endpoint.
+    // Falls back to single-file waterfall if stacked endpoint fails.
     if (currentJobId) {
-        showStackedWaterfall(currentJobId, freq, modal, title, metaDiv, bodyDiv);
+        showStackedWaterfallSafe(currentJobId, freq, p.file, modal, title, metaDiv, bodyDiv);
         return;
     }
 
@@ -622,32 +622,52 @@ window.showStackWaterfall = function(rowEl) {
 };
 
 // ─── Stacked Waterfall (single epoch vs stacked comparison) ──────────
-function showStackedWaterfall(jobId, freq, modal, title, metaDiv, bodyDiv) {
-    title.textContent = 'Stacked Waterfall — ' + freq.toFixed(6) + ' MHz';
-
+// Tries the stacked endpoint first, falls back to single-file waterfall
+// if it fails (OOM/timeout on large HDF5 files).
+function showStackedWaterfallSafe(jobId, freq, fileFallback, modal, title, metaDiv, bodyDiv) {
+    title.textContent = 'Waterfall — ' + freq.toFixed(6) + ' MHz';
     metaDiv.innerHTML =
-        '<div class="wm-item"><span class="wm-label">Freq:</span><span class="wm-val">' + freq.toFixed(6) + ' MHz</span></div>' +
-        '<div class="wm-item"><span class="wm-label">Mode:</span><span class="wm-val">Single vs Stacked</span></div>';
-
+        '<div class="wm-item"><span class="wm-label">Freq:</span><span class="wm-val">' + freq.toFixed(6) + ' MHz</span></div>';
     bodyDiv.innerHTML =
         '<div class="waterfall-loading"><div class="spinner"></div>' +
-        '<div>Loading stacked waterfall data...</div>' +
-        '<div style="font-size:0.8em;color:#546e7a;margin-top:4px;">Reading ' +
-        'multiple HDF5 files and aligning</div></div>';
+        '<div>Loading waterfall data...</div></div>';
     modal.style.display = 'flex';
 
-    var url = '/api/stack/peaks/' + jobId + '/stacked_waterfall?freq_mhz=' + freq +
-              '&width_chans=200&max_tints=20';
+    // Try stacked endpoint with a short timeout
+    var controller = new AbortController();
+    var timeoutId = setTimeout(function() { controller.abort(); }, 30000);
 
-    fetch(url).then(function(resp) { return resp.json(); }).then(function(data) {
-        if (data.error) {
-            bodyDiv.innerHTML = '<div class="waterfall-error">Error: ' + escapeHtml(data.error) + '</div>';
-            return;
-        }
-        renderStackedWaterfallPlot(data);
-    }).catch(function(err) {
-        bodyDiv.innerHTML = '<div class="waterfall-error">Fetch error: ' + escapeHtml(err.message) + '</div>';
-    });
+    fetch('/api/stack/peaks/' + jobId + '/stacked_waterfall?freq_mhz=' + freq +
+          '&width_chans=100&max_tints=10', { signal: controller.signal })
+        .then(function(resp) {
+            clearTimeout(timeoutId);
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            return resp.json();
+        })
+        .then(function(data) {
+            if (data.error) throw new Error(data.error);
+            renderStackedWaterfallPlot(data);
+        })
+        .catch(function(err) {
+            clearTimeout(timeoutId);
+            console.log('Stacked waterfall failed, falling back to single:', err.message);
+            // Fall back to original single-file waterfall
+            if (fileFallback) {
+                var url = '/api/waterfall?file=' + encodeURIComponent(fileFallback) +
+                          '&freq_mhz=' + freq + '&width_chans=200&max_tints=20';
+                fetch(url).then(function(r) { return r.json(); }).then(function(d) {
+                    if (d.error) {
+                        bodyDiv.innerHTML = '<div class="waterfall-error">Error: ' + escapeHtml(d.error) + '</div>';
+                        return;
+                    }
+                    renderWaterfallPlot(d, freq);
+                }).catch(function(e) {
+                    bodyDiv.innerHTML = '<div class="waterfall-error">Fetch error: ' + escapeHtml(e.message) + '</div>';
+                });
+            } else {
+                bodyDiv.innerHTML = '<div class="waterfall-error">Waterfall unavailable for this peak.</div>';
+            }
+        });
 }
 
 function renderStackedWaterfallPlot(data) {
