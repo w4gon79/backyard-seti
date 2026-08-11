@@ -787,22 +787,27 @@ function renderWaterfallHeatmap(divId, zData, freqs, times, centerFreq, zmin, zm
         xaxis: {
             title: isSmall ? '' : 'Frequency (MHz)',
             gridcolor: '#1e3a5f',
-            tickformat: '.4f'
+            tickformat: '.4f',
+            fixedrange: true
         },
         yaxis: {
             title: isSmall ? '' : 'Time (s)',
             gridcolor: '#1e3a5f',
-            autorange: 'reversed'
+            autorange: 'reversed',
+            fixedrange: true
         },
         margin: { l: 50, r: 10, t: 10, b: isSmall ? 30 : 50 },
         height: isSmall ? 200 : 350,
         showlegend: false,
         hovermode: 'closest',
+        hoverdistance: -1,
+        spikeMode: 'across',
         hoverlabel: {
             bgcolor: '#0d1b2a',
             bordercolor: '#4fc3f7',
-            font: { color: '#c8c8e0', size: 11 },
-            align: 'auto'
+            font: { color: '#c8c8e0', size: 10 },
+            align: 'left',
+            namelength: 0
         }
     };
 
@@ -810,26 +815,6 @@ function renderWaterfallHeatmap(divId, zData, freqs, times, centerFreq, zmin, zm
         displayModeBar: false,
         responsive: true
     });
-
-    // Force hover labels to stay within plot bounds using CSS
-    // Plotly rebuilds .hovertext on each move, so we use a MutationObserver
-    // to reposition any label that would overflow the right edge
-    var observer = new MutationObserver(function() {
-        var labels = plotDiv.querySelectorAll('.hovertext');
-        var plotRect = plotDiv.getBoundingClientRect();
-        for (var i = 0; i < labels.length; i++) {
-            var labelRect = labels[i].getBoundingClientRect();
-            // If label extends past right edge of plot, shift it left
-            if (labelRect.right > plotRect.right - 5) {
-                var overflow = labelRect.right - plotRect.right + 10;
-                var currentTransform = labels[i].style.transform || '';
-                if (currentTransform.indexOf('translateX') === -1) {
-                    labels[i].style.transform = currentTransform + ' translateX(-' + overflow + 'px)';
-                }
-            }
-        }
-    });
-    observer.observe(plotDiv, { childList: true, subtree: true });
 }
 
 function renderWaterfallPlot(data, centerFreq) {
