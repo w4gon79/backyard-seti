@@ -2543,6 +2543,24 @@ def api_stack_run():
     }
     _stack_jobs[job_id] = job_state
 
+    # Persist to DB immediately so the job survives dashboard restarts
+    try:
+        from db import get_db
+        conn = get_db()
+        conn.execute('''
+            INSERT INTO stack_jobs
+            (job_id, target, freq_center, width_mhz, epochs, n_epochs,
+             n_sigma, status, progress, progress_msg)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'running', 0, 'Initializing...')
+        ''', (
+            job_id, target, freq_center, width,
+            json.dumps(epochs), len(epochs), n_sigma,
+        ))
+        conn.commit()
+        conn.close()
+    except Exception as db_err:
+        print(f"  Stack DB insert error: {db_err}")
+
     # Progress callback
     def progress_cb(status):
         phase = status.get('phase', '')
@@ -2651,25 +2669,25 @@ def api_stack_run():
                 job_state['status'] = 'error'
                 job_state['progress_msg'] = result.get('error', 'Unknown error')
 
-            # Persist to SQLite
+            # Update DB row with final results
             try:
                 from db import get_db
                 conn = get_db()
                 conn.execute('''
-                    INSERT INTO stack_jobs
-                    (job_id, target, freq_center, width_mhz, epochs, n_epochs,
-                     n_sigma, status, progress, progress_msg, peaks_json,
-                     plot_path, stack_median, stack_sigma, snr_improvement, completed_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                    UPDATE stack_jobs SET
+                    status = ?, progress = ?, progress_msg = ?,
+                    peaks_json = ?, plot_path = ?,
+                    stack_median = ?, stack_sigma = ?,
+                    snr_improvement = ?, completed_at = datetime('now')
+                    WHERE job_id = ?
                 ''', (
-                    job_id, target, freq_center, width,
-                    json.dumps(epochs), len(epochs), n_sigma,
                     job_state['status'], job_state['progress'],
                     job_state['progress_msg'],
                     json.dumps(result.get('peaks', [])[:200]),
                     plot_path if os.path.isfile(plot_path) else None,
                     result.get('stack_median'), result.get('stack_sigma'),
                     result.get('snr_improvement'),
+                    job_id,
                 ))
                 conn.commit()
                 conn.close()
