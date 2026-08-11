@@ -3062,6 +3062,37 @@ def api_stack_spectrum(job_id):
     return jsonify({'error': 'Spectrum data not found'}), 404
 
 
+@app.route('/api/stack/delete/<job_id>', methods=['DELETE'])
+def api_stack_delete(job_id):
+    """Delete a stack job from DB and disk."""
+    import shutil
+    try:
+        from db import get_db
+        conn = get_db()
+        conn.execute('DELETE FROM stack_jobs WHERE job_id = ?', (job_id,))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+    # Remove from in-memory tracker
+    if job_id in _stack_jobs:
+        del _stack_jobs[job_id]
+
+    # Delete output files
+    for ext in ['.png', '.json', '.npz']:
+        p = os.path.join(STACK_OUTPUT_DIR, f'stack_{job_id}{ext}')
+        if os.path.isfile(p):
+            os.remove(p)
+
+    # Delete chunk directory if it exists
+    chunk_dir = os.path.join(STACK_OUTPUT_DIR, f'chunks_{job_id}')
+    if os.path.isdir(chunk_dir):
+        shutil.rmtree(chunk_dir, ignore_errors=True)
+
+    return jsonify({'success': True, 'job_id': job_id})
+
+
 @app.route('/api/stack/history')
 def api_stack_history():
     """List past stack jobs from SQLite."""

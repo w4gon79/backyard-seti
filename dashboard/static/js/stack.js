@@ -649,6 +649,7 @@ function renderHistory(jobs) {
         if (j.status === 'error' || j.status === 'interrupted') {
             resumeBtn = '<button class="btn-resume-small" data-resume="' + j.job_id + '">▶ Resume</button>';
         }
+        var deleteBtn = '<button class="btn-delete-small" data-delete="' + j.job_id + '">✕</button>';
 
         html += '<div class="history-item" data-job="' + j.job_id + '" data-status="' + j.status + '">' +
             '<span class="history-status ' + statusClass + '">' + statusIcon + '</span>' +
@@ -659,6 +660,7 @@ function renderHistory(jobs) {
                 peakInfo +
             '</div>' +
             resumeBtn +
+            deleteBtn +
             '<span class="history-time">' + time + '</span>' +
             '</div>';
     }
@@ -684,6 +686,31 @@ function renderHistory(jobs) {
             var oldJobId = this.getAttribute('data-resume');
             resumeStackJob(oldJobId);
         };
+    }
+
+    // Delete button handlers
+    var deleteBtns = container.querySelectorAll('.btn-delete-small');
+    for (var i = 0; i < deleteBtns.length; i++) {
+        deleteBtns[i].onclick = function(e) {
+            e.stopPropagation();
+            var delJobId = this.getAttribute('data-delete');
+            if (confirm('Delete stack job ' + delJobId + '? This removes the DB record and all output files.')) {
+                deleteStackJob(delJobId);
+            }
+        };
+    }
+}
+
+async function deleteStackJob(jobId) {
+    try {
+        var resp = await fetch('/api/stack/delete/' + jobId, {
+            method: 'DELETE'
+        });
+        var data = await resp.json();
+        if (data.error) throw new Error(data.error);
+        loadHistory();
+    } catch(err) {
+        alert('Delete failed: ' + err.message);
     }
 }
 

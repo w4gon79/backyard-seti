@@ -604,6 +604,20 @@
     background: #2e7d32;
     color: #c8e6c9;
 }
+.btn-delete-small {
+    padding: 3px 8px;
+    background: #37474f;
+    color: #ef5350;
+    border: 1px solid #546e7a;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.8em;
+    margin-left: 4px;
+}
+.btn-delete-small:hover {
+    background: #c62828;
+    color: #ffcdd2;
+}
 
 /* Waterfall modal (reused pattern) */
 .modal-overlay {
