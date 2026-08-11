@@ -3436,9 +3436,12 @@ def api_stack_stacked_waterfall(job_id):
     from incoherent_stack import EPOCHS, find_h5, FINE_DIRS
     from barycentric_correct import compute_barycentric_velocity, extract_mjd_from_filename, TARGET_COORDS
 
-    coords = TARGET_COORDS.get(target, TARGET_COORDS.get('PROXCEN', {}))
-    target_ra = coords.get('ra', 14.49)
-    target_dec = coords.get('dec', -62.68)
+    coords = TARGET_COORDS.get(target, TARGET_COORDS.get('PROXCEN', (14.49, -62.68)))
+    if isinstance(coords, (tuple, list)):
+        target_ra, target_dec = coords[0], coords[1]
+    else:
+        target_ra = coords.get('ra', 14.49)
+        target_dec = coords.get('dec', -62.68)
 
     # Barycentric correction is small (~0.002%), so the observed freq
     # window is approximately the same as the barycentric window.
@@ -3491,9 +3494,18 @@ def api_stack_stacked_waterfall(job_id):
                 on_data = np.array(wf_on.data, dtype=np.float64)
                 if on_data.ndim == 3:
                     on_data = on_data[:, 0, :]
-                on_freqs = np.array(wf_on.container.sf_freqs, dtype=np.float64)
+                # Build freq axis from header (sf_freqs is unreliable)
                 h = wf_on.header
                 tsamp = float(h.get('tsamp', 18.25))
+                fch1 = float(h.get('fch1', 0))
+                nchans_file = int(h.get('nchans', 1))
+                foff = float(h.get('foff', 0))
+                n_chans_loaded = on_data.shape[1]
+                # Compute freqs for the loaded sub-band
+                if n_chans_loaded > 1:
+                    on_freqs = np.linspace(f_start_obs, f_stop_obs, n_chans_loaded)
+                else:
+                    on_freqs = np.array([f_start_obs])
 
                 wf_off = Waterfall(off_path, load_data=True, f_start=f_start_obs, f_stop=f_stop_obs)
                 off_data = np.array(wf_off.data, dtype=np.float64)
