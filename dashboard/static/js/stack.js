@@ -764,7 +764,8 @@ function renderWaterfallHeatmap(divId, zData, freqs, times, centerFreq, zmin, zm
         zmax: zmax,
         colorscale: 'Viridis',
         reversescale: true,
-        hovertemplate: '%{x:.6f} MHz<br>t=%{y:.1f}s<br>Power=%{z:.2f}<extra></extra>',
+        hoverinfo: isSmall ? 'none' : 'x+y+z',
+        hovertemplate: isSmall ? undefined : '%{x:.6f} MHz<br>t=%{y:.1f}s<br>Power=%{z:.2f}<extra></extra>',
         name: 'Power'
     }];
 
@@ -799,9 +800,8 @@ function renderWaterfallHeatmap(divId, zData, freqs, times, centerFreq, zmin, zm
         margin: { l: 50, r: 10, t: 10, b: isSmall ? 30 : 50 },
         height: isSmall ? 200 : 350,
         showlegend: false,
-        hovermode: 'closest',
+        hovermode: isSmall ? false : 'closest',
         hoverdistance: -1,
-        spikeMode: 'across',
         hoverlabel: {
             bgcolor: '#0d1b2a',
             bordercolor: '#4fc3f7',
@@ -815,6 +815,32 @@ function renderWaterfallHeatmap(divId, zData, freqs, times, centerFreq, zmin, zm
         displayModeBar: false,
         responsive: true
     });
+
+    // For small grid plots: show hover info in a fixed status bar above the plot
+    if (isSmall) {
+        var gridItem = plotDiv.closest('.wf-grid-item');
+        if (gridItem) {
+            var labelEl = gridItem.querySelector('.wf-panel-label');
+            plotDiv.on('plotly_hover', function(eventData) {
+                if (eventData.points && eventData.points[0]) {
+                    var pt = eventData.points[0];
+                    var freqVal = freqs[pt.pointIndex[1]] || 0;
+                    var timeVal = times[pt.pointIndex[0]] || 0;
+                    var powerVal = zData[pt.pointIndex[0]] ? zData[pt.pointIndex[0]][pt.pointIndex[1]] : 0;
+                    if (labelEl) {
+                        labelEl.dataset.original = labelEl.dataset.original || labelEl.textContent;
+                        labelEl.textContent = labelEl.dataset.original +
+                            ' | ' + freqVal.toFixed(6) + ' MHz | ' + powerVal.toFixed(2) + ' dB';
+                    }
+                }
+            });
+            plotDiv.on('plotly_unhover', function() {
+                if (labelEl && labelEl.dataset.original) {
+                    labelEl.textContent = labelEl.dataset.original;
+                }
+            });
+        }
+    }
 }
 
 function renderWaterfallPlot(data, centerFreq) {
