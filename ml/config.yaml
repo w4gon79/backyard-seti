@@ -1,0 +1,36 @@
+# ML Module Configuration
+
+# Data extraction
+data:
+  crop_size: 64          # Waterfall crop size (channels x timesteps)
+  max_crops_per_file: 5000  # Limit crops per HDF5 file (memory management)
+  cache_format: npz      # npz or npy
+  normalize: true        # Normalize each crop to [0, 1]
+
+# Autoencoder model
+autoencoder:
+  latent_dim: 32         # Bottleneck dimension
+  base_channels: 32      # Starting channel count
+  n_layers: 3            # Encoder/decoder depth
+  
+# Training
+training:
+  batch_size: 256
+  epochs: 50
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  scheduler_step: 10     # LR decay step (epochs)
+  scheduler_gamma: 0.5   # LR decay factor
+  train_split: 0.8       # 80% train, 20% validation
+  early_stop_patience: 10  # Stop if val loss doesn't improve for N epochs
+  
+# Inference
+inference:
+  batch_size: 512
+  anomaly_percentile: 95 # Flag top 5% as anomalies
+  
+# Paths (relative to SETI_ROOT)
+paths:
+  checkpoint_dir: ml/checkpoints
+  cache_dir: ml/data
+  log_dir: ml/logs
