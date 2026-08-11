@@ -789,10 +789,20 @@
 .wf-plot {
     width: 100%;
     min-height: 350px;
+    overflow: hidden;
 }
 .wf-plot-small {
     min-height: 200px;
     max-width: 100%;
+}
+/* Clip Plotly hover labels to plot bounds */
+.wf-plot .plot-container,
+.wf-plot-small .plot-container {
+    overflow: hidden !important;
+}
+.wf-plot .svg-container,
+.wf-plot-small .svg-container {
+    overflow: hidden !important;
 }
 .wf-grid {
     display: grid;
