@@ -611,16 +611,30 @@ def import_scan_from_json(scan_dir, db_path=None):
 
     scan_id = meta.get('scan_id', os.path.basename(scan_dir))
 
-    # Check if already imported
+    # Check if already fully imported.
+    # Compare DB hit count against expected total from scan_meta.json.
+    # This catches partial imports caused by scan interruption/resume.
+    expected_hits = (meta.get('stats', {}) or {}).get('total_hits', 0)
     existing = get_scan(scan_id, db_path)
-    if existing and existing.get('total_hits', 0) > 0:
-        hit_count = count_hits(scan_id, db_path=db_path)
-        if hit_count > 0:
+    if existing:
+        db_hit_count = count_hits(scan_id, db_path=db_path)
+        if expected_hits > 0 and db_hit_count >= expected_hits:
+            # Fully imported already
             stats['skipped'] = True
-            stats['hits_in_db'] = hit_count
+            stats['hits_in_db'] = db_hit_count
             return stats
+        if db_hit_count > 0 and db_hit_count < expected_hits:
+            # Partial import detected — delete stale hits and re-import
+            stats['partial_import_detected'] = db_hit_count
+            stats['expected_hits'] = expected_hits
+            conn = get_db(db_path)
+            try:
+                conn.execute('DELETE FROM hits WHERE scan_id = ?', (scan_id,))
+                conn.commit()
+            finally:
+                conn.close()
 
-    # Upsert scan metadata
+    # Upsert scan metadata (always, to update correct totals)
     upsert_scan(meta, db_path)
 
     # Check for combined_corrected.json (has all hits + barycentric data)
