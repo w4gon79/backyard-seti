@@ -585,6 +585,14 @@ window.showStackWaterfall = function(rowEl) {
 
     title.textContent = 'Waterfall — ' + freq.toFixed(6) + ' MHz';
 
+    // If we have a stack job context, use the stacked waterfall endpoint
+    // (shows single epoch vs stacked average side by side)
+    if (currentJobId) {
+        showStackedWaterfall(currentJobId, freq, modal, title, metaDiv, bodyDiv);
+        return;
+    }
+
+    // Fallback: single-file waterfall (original behavior)
     var metaHtml = '';
     metaHtml += '<div class="wm-item"><span class="wm-label">Freq:</span><span class="wm-val">' + freq.toFixed(6) + ' MHz</span></div>';
     metaHtml += '<div class="wm-item"><span class="wm-label">Source:</span><span class="wm-val" style="font-size:0.85em;">' + (p.file || 'auto') + '</span></div>';
@@ -612,6 +620,155 @@ window.showStackWaterfall = function(rowEl) {
         bodyDiv.innerHTML = '<div class="waterfall-error">Fetch error: ' + escapeHtml(err.message) + '</div>';
     });
 };
+
+// ─── Stacked Waterfall (single epoch vs stacked comparison) ──────────
+function showStackedWaterfall(jobId, freq, modal, title, metaDiv, bodyDiv) {
+    title.textContent = 'Stacked Waterfall — ' + freq.toFixed(6) + ' MHz';
+
+    metaDiv.innerHTML =
+        '<div class="wm-item"><span class="wm-label">Freq:</span><span class="wm-val">' + freq.toFixed(6) + ' MHz</span></div>' +
+        '<div class="wm-item"><span class="wm-label">Mode:</span><span class="wm-val">Single vs Stacked</span></div>';
+
+    bodyDiv.innerHTML =
+        '<div class="waterfall-loading"><div class="spinner"></div>' +
+        '<div>Loading stacked waterfall data...</div>' +
+        '<div style="font-size:0.8em;color:#546e7a;margin-top:4px;">Reading ' +
+        'multiple HDF5 files and aligning</div></div>';
+    modal.style.display = 'flex';
+
+    var url = '/api/stack/peaks/' + jobId + '/stacked_waterfall?freq_mhz=' + freq +
+              '&width_chans=200&max_tints=20';
+
+    fetch(url).then(function(resp) { return resp.json(); }).then(function(data) {
+        if (data.error) {
+            bodyDiv.innerHTML = '<div class="waterfall-error">Error: ' + escapeHtml(data.error) + '</div>';
+            return;
+        }
+        renderStackedWaterfallPlot(data);
+    }).catch(function(err) {
+        bodyDiv.innerHTML = '<div class="waterfall-error">Fetch error: ' + escapeHtml(err.message) + '</div>';
+    });
+}
+
+function renderStackedWaterfallPlot(data) {
+    var bodyDiv = document.getElementById('waterfall-body');
+    var freqs = data.freqs;
+    var times = data.times;
+    var centerFreq = data.center_freq_mhz;
+
+    var single = data.single_epoch;
+    var stacked = data.stacked;
+    var allEpochs = data.all_epochs || [];
+
+    // Build mode toggle: "comparison" (side by side) or "all epochs" (grid)
+    var html = '';
+    html += '<div class="stacked-wf-controls">';
+    html += '<button class="wf-mode-btn active" data-mode="compare">Single vs Stacked</button>';
+    if (allEpochs.length > 2) {
+        html += '<button class="wf-mode-btn" data-mode="all">All Epochs (' + allEpochs.length + ')</button>';
+    }
+    html += '</div>';
+    html += '<div id="wf-compare-view" class="wf-view">';
+    html += '<div class="wf-pair">';
+    html += '<div class="wf-panel-label">' + escapeHtml(single.label) + ' (raw)</div>';
+    html += '<div id="wf-single-plot" class="wf-plot"></div>';
+    html += '</div>';
+    html += '<div class="wf-pair">';
+    html += '<div class="wf-panel-label">' + escapeHtml(stacked.label) + ' (SNR boosted)</div>';
+    html += '<div id="wf-stacked-plot" class="wf-plot"></div>';
+    html += '</div>';
+    html += '</div>';
+    if (allEpochs.length > 2) {
+        html += '<div id="wf-all-view" class="wf-view" style="display:none;">';
+        html += '<div class="wf-grid">';
+        for (var i = 0; i < allEpochs.length; i++) {
+            html += '<div class="wf-grid-item">';
+            html += '<div class="wf-panel-label">' + escapeHtml(allEpochs[i].label) + '</div>';
+            html += '<div id="wf-epoch-' + i + '" class="wf-plot wf-plot-small"></div>';
+            html += '</div>';
+        }
+        html += '</div>';
+        html += '</div>';
+    }
+    bodyDiv.innerHTML = html;
+
+    // Render side-by-side comparison
+    renderWaterfallHeatmap('wf-single-plot', single.data, freqs, times, centerFreq, -2, 10);
+    renderWaterfallHeatmap('wf-stacked-plot', stacked.data, freqs, times, centerFreq, -2, 10);
+
+    // Render all-epochs grid if present
+    if (allEpochs.length > 2) {
+        for (var i = 0; i < allEpochs.length; i++) {
+            renderWaterfallHeatmap('wf-epoch-' + i, allEpochs[i].data, freqs, times, centerFreq, -2, 10);
+        }
+    }
+
+    // Mode toggle handlers
+    var btns = document.querySelectorAll('.wf-mode-btn');
+    for (var i = 0; i < btns.length; i++) {
+        btns[i].onclick = function() {
+            for (var j = 0; j < btns.length; j++) btns[j].classList.remove('active');
+            this.classList.add('active');
+            var mode = this.getAttribute('data-mode');
+            var compareView = document.getElementById('wf-compare-view');
+            var allView = document.getElementById('wf-all-view');
+            if (mode === 'compare') {
+                compareView.style.display = '';
+                if (allView) allView.style.display = 'none';
+            } else {
+                compareView.style.display = 'none';
+                if (allView) allView.style.display = '';
+            }
+        };
+    }
+}
+
+function renderWaterfallHeatmap(divId, zData, freqs, times, centerFreq, zmin, zmax) {
+    var plotDiv = document.getElementById(divId);
+    if (!plotDiv) return;
+
+    var traces = [{
+        type: 'heatmap',
+        z: zData,
+        x: freqs,
+        y: times,
+        zmin: zmin,
+        zmax: zmax,
+        colorscale: 'Viridis',
+        reversescale: true,
+        hovertemplate: '%{x:.6f} MHz<br>t=%{y:.1f}s<br>Power=%{z:.2f}<extra></extra>',
+        name: 'Power'
+    }];
+
+    // Center frequency marker
+    traces.push({
+        type: 'scatter',
+        mode: 'lines',
+        x: [centerFreq, centerFreq],
+        y: [times[0], times[times.length - 1]],
+        line: { color: '#ffff00', width: 1, dash: 'dot' },
+        name: 'Hit freq',
+        hoverinfo: 'skip',
+        showlegend: false
+    });
+
+    var isSmall = divId.indexOf('epoch-') >= 0;
+    var layout = {
+        paper_bgcolor: 'transparent',
+        plot_bgcolor: '#0a0e14',
+        font: { color: '#c8c8e0', size: isSmall ? 9 : 11 },
+        xaxis: { title: isSmall ? '' : 'Frequency (MHz)', gridcolor: '#1e3a5f', tickformat: '.4f' },
+        yaxis: { title: isSmall ? '' : 'Time (s)', gridcolor: '#1e3a5f', autorange: 'reversed' },
+        margin: { l: 50, r: 10, t: 10, b: isSmall ? 30 : 50 },
+        height: isSmall ? 200 : 350,
+        showlegend: false
+    };
+
+    Plotly.newPlot(plotDiv, traces, layout, {
+        displayModeBar: false,
+        responsive: true
+    });
+}
 
 function renderWaterfallPlot(data, centerFreq) {
     var bodyDiv = document.getElementById('waterfall-body');

@@ -737,6 +737,70 @@
 .class-sum.rfi { background: #4a1010; color: #ef5350; }
 
 /* Responsive */
+
+/* ─── Stacked Waterfall Layout ─────────────────────────────────────── */
+.stacked-wf-controls {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+.wf-mode-btn {
+    padding: 6px 14px;
+    background: #1b2838;
+    border: 1px solid #1e3a5f;
+    color: #90a4ae;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.85em;
+    transition: all 0.2s;
+}
+.wf-mode-btn:hover {
+    background: #1e3a5f;
+    color: #c8c8e0;
+}
+.wf-mode-btn.active {
+    background: #0d47a1;
+    border-color: #1976d2;
+    color: #82b1ff;
+}
+.wf-view {
+    width: 100%;
+}
+.wf-pair {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 8px;
+}
+.wf-pair > .wf-pair {
+    flex: 1;
+}
+.wf-panel-label {
+    color: #82b1ff;
+    font-size: 0.9em;
+    font-weight: 600;
+    margin-bottom: 6px;
+    text-align: center;
+}
+.wf-plot {
+    width: 100%;
+    min-height: 350px;
+}
+.wf-plot-small {
+    min-height: 200px;
+}
+.wf-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 12px;
+}
+.wf-grid-item {
+    background: #0d1b2a;
+    border: 1px solid #1e3a5f;
+    border-radius: 6px;
+    padding: 8px;
+}
+
+/* Responsive */
 @media (max-width: 900px) {
     .stack-row { flex-direction: column; }
     .stack-panel-left { width: 100%; }

@@ -3390,6 +3390,210 @@ def api_stack_crossref(job_id):
         return jsonify({'error': str(e)}), 500
 
 
+# ─── API: Stacked Peak Waterfall (single epoch vs stacked comparison) ──
+
+@app.route('/api/stack/peaks/<job_id>/stacked_waterfall')
+def api_stack_stacked_waterfall(job_id):
+    """Return side-by-side waterfalls for a stack peak: single epoch (raw)
+    vs stacked average (SNR-boosted).
+
+    Query params:
+      - freq_mhz: peak frequency in MHz (barycentric)
+      - width_chans: half-width in channels (default 200)
+      - max_tints: max time integrations per epoch (default 20)
+    """
+    from blimpy import Waterfall
+    import numpy as np
+
+    freq_mhz = request.args.get('freq_mhz', type=float)
+    width_chans = request.args.get('width_chans', default=200, type=int)
+    max_tints = request.args.get('max_tints', default=20, type=int)
+
+    if freq_mhz is None:
+        return jsonify({'error': 'Missing freq_mhz'}), 400
+
+    # Load the stack job to get target and epochs
+    try:
+        from db import get_db
+        conn = get_db()
+        row = conn.execute(
+            'SELECT target, epochs FROM stack_jobs WHERE job_id = ?', (job_id,)
+        ).fetchone()
+        conn.close()
+    except Exception:
+        row = None
+    if not row:
+        return jsonify({'error': 'Job not found'}), 404
+
+    target = (row['target'] or 'PROXCEN').upper()
+    epochs = json.loads(row['epochs'] or '[]')
+
+    if not epochs:
+        return jsonify({'error': 'No epochs in stack job'}), 400
+
+    # Get epoch definitions from incoherent_stack
+    sys.path.insert(0, SETI_ROOT)
+    from incoherent_stack import EPOCHS, find_h5, FINE_DIRS
+    from barycentric_correct import compute_barycentric_velocity, extract_mjd_from_filename, TARGET_COORDS
+
+    coords = TARGET_COORDS.get(target, TARGET_COORDS.get('PROXCEN', {}))
+    target_ra = coords.get('ra', 14.49)
+    target_dec = coords.get('dec', -62.68)
+
+    # Barycentric correction is small (~0.002%), so the observed freq
+    # window is approximately the same as the barycentric window.
+    # We load a slightly wider window to be safe.
+    chan_width_mhz = 2.7939677e-6  # Parkes fine-res channel width
+    half_width_mhz = (width_chans + 50) * chan_width_mhz
+    f_start_obs = freq_mhz - half_width_mhz
+    f_stop_obs = freq_mhz + half_width_mhz
+
+    # Build common barycentric grid for the narrow window
+    target_chans = 2 * width_chans
+    f_min_bary = freq_mhz - width_chans * chan_width_mhz
+    f_max_bary = freq_mhz + width_chans * chan_width_mhz
+    common_grid = np.linspace(f_min_bary, f_max_bary, target_chans)
+
+    epoch_spectra_2d = []  # list of (n_tints, target_chans) arrays
+    epoch_labels = []
+    tsamp = 18.25  # default, overwritten by header
+
+    for ep_label in epochs:
+        ep_def = EPOCHS.get(ep_label)
+        if not ep_def:
+            continue
+
+        mjd_int = ep_def['mjd_int']
+        seqs = ep_def['seqs']
+
+        # Barycentric correction for this epoch
+        first_on = f"Parkes_{mjd_int}_{seqs[0][0]}_PROXCEN_S_fine.h5"
+        mjd = extract_mjd_from_filename(first_on)
+        v_bary = compute_barycentric_velocity(mjd, target_ra, target_dec, 'parkes')
+        c = 299792458.0
+        corr = 1.0 - v_bary / c
+
+        # Load ON/OFF pairs, subtract, keep 2D (time x freq)
+        pair_residuals_2d = []
+        ref_freqs = None
+        ref_times = None
+
+        for on_seq, off_seq in seqs:
+            on_file = f"Parkes_{mjd_int}_{on_seq}_PROXCEN_S_fine.h5"
+            off_file = f"Parkes_{mjd_int}_{off_seq}_PROXCEN_R_fine.h5"
+            on_path = find_h5(on_file)
+            off_path = find_h5(off_file)
+            if not on_path or not off_path:
+                continue
+
+            try:
+                wf_on = Waterfall(on_path, load_data=True, f_start=f_start_obs, f_stop=f_stop_obs)
+                on_data = np.array(wf_on.data, dtype=np.float64)
+                if on_data.ndim == 3:
+                    on_data = on_data[:, 0, :]
+                on_freqs = np.array(wf_on.container.sf_freqs, dtype=np.float64)
+                h = wf_on.header
+                tsamp = float(h.get('tsamp', 18.25))
+
+                wf_off = Waterfall(off_path, load_data=True, f_start=f_start_obs, f_stop=f_stop_obs)
+                off_data = np.array(wf_off.data, dtype=np.float64)
+                if off_data.ndim == 3:
+                    off_data = off_data[:, 0, :]
+            except Exception as e:
+                print(f"  Error loading {on_file}: {e}")
+                continue
+
+            # Align time dimensions
+            n_t = min(on_data.shape[0], off_data.shape[0])
+            on_data = on_data[:n_t]
+            off_data = off_data[:n_t]
+
+            # Subtract OFF from ON (kills steady RFI)
+            residual = on_data - off_data
+
+            if ref_freqs is None:
+                ref_freqs = on_freqs
+                ref_times = np.arange(n_t, dtype=np.float64) * tsamp
+
+            pair_residuals_2d.append(residual)
+
+        if not pair_residuals_2d:
+            continue
+
+        # Average across ON/OFF pairs within this epoch (keep 2D)
+        avg_2d = np.mean(pair_residuals_2d, axis=0)  # shape: (n_tints, n_chans)
+
+        # Apply barycentric correction to frequency axis
+        bary_freqs = ref_freqs * corr
+
+        # For each time row, interpolate onto common barycentric grid
+        sort_idx = np.argsort(bary_freqs)
+        bary_sorted = bary_freqs[sort_idx]
+
+        interp_2d = np.zeros((avg_2d.shape[0], target_chans))
+        for t_idx in range(avg_2d.shape[0]):
+            row_sorted = avg_2d[t_idx, sort_idx]
+            interp_2d[t_idx] = np.interp(common_grid, bary_sorted, row_sorted)
+
+        # Limit time integrations
+        n_tints = interp_2d.shape[0]
+        if n_tints > max_tints:
+            indices = np.linspace(0, n_tints - 1, max_tints, dtype=int)
+            interp_2d = interp_2d[indices]
+
+        epoch_spectra_2d.append(interp_2d)
+        epoch_labels.append(ep_label)
+
+    if not epoch_spectra_2d:
+        return jsonify({'error': 'No epoch data could be loaded'}), 500
+
+    # Align all epochs to the same number of time bins
+    min_tints = min(s.shape[0] for s in epoch_spectra_2d)
+    for i in range(len(epoch_spectra_2d)):
+        if epoch_spectra_2d[i].shape[0] > min_tints:
+            indices = np.linspace(0, epoch_spectra_2d[i].shape[0] - 1, min_tints, dtype=int)
+            epoch_spectra_2d[i] = epoch_spectra_2d[i][indices]
+
+    # Build single-epoch view (first epoch, raw)
+    single = epoch_spectra_2d[0]
+
+    # Build stacked average (the SNR-boosted view)
+    stacked = np.mean(epoch_spectra_2d, axis=0)
+
+    # Convert both to dB above median for visualization
+    def to_db(arr):
+        med = np.median(arr[arr != 0]) if np.any(arr != 0) else 1.0
+        if med == 0:
+            med = 1.0
+        return 10.0 * np.log10(np.maximum(arr, 1.0) / med)
+
+    single_db = to_db(single)
+    stacked_db = to_db(stacked)
+
+    times = (np.arange(min_tints, dtype=np.float64) * tsamp).tolist()
+    freqs = common_grid.tolist()
+
+    return jsonify({
+        'single_epoch': {
+            'label': epoch_labels[0],
+            'data': np.nan_to_num(single_db, nan=0.0).tolist(),
+        },
+        'stacked': {
+            'label': f'Stacked ({len(epoch_spectra_2d)} epochs)',
+            'data': np.nan_to_num(stacked_db, nan=0.0).tolist(),
+        },
+        'all_epochs': [
+            {'label': epoch_labels[i], 'data': np.nan_to_num(to_db(epoch_spectra_2d[i]), nan=0.0).tolist()}
+            for i in range(len(epoch_spectra_2d))
+        ],
+        'freqs': freqs,
+        'times': times,
+        'n_chans': target_chans,
+        'n_tints': min_tints,
+        'center_freq_mhz': freq_mhz,
+    })
+
+
 # ─── Main ─────────────────────────────────────────────────────────────
 
 # Ensure DB schema is up to date (creates stack_jobs table if missing)
