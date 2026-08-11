@@ -800,7 +800,7 @@ function renderWaterfallHeatmap(divId, zData, freqs, times, centerFreq, zmin, zm
         margin: { l: 50, r: 10, t: 10, b: isSmall ? 30 : 50 },
         height: isSmall ? 200 : 350,
         showlegend: false,
-        hovermode: isSmall ? false : 'closest',
+        hovermode: 'closest',
         hoverdistance: -1,
         hoverlabel: {
             bgcolor: '#0d1b2a',
@@ -816,22 +816,27 @@ function renderWaterfallHeatmap(divId, zData, freqs, times, centerFreq, zmin, zm
         responsive: true
     });
 
-    // For small grid plots: show hover info in a fixed status bar above the plot
+    // For small grid plots: suppress floating label, show info in panel label bar
     if (isSmall) {
+        // Hide the floating hovertext element via CSS override on this specific plot
+        var styleId = divId + '-style';
+        if (!document.getElementById(styleId)) {
+            var style = document.createElement('style');
+            style.id = styleId;
+            style.textContent = '#' + divId + ' .hovertext { display: none !important; }';
+            document.head.appendChild(style);
+        }
         var gridItem = plotDiv.closest('.wf-grid-item');
         if (gridItem) {
             var labelEl = gridItem.querySelector('.wf-panel-label');
+            if (labelEl) {
+                labelEl.dataset.original = labelEl.textContent;
+            }
             plotDiv.on('plotly_hover', function(eventData) {
-                if (eventData.points && eventData.points[0]) {
+                if (labelEl && eventData.points && eventData.points[0]) {
                     var pt = eventData.points[0];
-                    var freqVal = freqs[pt.pointIndex[1]] || 0;
-                    var timeVal = times[pt.pointIndex[0]] || 0;
-                    var powerVal = zData[pt.pointIndex[0]] ? zData[pt.pointIndex[0]][pt.pointIndex[1]] : 0;
-                    if (labelEl) {
-                        labelEl.dataset.original = labelEl.dataset.original || labelEl.textContent;
-                        labelEl.textContent = labelEl.dataset.original +
-                            ' | ' + freqVal.toFixed(6) + ' MHz | ' + powerVal.toFixed(2) + ' dB';
-                    }
+                    labelEl.textContent = (labelEl.dataset.original || '') +
+                        ' | ' + pt.x.toFixed(6) + ' MHz | ' + pt.z.toFixed(2) + ' dB';
                 }
             });
             plotDiv.on('plotly_unhover', function() {
