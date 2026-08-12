@@ -1344,6 +1344,9 @@ async function loadResults(jobId) {
         var btn = document.getElementById('tl-run-btn');
         btn.disabled = false;
         btn.textContent = '\u25b6 Run Pipeline';
+
+        // Refresh history list so the completed run shows up
+        tlLoadHistory();
     } catch(err) {
         showError(err.message);
     }
