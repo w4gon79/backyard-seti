@@ -6,7 +6,7 @@
     <title>📊 Incoherent Stack - Phase 2C</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=8">
     <link rel="stylesheet" href="/static/css/style.css?v=31">
-    <link rel="stylesheet" href="/static/css/stack.css?v=16">
+    <link rel="stylesheet" href="/static/css/stack.css?v=17">
     <!-- Plotly for waterfall plots -->
     <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 </head>
@@ -198,34 +198,34 @@
         <div class="two-layer-body">
             <div class="two-layer-controls">
                 <div class="control-group">
-                    <label for="tl-target">Target</label>
-                    <input type="text" id="tl-target" value="PROXCEN" placeholder="e.g. PROXCEN">
+                    <label for="tl-target" title="Target star name. Must match BL filename convention (e.g. PROXCEN in Parkes_57791_72989_PROXCEN_S_fine.h5). Only targets with downloaded data and barycentric correction will work.">Target <span class="tooltip-icon">ⓘ</span></label>
+                    <input type="text" id="tl-target" value="PROXCEN" placeholder="e.g. PROXCEN" title="Target star identifier. Must match filenames in the fine data directory.">
                 </div>
                 <div class="control-row">
                     <div class="control-group">
-                        <label for="tl-tolerance" title="Barycentric frequency match tolerance in Hz">Tolerance (Hz)</label>
-                        <input type="number" id="tl-tolerance" value="10" step="1" min="1">
+                        <label for="tl-tolerance" title="Barycentric frequency match tolerance in Hz. A real signal from the target star would match within a few Hz after barycentric correction. 10 Hz is tight enough to kill 99.99% of RFI. Lower = stricter, higher = more false positives. Parkes channel width is 2.79 Hz.">Tolerance (Hz) <span class="tooltip-icon">ⓘ</span></label>
+                        <input type="number" id="tl-tolerance" value="10" step="1" min="1" title="How close barycentric frequencies must be across epochs to count as a match. 10 Hz = ~3.6 Parkes channels. Tight is good.">
                     </div>
                     <div class="control-group">
-                        <label for="tl-min-epochs" title="Minimum epochs a hit must appear in to survive">Min Epochs</label>
-                        <input type="number" id="tl-min-epochs" value="3" step="1" min="2">
+                        <label for="tl-min-epochs" title="Minimum number of epochs a hit must appear in to survive Layer 1. Higher = stricter. With 4 epochs available, requiring 3 eliminates nearly all coincidental RFI matches. A real signal would appear in ALL epochs.">Min Epochs <span class="tooltip-icon">ⓘ</span></label>
+                        <input type="number" id="tl-min-epochs" value="3" step="1" min="2" title="Minimum epoch count for a candidate. 2 of 4 = permissive (expect false positives). 3 of 4 = strict. 4 of 4 = maximum confidence.">
                     </div>
                 </div>
                 <div class="control-row">
                     <div class="control-group">
-                        <label for="tl-min-snr" title="Minimum SNR threshold for the cross-epoch filter">Min SNR</label>
-                        <input type="number" id="tl-min-snr" value="8" step="0.5" min="0">
+                        <label for="tl-min-snr" title="Minimum Signal-to-Noise ratio for the cross-epoch filter. Only hits at or above this SNR in the original turboSETI results are considered. 8 filters out faint threshold detections. Lower includes more noise hits.">Min SNR <span class="tooltip-icon">ⓘ</span></label>
+                        <input type="number" id="tl-min-snr" value="8" step="0.5" min="0" title="SNR cutoff for Layer 1. turboSETI reports SNR >= 5 by default. Using 8 focuses on clear detections.">
                     </div>
                     <div class="control-group">
-                        <label for="tl-stack-width" title="Stack window width in MHz per candidate">Stack Width (MHz)</label>
-                        <input type="number" id="tl-stack-width" value="0.05" step="0.01" min="0.01">
+                        <label for="tl-stack-width" title="Width of the frequency window to stack around each surviving candidate, in MHz. 0.05 MHz = 50 kHz gives enough context to see the signal shape without diluting the stack with noise. Larger windows show more context but reduce SNR.">Stack Width (MHz) <span class="tooltip-icon">ⓘ</span></label>
+                        <input type="number" id="tl-stack-width" value="0.05" step="0.01" min="0.01" title="Frequency window for Layer 2 targeted stack. 0.05 MHz = ~18,000 Parkes channels. Tighter = faster, more sensitive.">
                     </div>
                 </div>
                 <div class="control-group">
-                    <label for="tl-n-sigma" title="Peak detection threshold in sigma for the targeted stack">N Sigma</label>
-                    <input type="number" id="tl-n-sigma" value="5" step="0.5" min="1">
+                    <label for="tl-n-sigma" title="Peak detection threshold for the targeted stack output, in standard deviations above the noise floor. 5 sigma means a 1-in-3.5-million false alarm rate per frequency bin. Higher = fewer false peaks.">N Sigma <span class="tooltip-icon">ⓘ</span></label>
+                    <input type="number" id="tl-n-sigma" value="5" step="0.5" min="1" title="Stack peak detection threshold. 5 sigma = rigorous. 3 sigma = exploratory. Each step halves/doubles detection count.">
                 </div>
-                <button id="tl-run-btn" class="btn-primary" title="Run the two-layer pipeline: cross-epoch filter then targeted stack">▶ Run Pipeline</button>
+                <button id="tl-run-btn" class="btn-primary" title="Run the full two-layer pipeline: Layer 1 cross-epoch barycentric filter eliminates RFI, Layer 2 stacks surviving candidates for SNR boost confirmation.">▶ Run Pipeline</button>
             </div>
             <div class="two-layer-results" id="tl-results-area">
                 <div class="two-layer-idle">
