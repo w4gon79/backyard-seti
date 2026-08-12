@@ -4038,7 +4038,37 @@ def api_two_layer_results(job_id):
             'progress': job['progress'],
         }), 400
 
-    return jsonify(job.get('result', {}))
+    # Return results, stripping large arrays (stack spectra) that would
+    # make the JSON response too large for the browser to handle
+    full_result = job.get('result', {})
+    slim_result = {
+        'target': full_result.get('target'),
+        'timestamp': full_result.get('timestamp'),
+        'summary': full_result.get('summary'),
+        'layer1': full_result.get('layer1'),
+        'layer2': {
+            'n_candidates_stacked': full_result.get('layer2', {}).get('n_candidates_stacked', 0),
+            'results': [],
+        },
+    }
+    # Include layer 2 results but strip stack spectra arrays
+    for sr in full_result.get('layer2', {}).get('results', []):
+        slim_sr = {k: v for k, v in sr.items() if k != 'stack_result'}
+        if 'stack_result' in sr:
+            slim_sr['stack_result'] = {
+                'freq_center': sr['stack_result'].get('freq_center'),
+                'n_epochs': sr['stack_result'].get('n_epochs'),
+                'median': sr['stack_result'].get('median'),
+                'sigma': sr['stack_result'].get('sigma'),
+                'peaks': sr['stack_result'].get('peaks', []),
+                'used_epochs': sr['stack_result'].get('used_epochs', []),
+                'snr_improvement': sr['stack_result'].get('snr_improvement'),
+                'epoch_info': sr['stack_result'].get('epoch_info', []),
+                'stack_width_mhz': sr['stack_result'].get('stack_width_mhz'),
+            }
+        slim_result['layer2']['results'].append(slim_sr)
+
+    return jsonify(slim_result)
 
 
 # ─── Main ─────────────────────────────────────────────────────────────
