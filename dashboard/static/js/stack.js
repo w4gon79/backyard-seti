@@ -1013,7 +1013,7 @@ function renderHistory(jobs) {
     var html = '';
     for (var i = 0; i < jobs.length; i++) {
         var j = jobs[i];
-        var statusIcon = j.status === 'complete' ? '✅' : (j.status === 'error' ? '❌' : (j.status === 'interrupted' ? '⏸️' : '⏳'));
+        var statusIcon = j.status === 'complete' ? '✅' : (j.status === 'error' ? '❌' : (j.status === 'interrupted' ? '⏸️' : (j.status === 'superseded' ? '⏭️' : '⏳')));
         var statusClass = j.status || 'unknown';
         var time = j.created_at || '';
         // Truncate time to just date + HH:MM
@@ -1030,7 +1030,8 @@ function renderHistory(jobs) {
         }
         var deleteBtn = '<button class="btn-delete-small" data-delete="' + j.job_id + '">✕</button>';
 
-        html += '<div class="history-item" data-job="' + j.job_id + '" data-status="' + j.status + '">' +
+        var itemClass = j.status === 'superseded' ? ' history-item-superseded' : '';
+        html += '<div class="history-item' + itemClass + '" data-job="' + j.job_id + '" data-status="' + j.status + '">' +
             '<span class="history-status ' + statusClass + '">' + statusIcon + '</span>' +
             '<div class="history-info">' +
                 '<span class="history-target">' + escapeHtml(j.target || '?') + '</span>' +

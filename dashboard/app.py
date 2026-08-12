@@ -2887,6 +2887,18 @@ def api_stack_resume(job_id):
                     json.dumps(result.get('epoch_info', [])),
                 ))
                 conn.commit()
+
+                # Mark the original interrupted job as superseded
+                if result.get('success'):
+                    try:
+                        conn.execute(
+                            "UPDATE stack_jobs SET status = 'superseded', "
+                            "progress_msg = 'Resumed as ' || ? WHERE job_id = ?",
+                            (new_job_id, job_id))
+                        conn.commit()
+                    except Exception:
+                        pass
+
                 conn.close()
             except Exception as db_err:
                 print(f"  Stack DB persist error: {db_err}")

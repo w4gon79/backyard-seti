@@ -556,6 +556,9 @@
 }
 .history-item:last-child { border-bottom: none; }
 .history-item:hover { background: #162447; }
+.history-item-superseded { opacity: 0.4; cursor: default; }
+.history-item-superseded:hover { background: transparent; }
+.history-status.superseded { color: #666; }
 .history-status {
     font-size: 1.1em;
 }

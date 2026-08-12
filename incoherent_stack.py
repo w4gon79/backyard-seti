@@ -767,6 +767,7 @@ def run_stack_job_chunked(params, progress_callback=None):
             'peaks': chunk_result['peaks'],
             'stack_median': chunk_result['median'],
             'stack_sigma': chunk_result['sigma'],
+            'epoch_info': chunk_result.get('epoch_info', []),
         }
         with open(chunk_file, 'w') as f:
             json.dump(chunk_data, f, indent=2)
@@ -850,7 +851,43 @@ def run_stack_job_chunked(params, progress_callback=None):
         except Exception as e:
             print(f"Combined plot failed: {e}")
 
+    # Collect epoch_info from the first successful chunk (all chunks process
+    # the same epochs, so any chunk's epoch_info is representative)
+    combined_epoch_info = []
+    for cr in chunk_results:
+        saved = cr[1] if isinstance(cr[1], dict) else cr[1]
+        ei = saved.get('epoch_info', [])
+        if ei:
+            combined_epoch_info = ei
+            break
+
+    # Save spectrum .npz for Plotly rendering across restarts
+    # Concatenate all chunk grids/stacks into full-band spectrum
+    _full_grid = None
+    _full_stack = None
+    if chunk_results:
+        cg, cs = [], []
+        for cr in chunk_results:
+            if len(cr) >= 4:
+                cg.append(cr[2])
+                cs.append(cr[3])
+        if cg:
+            _full_grid = np.concatenate(cg)
+            _full_stack = np.concatenate(cs)
+
+    if output_json and _full_grid is not None:
+        npz_path = output_json.replace('.json', '.npz')
+        try:
+            np.savez_compressed(npz_path,
+                               grid_freqs=_full_grid,
+                               stack_power=_full_stack)
+            print(f"Spectrum saved: {npz_path}")
+        except Exception as e:
+            print(f"Spectrum save failed: {e}")
+
     # Assemble combined results
+    grid_n_bins = len(_full_grid) if _full_grid is not None else (
+        int(width / 2.7939677e-6))  # fallback estimate
     results = {
         'success': True,
         'target': target,
@@ -863,22 +900,26 @@ def run_stack_job_chunked(params, progress_callback=None):
         'peaks': all_peaks[:200],
         'stack_median': combined_median,
         'stack_sigma': combined_sigma,
-        'epoch_info': [],
-        'grid_n_bins': sum(len(cr[2]) for cr in chunk_results if len(cr) >= 4) or
-                       int(width / 2.7939677e-6),  # fallback estimate
+        'epoch_info': combined_epoch_info,
+        'grid_n_bins': grid_n_bins,
+        'grid_freqs': _full_grid.tolist() if _full_grid is not None else [],
+        'stack_power': _full_stack.tolist() if _full_stack is not None else [],
         'chunked': True,
         'n_chunks': n_chunks,
         'chunk_size_mhz': chunk_size_mhz,
     }
 
-    # Save combined JSON
+    # Save combined JSON (exclude large arrays - they're in the .npz)
     if output_json:
+        results_compact = {k: v for k, v in results.items()
+                          if k not in ('grid_freqs', 'stack_power')}
         with open(output_json, 'w') as f:
-            json.dump(results, f, indent=2)
+            json.dump(results_compact, f, indent=2)
         print(f"Combined results saved: {output_json}")
 
     _cb({'phase': 'complete',
-         'results': {k: v for k, v in results.items() if k != 'peaks'},
+         'results': {k: v for k, v in results.items()
+                     if k not in ('peaks', 'grid_freqs', 'stack_power')},
          'n_peaks': len(all_peaks)})
 
     return results
