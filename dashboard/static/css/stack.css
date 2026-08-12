@@ -832,21 +832,25 @@
     overflow: hidden;
 }
 .two-layer-panel .panel-header {
+    padding: 10px 16px;
+    background: #162447;
+    font-weight: 600;
+    font-size: 0.95em;
+    color: #64b5f6;
+    border-bottom: 1px solid #1e3a5f;
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 12px 20px;
-    background: rgba(26, 58, 95, 0.3);
-    border-bottom: 1px solid #1e3a5f;
 }
 .two-layer-panel .panel-header > span:first-child {
-    color: #4fc3f7;
-    font-size: 1.1em;
+    color: #64b5f6;
+    font-size: inherit;
     font-weight: 600;
 }
 .two-layer-desc {
     color: #546e7a;
-    font-size: 0.8em;
+    font-size: 0.85em;
+    font-weight: 400;
 }
 .two-layer-body {
     display: flex;
