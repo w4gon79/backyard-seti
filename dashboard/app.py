@@ -3929,6 +3929,18 @@ def api_two_layer_run():
                 if r.get('peaks')
             )
 
+            # ─── Layer 2.5: Automated RFI Scorecard ─────────────────
+            job_state['phase'] = 'scorecard'
+            job_state['progress'] = 97
+            job_state['progress_msg'] = 'Running RFI scorecard analysis...'
+
+            layer25_result = None
+            try:
+                from ml.layer25_analysis import analyze_all_candidates
+                layer25_result = analyze_all_candidates(candidates, stack_results)
+            except Exception as e:
+                print(f'  Layer 2.5 error: {e}')
+
             verdict = 'CANDIDATES_FOUND' if n_with_peaks > 0 else 'NO_PEAKS_IN_STACK'
 
             job_state['phase'] = 'complete'
@@ -3955,6 +3967,7 @@ def api_two_layer_run():
                     'results': stack_results,
                     'n_candidates_stacked': n_stacked,
                 },
+                'layer25': layer25_result,
                 'summary': {
                     'total_on_freqs': summary.get('total_on_frequencies', 0),
                     'candidates_after_layer1': len(candidates),

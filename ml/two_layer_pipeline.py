@@ -39,6 +39,7 @@ from incoherent_stack import (
     EPOCHS, find_h5, load_spectrum_window, build_common_grid, find_peaks,
     process_epoch, compute_barycentric_velocity, extract_mjd_from_filename,
 )
+from ml.layer25_analysis import analyze_all_candidates
 
 
 def get_scan_dirs(target='PROXCEN'):
@@ -320,6 +321,11 @@ def main():
         candidates, args.stack_width, epoch_labels, target=target,
     )
     
+    # ─── Layer 2.5: Automated RFI Scorecard ─────────────────────
+    layer25_result = analyze_all_candidates(
+        candidates, stack_results, n_sigma=args.n_sigma,
+    )
+    
     # ─── Summary ───────────────────────────────────────────────────
     n_stacked = sum(1 for r in stack_results if r.get('stack_success'))
     n_with_peaks = sum(1 for r in stack_results
@@ -367,10 +373,12 @@ def main():
                 'results': save_results,
                 'n_candidates_stacked': n_stacked,
             },
+            'layer25': layer25_result,
             'summary': {
                 'total_on_freqs': xepoch_result['summary'].get('total_on_frequencies', 0),
                 'candidates_after_layer1': len(candidates),
                 'candidates_after_layer2': n_with_peaks,
+                'candidates_after_layer25': layer25_result['summary']['interesting'] + layer25_result['summary']['needs_review'],
                 'verdict': 'CANDIDATES_FOUND' if n_with_peaks > 0 else 'NO_PEAKS_IN_STACK',
             },
         }, f, indent=2, default=str)

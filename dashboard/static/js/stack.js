@@ -1398,8 +1398,12 @@ function renderResults(data) {
 
     // Candidate table (if any)
     if (candidates.length > 0) {
+        // Get Layer 2.5 scorecards if available
+        var layer25 = data.layer25 || {};
+        var scorecards = layer25.scorecards || [];
+        
         html += '<table class="tl-cand-table">';
-        html += '<thead><tr><th>#</th><th>Bary Freq (MHz)</th><th>Epochs</th><th>Max SNR</th><th>Mean Drift (Hz/s)</th><th>Stack Peaks</th><th>Status</th><th>Action</th></tr></thead>';
+        html += '<thead><tr><th>#</th><th>Bary Freq (MHz)</th><th>Epochs</th><th>Max SNR</th><th>Mean Drift (Hz/s)</th><th>Stack Peaks</th><th>Status</th><th>RFI Assessment</th><th>Action</th></tr></thead>';
         html += '<tbody>';
         for (var i = 0; i < candidates.length; i++) {
             var c = candidates[i];
@@ -1411,6 +1415,23 @@ function renderResults(data) {
             var stackPeaks = sr.peaks ? sr.peaks.length : 0;
             var status = sr.stack_success === false ? '<span style="color:#ef5350;">Failed: ' + escapeHtmlLocal(sr.error || '') + '</span>' : (stackPeaks > 0 ? '<span style="color:#ff9800;">\u26a0 Peaks (' + stackPeaks + ')</span>' : '<span style="color:#66bb6a;">\u2714 Clean</span>');
 
+            // Layer 2.5 scorecard
+            var sc = scorecards[i] || {};
+            var assessment = sc.assessment || 'N/A';
+            var rfiScore = sc.rfi_score || 0;
+            var flags = sc.flags || [];
+            var assessColor = assessment === 'LIKELY_RFI' ? '#ef5350' :
+                              assessment === 'POSSIBLY_RFI' ? '#ff9800' :
+                              assessment === 'NEEDS_REVIEW' ? '#ffeb3b' :
+                              assessment === 'INTERESTING' ? '#66bb6a' : '#546e7a';
+            var assessText = assessment.replace(/_/g, ' ');
+            var flagText = flags.length > 0 ? flags.join(', ') : '';
+            var assessHtml = '<span style="color:' + assessColor + ';font-weight:600;">' + escapeHtmlLocal(assessText) + '</span>';
+            assessHtml += '<span style="color:#546e7a;font-size:0.8em;"> (' + rfiScore + '/100)</span>';
+            if (flagText) {
+                assessHtml += '<br><span style="color:#546e7a;font-size:0.75em;">' + escapeHtmlLocal(flagText) + '</span>';
+            }
+
             // Build peak list for waterfall display
             var peaksJson = encodeURIComponent(JSON.stringify(sr.peaks || []));
             html += '<tr>';
@@ -1421,6 +1442,7 @@ function renderResults(data) {
             html += '<td>' + drift.toFixed(6) + '</td>';
             html += '<td>' + stackPeaks + '</td>';
             html += '<td>' + status + '</td>';
+            html += '<td>' + assessHtml + '</td>';
             html += '<td><button class="btn-waterfall" onclick="showTLWaterfall(' + freq + ', ' + '\'' + peaksJson + '\'' + ')">\u{1f50d} View</button></td>';
             html += '</tr>';
         }
