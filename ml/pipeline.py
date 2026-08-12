@@ -82,6 +82,7 @@ def run_pipeline(target='PROXCEN', crop_size=64, epochs=50,
         checkpoint_path=ckpt_path,
         target=target,
         top_percent=top_percent,
+        max_per_file=max_per_file,
     )
     
     print(f"\nInference complete: {time.time()-t0:.1f}s\n")

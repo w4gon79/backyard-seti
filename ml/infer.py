@@ -36,7 +36,7 @@ def add_ml_columns(db_path):
 
 
 def score_all_hits(checkpoint_path, target='PROXCEN', batch_size=512, 
-                   top_percent=5, device='auto', db_path=None):
+                   top_percent=5, device='auto', db_path=None, max_per_file=5000):
     """Score all hits for a target using the trained autoencoder."""
     if db_path is None:
         db_path = os.path.join(SETI_ROOT, 'data', 'seti_hits.db')
@@ -94,7 +94,11 @@ def score_all_hits(checkpoint_path, target='PROXCEN', batch_size=512,
             print(f"  [{file_idx+1}/{len(file_groups)}] SKIP: {source_file} not found")
             continue
         
-        freqs = [h['freq'] for h in file_hits]
+        # Subsample if too many hits in one file (same cap as extraction)
+        if len(file_hits) > max_per_file:
+            import random
+            file_hits = random.sample(file_hits, max_per_file)
+            freqs = [h['freq'] for h in file_hits]
         print(f"  [{file_idx+1}/{len(file_groups)}] {source_file}: {len(freqs)} hits", end='', flush=True)
         
         crops = extract_crops_from_file(h5_path, freqs, crop_size=crop_size)
@@ -164,6 +168,7 @@ if __name__ == '__main__':
     parser.add_argument('--target', default='PROXCEN')
     parser.add_argument('--top-percent', type=float, default=5, help='Flag top N%% as anomalies')
     parser.add_argument('--batch-size', type=int, default=512)
+    parser.add_argument('--max-per-file', type=int, default=5000, help='Max hits per HDF5 file to score')
     args = parser.parse_args()
     
     ckpt = args.checkpoint or os.path.join(SETI_ROOT, 'ml', 'checkpoints', 'autoencoder_best.pt')
@@ -176,4 +181,5 @@ if __name__ == '__main__':
         target=args.target,
         batch_size=args.batch_size,
         top_percent=args.top_percent,
+        max_per_file=args.max_per_file,
     )
