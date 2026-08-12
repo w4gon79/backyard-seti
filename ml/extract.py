@@ -40,19 +40,7 @@ def extract_crops_from_file(h5_path, hit_freqs, crop_size=64, max_tints=None):
     processed = 0
     errors = 0
 
-    # Sort hits by channel number for sequential disk access
-    # Random-order reads cause constant seeking across the 12 GB file.
-    # Sequential reads are ~100x faster on HDD and significantly faster on SSD.
-    hit_channels = []
-    for hit_freq in hit_freqs:
-        center_chan = int(round((hit_freq - fch1) / foff))
-        if center_chan - half >= 0 and center_chan + half <= nchans:
-            hit_channels.append((center_chan, hit_freq))
-    hit_channels.sort(key=lambda x: x[0])  # sort by channel number
-
-    if not hit_channels:
-        return None
-
+    # Read header first (needed for channel computation)
     with h5py.File(h5_path, 'r') as f:
         dset = f['data']
         attrs = dict(dset.attrs)
@@ -61,12 +49,22 @@ def extract_crops_from_file(h5_path, hit_freqs, crop_size=64, max_tints=None):
         nchans = int(attrs.get('nchans', 207618048))
         n_times = dset.shape[0]
 
+        # Sort hits by channel number for sequential disk access
+        hit_channels = []
+        for hit_freq in hit_freqs:
+            center_chan = int(round((hit_freq - fch1) / foff))
+            if center_chan - half >= 0 and center_chan + half <= nchans:
+                hit_channels.append((center_chan, hit_freq))
+        hit_channels.sort(key=lambda x: x[0])
+
+        if not hit_channels:
+            return None
+
         for center_chan, hit_freq in hit_channels:
             chan_start = center_chan - half
             chan_stop = center_chan + half
 
             try:
-                # Read slice from already-open file handle (sequential access)
                 data = np.array(dset[:, 0, chan_start:chan_stop], dtype=np.float32)
             except Exception:
                 errors += 1
@@ -74,7 +72,6 @@ def extract_crops_from_file(h5_path, hit_freqs, crop_size=64, max_tints=None):
 
             n_tints = data.shape[0]
 
-            # Sample or pad time dimension to crop_size
             if n_tints > crop_size:
                 indices = np.linspace(0, n_tints - 1, crop_size, dtype=int)
                 data = data[indices]
@@ -82,7 +79,6 @@ def extract_crops_from_file(h5_path, hit_freqs, crop_size=64, max_tints=None):
                 pad = np.tile(data[-1:], (crop_size - n_tints, 1))
                 data = np.vstack([data, pad])
 
-            # Normalize to [0, 1]
             c_min, c_max = data.min(), data.max()
             if c_max > c_min:
                 data = (data - c_min) / (c_max - c_min)
