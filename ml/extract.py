@@ -24,57 +24,67 @@ sys.path.insert(0, os.path.join(SETI_ROOT, 'src'))
 def extract_crops_from_file(h5_path, hit_freqs, crop_size=64, max_tints=None):
     """Extract waterfall crops from an HDF5 file at given hit frequencies.
 
-    Uses hdf5_reader.read_channel_slice() for memory-efficient reads
-    (~16 KB per crop instead of loading 12 GB via blimpy).
+    Opens the HDF5 file ONCE and batch-reads all channel slices in a single
+    pass to avoid 5000+ separate file open/close cycles.
 
     Returns array of shape (n_hits, crop_size, crop_size).
     """
     import sys, os
     SETI_ROOT_LOCAL = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     sys.path.insert(0, os.path.join(SETI_ROOT_LOCAL, 'src'))
-    from hdf5_reader import read_channel_slice, freq_to_chan, get_header
+    import hdf5plugin  # noqa: F401 -- registers bitshuffle filter
+    import h5py
 
-    # Read header
-    hdr = get_header(h5_path)
-    fch1 = float(hdr.get('fch1', 0))
-    foff = float(hdr.get('foff', 0))
-    nchans = int(hdr.get('nchans', 207618048))
-    tsamp = float(hdr.get('tsamp', 18.25))
-
-    crops = []
     half = crop_size // 2
+    crops = []
+    processed = 0
+    errors = 0
 
-    for hit_freq in hit_freqs:
-        center_chan = freq_to_chan(hit_freq, fch1=fch1, foff=foff, nchans=nchans)
+    with h5py.File(h5_path, 'r') as f:
+        dset = f['data']
+        attrs = dict(dset.attrs)
+        fch1 = float(attrs.get('fch1', 0))
+        foff = float(attrs.get('foff', 0))
+        nchans = int(attrs.get('nchans', 207618048))
+        n_times = dset.shape[0]
 
-        # Skip if too close to edge
-        if center_chan - half < 0 or center_chan + half > nchans:
-            continue
+        for hit_freq in hit_freqs:
+            center_chan = int(round((hit_freq - fch1) / foff))
+            if center_chan - half < 0 or center_chan + half > nchans:
+                continue
 
-        try:
-            data = read_channel_slice(h5_path, center_chan, half_width=half)
-        except Exception as e:
-            print(f"      Error reading chan {center_chan}: {e}")
-            continue
+            chan_start = center_chan - half
+            chan_stop = center_chan + half
 
-        n_tints = data.shape[0]
+            try:
+                # Read slice from already-open file handle
+                data = np.array(dset[:, 0, chan_start:chan_stop], dtype=np.float32)
+            except Exception:
+                errors += 1
+                continue
 
-        # Sample or pad time dimension to crop_size
-        if n_tints > crop_size:
-            indices = np.linspace(0, n_tints - 1, crop_size, dtype=int)
-            data = data[indices]
-        elif n_tints < crop_size:
-            pad = np.tile(data[-1:], (crop_size - n_tints, 1))
-            data = np.vstack([data, pad])
+            n_tints = data.shape[0]
 
-        # Normalize to [0, 1]
-        c_min, c_max = data.min(), data.max()
-        if c_max > c_min:
-            data = (data - c_min) / (c_max - c_min)
-        else:
-            data = np.zeros_like(data)
+            # Sample or pad time dimension to crop_size
+            if n_tints > crop_size:
+                indices = np.linspace(0, n_tints - 1, crop_size, dtype=int)
+                data = data[indices]
+            elif n_tints < crop_size:
+                pad = np.tile(data[-1:], (crop_size - n_tints, 1))
+                data = np.vstack([data, pad])
 
-        crops.append(data)
+            # Normalize to [0, 1]
+            c_min, c_max = data.min(), data.max()
+            if c_max > c_min:
+                data = (data - c_min) / (c_max - c_min)
+            else:
+                data = np.zeros_like(data)
+
+            crops.append(data)
+            processed += 1
+
+    if errors > 0:
+        print(f"      ({errors} channels skipped due to read errors)")
 
     if not crops:
         return None
