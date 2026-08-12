@@ -3116,11 +3116,24 @@ def api_stack_spectrum(job_id):
     job = _stack_jobs.get(job_id)
     if job and job.get('result') and job['result'].get('grid_freqs'):
         r = job['result']
+        raw_freqs = r.get('grid_freqs', [])
+        raw_power = r.get('stack_power', [])
+        n_total = len(raw_freqs)
+        # Downsample for JSON transport if huge
+        max_points = 50000
+        if n_total > max_points:
+            step = int(np.ceil(n_total / max_points))
+            out_freqs = raw_freqs[::step]
+            out_power = raw_power[::step]
+        else:
+            out_freqs = raw_freqs
+            out_power = raw_power
         return jsonify({
             'job_id': job_id,
-            'grid_freqs': r.get('grid_freqs'),
-            'stack_power': r.get('stack_power'),
-            'n_bins': r.get('grid_n_bins', len(r.get('grid_freqs', []))),
+            'grid_freqs': out_freqs,
+            'stack_power': out_power,
+            'n_bins': n_total,
+            'n_rendered': len(out_freqs),
         })
 
     # Fall back to .npz file on disk
@@ -3128,13 +3141,22 @@ def api_stack_spectrum(job_id):
     if os.path.isfile(npz_path):
         try:
             data = np.load(npz_path)
-            freqs = data['grid_freqs'].tolist()
-            power = data['stack_power'].tolist()
+            freqs = data['grid_freqs']
+            power = data['stack_power']
+            n_total = len(freqs)
+            # Downsample to max 50k points for JSON transport
+            # (frontend Plotly downsamples anyway, no reason to ship millions of points)
+            max_points = 50000
+            if n_total > max_points:
+                step = int(np.ceil(n_total / max_points))
+                freqs = freqs[::step]
+                power = power[::step]
             return jsonify({
                 'job_id': job_id,
-                'grid_freqs': freqs,
-                'stack_power': power,
-                'n_bins': len(freqs),
+                'grid_freqs': freqs.tolist(),
+                'stack_power': power.tolist(),
+                'n_bins': n_total,
+                'n_rendered': len(freqs),
             })
         except Exception as e:
             return jsonify({'error': f'Failed to load spectrum: {e}'}), 500

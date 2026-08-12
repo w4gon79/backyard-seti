@@ -237,6 +237,10 @@ async function pollStatus() {
 async function loadResults(jobId) {
     try {
         var resp = await fetch('/api/stack/results/' + jobId);
+        var ct = resp.headers.get('Content-Type') || '';
+        if (ct.indexOf('application/json') < 0) {
+            throw new Error('Server returned ' + ct + ' (HTTP ' + resp.status + ')');
+        }
         var data = await resp.json();
         if (data.error) throw new Error(data.error);
 
@@ -457,6 +461,10 @@ function loadPlot(jobId) {
     // Try loading spectrum data from API (for jobs restored from DB)
     if (currentResults && currentResults.has_spectrum) {
         fetch('/api/stack/spectrum/' + jobId).then(function(resp) {
+            var ct = resp.headers.get('Content-Type') || '';
+            if (ct.indexOf('application/json') < 0) {
+                throw new Error('Server returned ' + ct);
+            }
             return resp.json();
         }).then(function(data) {
             if (data.error) {
@@ -466,7 +474,8 @@ function loadPlot(jobId) {
             currentResults.grid_freqs = data.grid_freqs;
             currentResults.stack_power = data.stack_power;
             renderInteractiveSpectrum(currentResults);
-        }).catch(function() {
+        }).catch(function(err) {
+            console.warn('Spectrum load failed, falling back to PNG:', err.message);
             fallbackToPNG(jobId);
         });
         return;
