@@ -2003,14 +2003,35 @@ async function runCrossEpoch() {
         freq_tolerance_hz: parseFloat(document.getElementById('bary-tolerance-hz').value) || 10,
         min_epochs: parseInt(document.getElementById('bary-min-epochs').value) || 2,
         min_snr: parseFloat(document.getElementById('bary-min-snr').value) || 0,
+        force_rerun: true,
     };
 
+    // Show loading indicator
+    var resultsContainer = document.getElementById('bary-results-container');
+    if (resultsContainer) {
+        resultsContainer.style.display = 'block';
+        var tbody = document.getElementById('crossepoch-tbody');
+        if (tbody) {
+            tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:20px;color:#ffeb3b;">'
+                + '<div style="display:inline-block;">'
+                + '<div style="display:inline-block;width:24px;height:24px;border:3px solid #1e3a5f;border-top-color:#ffeb3b;border-radius:50%;animation:xf-spin 0.8s linear infinite;vertical-align:middle;margin-right:8px;"></div>'
+                + 'Searching across ' + scanIds.length + ' scans... this may take 30-60 seconds'
+                + '</div></td></tr>';
+        }
+    }
+
     try {
-        // Use fast SQLite DB endpoint
+        // Use fast SQLite DB endpoint with extended timeout
+        var controller = new AbortController();
+        var timeoutId = setTimeout(function() { controller.abort(); }, 120000);
+
         var resp = await fetch('/api/db/cross-epoch', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(params),
+            signal: controller.signal,
         });
+        clearTimeout(timeoutId);
+
         var data = await resp.json();
         if (data.error) {
             // Fallback to legacy JSON endpoint
@@ -2028,7 +2049,11 @@ async function runCrossEpoch() {
         // Refresh history dropdown with the new cached run
         loadCrossEpochHistory();
     } catch(e) {
-        alert('Error: ' + e.message);
+        if (e.name === 'AbortError') {
+            alert('Cross-epoch search timed out. Try increasing min_snr or reducing tolerance to speed up the query.');
+        } else {
+            alert('Error: ' + e.message);
+        }
     } finally {
         btn.disabled = false;
         btn.textContent = 'Run Cross-Epoch Search';
