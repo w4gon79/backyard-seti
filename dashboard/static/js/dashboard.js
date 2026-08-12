@@ -1877,7 +1877,7 @@ async function deleteBarycentric(scanId) {
         return;
     }
     try {
-        var resp = await fetch('/api/barycentric/delete/' + encodeURIComponent(scanId), {
+        var resp = await fetch('/api/barycentric/delete/' + scanId, {
             method: 'DELETE',
         });
         var data = await resp.json();
