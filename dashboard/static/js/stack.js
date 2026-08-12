@@ -845,7 +845,7 @@ function renderWaterfallHeatmap(divId, zData, freqs, times, centerFreq, zmin, zm
                 if (labelEl && eventData.points && eventData.points[0]) {
                     var pt = eventData.points[0];
                     labelEl.textContent = (labelEl.dataset.original || '') +
-                        ' | ' + pt.x.toFixed(6) + ' MHz | ' + pt.z.toFixed(2) + ' dB';
+                        ' | ' + pt.x.toFixed(6) + ' MHz \u00b1' + pt.z.toFixed(2) + ' dB';
                 }
             });
             plotDiv.on('plotly_unhover', function() {
@@ -1022,7 +1022,7 @@ function renderHistory(jobs) {
     var html = '';
     for (var i = 0; i < jobs.length; i++) {
         var j = jobs[i];
-        var statusIcon = j.status === 'complete' ? 'âœ…' : (j.status === 'error' ? 'âŒ' : (j.status === 'interrupted' ? 'â¸ï¸' : (j.status === 'superseded' ? 'â­ï¸' : 'â³')));
+        var statusIcon = j.status === 'complete' ? '\u2705' : (j.status === 'error' ? '\u274c' : (j.status === 'interrupted' ? '\u23f8' : (j.status === 'superseded' ? '\u23ed' : '\u23f3')));
         var statusClass = j.status || 'unknown';
         var time = j.created_at || '';
         // Truncate time to just date + HH:MM
@@ -1035,16 +1035,16 @@ function renderHistory(jobs) {
 
         var resumeBtn = '';
         if (j.status === 'error' || j.status === 'interrupted') {
-            resumeBtn = '<button class="btn-resume-small" data-resume="' + j.job_id + '">â–¶ Resume</button>';
+            resumeBtn = '<button class="btn-resume-small" data-resume="' + j.job_id + '">\u25b6 Resume</button>';
         }
-        var deleteBtn = '<button class="btn-delete-small" data-delete="' + j.job_id + '">âœ•</button>';
+        var deleteBtn = '<button class="btn-delete-small" data-delete="' + j.job_id + '">\u2715</button>';
 
         var itemClass = j.status === 'superseded' ? ' history-item-superseded' : '';
         html += '<div class="history-item' + itemClass + '" data-job="' + j.job_id + '" data-status="' + j.status + '">' +
             '<span class="history-status ' + statusClass + '">' + statusIcon + '</span>' +
             '<div class="history-info">' +
                 '<span class="history-target">' + escapeHtml(j.target || '?') + '</span>' +
-                '<span class="history-freq">' + (j.freq_center || 0).toFixed(1) + ' MHz Â±' + (j.width_mhz || 0).toFixed(0) + '</span>' +
+                '<span class="history-freq">' + (j.freq_center || 0).toFixed(1) + ' MHz \u00b1' + (j.width_mhz || 0).toFixed(0) + '</span>' +
                 '<span class="history-epochs">' + (j.n_epochs || 0) + ' epochs</span>' +
                 peakInfo +
             '</div>' +

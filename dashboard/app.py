@@ -4026,88 +4026,6 @@ def api_two_layer_active():
     return jsonify({'job_id': None, 'status': 'none'})
 
 
-@app.route('/api/stack/two-layer/<job_id>')
-def api_two_layer_status(job_id):
-    """Poll two-layer pipeline job status."""
-    job = _two_layer_jobs.get(job_id)
-    if not job:
-        return jsonify({'error': 'Job not found'}), 404
-
-    resp = {
-        'job_id': job_id,
-        'status': job['status'],
-        'progress': job['progress'],
-        'progress_msg': job['progress_msg'],
-        'phase': job.get('phase', ''),
-        'target': job.get('target'),
-        'candidates_found': job.get('candidates_found', 0),
-    }
-
-    if job['status'] == 'error':
-        resp['error'] = job.get('progress_msg', 'Unknown error')
-
-    return jsonify(resp)
-
-
-@app.route('/api/stack/two-layer/<job_id>/results')
-def api_two_layer_results(job_id):
-    """Get full results for a completed two-layer pipeline job."""
-    # Try in-memory first (for freshly completed jobs)
-    job = _two_layer_jobs.get(job_id)
-    if not job:
-        # Fall back to DB (for jobs from previous dashboard runs)
-        try:
-            from db import get_db
-            conn = get_db()
-            row = conn.execute(
-                'SELECT * FROM two_layer_jobs WHERE job_id = ?', (job_id,)).fetchone()
-            conn.close()
-            if row and row['status'] == 'complete' and row['result_json']:
-                return jsonify(json.loads(row['result_json']))
-        except Exception:
-            pass
-        return jsonify({'error': 'Job not found'}), 404
-
-    if job['status'] != 'complete':
-        return jsonify({
-            'error': 'Job not complete',
-            'status': job['status'],
-            'progress': job['progress'],
-        }), 400
-
-    # Return results, stripping large arrays (stack spectra) that would
-    # make the JSON response too large for the browser to handle
-    full_result = job.get('result', {})
-    slim_result = {
-        'target': full_result.get('target'),
-        'timestamp': full_result.get('timestamp'),
-        'summary': full_result.get('summary'),
-        'layer1': full_result.get('layer1'),
-        'layer2': {
-            'n_candidates_stacked': full_result.get('layer2', {}).get('n_candidates_stacked', 0),
-            'results': [],
-        },
-    }
-    # Include layer 2 results but strip stack spectra arrays
-    for sr in full_result.get('layer2', {}).get('results', []):
-        slim_sr = {k: v for k, v in sr.items() if k != 'stack_result'}
-        if 'stack_result' in sr:
-            slim_sr['stack_result'] = {
-                'freq_center': sr['stack_result'].get('freq_center'),
-                'n_epochs': sr['stack_result'].get('n_epochs'),
-                'median': sr['stack_result'].get('median'),
-                'sigma': sr['stack_result'].get('sigma'),
-                'peaks': sr['stack_result'].get('peaks', []),
-                'used_epochs': sr['stack_result'].get('used_epochs', []),
-                'snr_improvement': sr['stack_result'].get('snr_improvement'),
-                'epoch_info': sr['stack_result'].get('epoch_info', []),
-                'stack_width_mhz': sr['stack_result'].get('stack_width_mhz'),
-            }
-        slim_result['layer2']['results'].append(slim_sr)
-
-    return jsonify(slim_result)
-
-
 @app.route('/api/stack/two-layer/history')
 def api_two_layer_history():
     """List past two-layer pipeline jobs from DB."""
@@ -4144,6 +4062,29 @@ def api_two_layer_history():
         return jsonify({'jobs': jobs})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/stack/two-layer/<job_id>')
+def api_two_layer_status(job_id):
+    """Poll two-layer pipeline job status."""
+    job = _two_layer_jobs.get(job_id)
+    if not job:
+        return jsonify({'error': 'Job not found'}), 404
+
+    resp = {
+        'job_id': job_id,
+        'status': job['status'],
+        'progress': job['progress'],
+        'progress_msg': job['progress_msg'],
+        'phase': job.get('phase', ''),
+        'target': job.get('target'),
+        'candidates_found': job.get('candidates_found', 0),
+    }
+
+    if job['status'] == 'error':
+        resp['error'] = job.get('progress_msg', 'Unknown error')
+
+    return jsonify(resp)
 
 
 @app.route('/api/stack/two-layer/<job_id>/results')
