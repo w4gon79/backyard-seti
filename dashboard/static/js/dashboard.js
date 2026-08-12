@@ -1786,6 +1786,8 @@ async function loadBarycentricTargets() {
         select.innerHTML = html;
         // Store which scans have barycentric correction completed
         window.correctedScanIds = data.corrected_scans || [];
+        // Store detailed status (complete vs partial)
+        window.correctedScanStatus = data.corrected_scans_status || [];
         // Refresh the cross-epoch checkboxes now that we know which scans are corrected
         updateBaryScanCheckboxes();
     } catch(e) {
@@ -1815,6 +1817,13 @@ function updateBaryScanCheckboxes() {
         container.innerHTML = '<span style="color:#546e7a;font-size:0.85em;">No barycentrically corrected scans yet. Run correction first.</span>';
         return;
     }
+    // Build a lookup for status info
+    var statusMap = {};
+    if (window.correctedScanStatus) {
+        for (var si = 0; si < window.correctedScanStatus.length; si++) {
+            statusMap[window.correctedScanStatus[si].scan_id] = window.correctedScanStatus[si];
+        }
+    }
     var html = '';
     for (var i = 0; i < scansList.length; i++) {
         var s = scansList[i];
@@ -1823,9 +1832,17 @@ function updateBaryScanCheckboxes() {
         if (window.correctedScanIds.indexOf(sid) === -1) continue;
         var label = sid;
         if (label.length > 40) label = label.substring(0, 37) + '...';
-        html += '<label class="bary-scan-checkbox" data-scan-id="' + sid + '">';
+        var status = statusMap[sid];
+        var partialBadge = '';
+        if (status && !status.complete) {
+            partialBadge = ' <span class="bary-partial-badge" title="Partial correction: ' +
+                (status.bary_hits || 0) + ' / ' + (status.raw_hits || 0) + ' hits">partial</span>';
+        }
+        html += '<span class="bary-scan-checkbox" data-scan-id="' + sid + '">';
         html += '<input type="checkbox" value="' + sid + '"> ';
-        html += label + '</label>';
+        html += '<span class="bary-scan-label">' + label + partialBadge + '</span>';
+        html += '<button class="bary-delete-btn" title="Delete barycentric correction for this scan" onclick="deleteBarycentric(\'' + sid + '\')">✕</button>';
+        html += '</span>';
     }
     if (!html) {
         container.innerHTML = '<span style="color:#546e7a;font-size:0.85em;">No barycentrically corrected scans yet. Run correction first.</span>';
@@ -1837,7 +1854,7 @@ function updateBaryScanCheckboxes() {
         var cb = container.querySelector('input[value="' + currentScanId + '"]');
         if (cb) {
             cb.checked = true;
-            cb.parentElement.classList.add('checked');
+            cb.closest('.bary-scan-checkbox').classList.add('checked');
         }
     }
     // Add change listeners
@@ -1845,11 +1862,43 @@ function updateBaryScanCheckboxes() {
     for (var j = 0; j < checkboxes.length; j++) {
         checkboxes[j].onchange = function() {
             if (this.checked) {
-                this.parentElement.classList.add('checked');
+                this.closest('.bary-scan-checkbox').classList.add('checked');
             } else {
-                this.parentElement.classList.remove('checked');
+                this.closest('.bary-scan-checkbox').classList.remove('checked');
             }
         };
+    }
+}
+
+async function deleteBarycentric(scanId) {
+    if (!scanId) return;
+    var shortId = scanId.length > 40 ? scanId.substring(0, 37) + '...' : scanId;
+    if (!confirm('Delete barycentric correction for ' + shortId + '?\n\nThis removes all corrected data. You can re-run correction later.')) {
+        return;
+    }
+    try {
+        var resp = await fetch('/api/barycentric/delete/' + encodeURIComponent(scanId), {
+            method: 'DELETE',
+        });
+        var data = await resp.json();
+        if (data.error) {
+            alert('Error: ' + data.error);
+            return;
+        }
+        // Refresh the scan list
+        await loadBarycentricTargets();
+        // Show brief success message
+        var statusDiv = document.getElementById('bary-status');
+        if (statusDiv) {
+            statusDiv.innerHTML = '<span style="color:#66bb6a;">✓ Deleted barycentric correction for ' + shortId + '</span>';
+            setTimeout(function() {
+                if (statusDiv.innerHTML.indexOf('Deleted barycentric') !== -1) {
+                    statusDiv.innerHTML = '';
+                }
+            }, 4000);
+        }
+    } catch(e) {
+        alert('Error deleting barycentric correction: ' + e.message);
     }
 }
 

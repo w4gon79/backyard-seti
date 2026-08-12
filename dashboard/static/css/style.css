@@ -782,6 +782,35 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
     margin: 0;
     cursor: pointer;
 }
+.bary-scan-label {
+    cursor: default;
+}
+.bary-delete-btn {
+    background: transparent;
+    border: none;
+    color: #ef5350;
+    cursor: pointer;
+    font-size: 0.85em;
+    padding: 0 2px;
+    margin-left: 4px;
+    line-height: 1;
+    opacity: 0.6;
+    transition: opacity 0.2s;
+}
+.bary-delete-btn:hover {
+    opacity: 1;
+}
+.bary-partial-badge {
+    display: inline-block;
+    background: #5d4037;
+    color: #ffcc80;
+    font-size: 0.75em;
+    padding: 1px 4px;
+    border-radius: 3px;
+    margin-left: 4px;
+    vertical-align: middle;
+    font-weight: bold;
+}
 .bary-status {
     margin-top: 12px;
     font-size: 0.85em;

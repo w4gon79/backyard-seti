@@ -19,6 +19,7 @@ import threading
 import time
 import subprocess
 import re
+import shutil
 from datetime import datetime, timedelta
 from pathlib import Path
 from flask import Flask, render_template, jsonify, request, send_from_directory, make_response
@@ -2096,6 +2097,31 @@ def api_barycentric_corrected_load(scan_id):
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/barycentric/delete/<scan_id>', methods=['DELETE'])
+def api_barycentric_delete(scan_id):
+    """Delete barycentric correction data for a scan.
+    
+    Removes the entire barycentric/ subdirectory and all corrected data.
+    The scan itself is not affected — correction can be re-run later.
+    """
+    if not re.match(r'^[A-Za-z0-9_]+$', scan_id):
+        return jsonify({'error': 'Invalid scan_id'}), 400
+    
+    scan_dir = _get_scan_dir(scan_id)
+    if not scan_dir:
+        return jsonify({'error': f'Scan not found: {scan_id}'}), 404
+    
+    bary_dir = os.path.join(scan_dir, 'barycentric')
+    if not os.path.isdir(bary_dir):
+        return jsonify({'error': 'No barycentric correction found for this scan'}), 404
+    
+    try:
+        shutil.rmtree(bary_dir)
+        return jsonify({'success': True, 'deleted': scan_id})
+    except Exception as e:
+        return jsonify({'error': f'Failed to delete barycentric data: {e}'}), 500
+
+
 @app.route('/api/barycentric/targets')
 def api_barycentric_targets():
     """Return known target coordinates for the dropdown."""
@@ -2117,6 +2143,7 @@ def api_barycentric_targets():
     
     # Also return which scans have barycentric correction completed
     corrected_scans = []
+    corrected_scans_status = []
     for sm in _discover_scans():
         sid = sm.get('scan_id') or sm.get('_dir', '')
         if not sid:
@@ -2125,8 +2152,43 @@ def api_barycentric_targets():
         combined_path = os.path.join(scan_dir, 'barycentric', 'combined_corrected.json')
         if os.path.isfile(combined_path):
             corrected_scans.append(sid)
+            
+            # Check if correction is complete vs partial
+            # Count bary hits and compare to raw hits
+            status_entry = {'scan_id': sid, 'complete': True, 'bary_hits': 0, 'raw_hits': 0}
+            try:
+                with open(combined_path) as f:
+                    bary_data = json.load(f)
+                status_entry['bary_hits'] = bary_data.get('total_hits', len(bary_data.get('hits', [])))
+                
+                # Count raw hits from scan directory
+                hit_files = glob_module.glob(os.path.join(scan_dir, '**/*_hits.json'), recursive=True)
+                raw_count = 0
+                for hf in hit_files:
+                    # Skip barycentric directory hits
+                    if 'barycentric' in hf:
+                        continue
+                    try:
+                        with open(hf) as f:
+                            raw_data = json.load(f)
+                        raw_count += len(raw_data.get('hits', raw_data) if isinstance(raw_data, dict) else raw_data)
+                    except Exception:
+                        pass
+                status_entry['raw_hits'] = raw_count
+                
+                # A scan is "complete" if bary hits >= 95% of raw hits
+                if raw_count > 0:
+                    status_entry['complete'] = (status_entry['bary_hits'] / raw_count) >= 0.95
+                else:
+                    status_entry['complete'] = True
+            except Exception:
+                pass
+            
+            corrected_scans_status.append(status_entry)
     
-    return jsonify({'targets': targets, 'telescopes': telescopes, 'corrected_scans': corrected_scans})
+    return jsonify({'targets': targets, 'telescopes': telescopes, 
+                     'corrected_scans': corrected_scans,
+                     'corrected_scans_status': corrected_scans_status})
 
 
 # ─── API: Waterfall Data ─────────────────────────────────────────────
