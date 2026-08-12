@@ -427,6 +427,19 @@ reduce sub-band count by 90%+ for initial reconnaissance.
 
 ---
 
+## Performance Optimizations (Post-Phase 3)
+
+### HDF5 Hyperslab Batch Read
+**Problem:** ML inference and stacked waterfall read 5,000+ individual channel slices from random positions in 207-million-channel HDF5 files. Each read seeks to a different 1 MB compressed chunk, causing disk-bound latency even with sequential sorting.
+
+**Solution:** Group hits by contiguous channel ranges and read each range as a single HDF5 hyperslab operation. For example, if 50 hits fall within channels 91,674,000-91,675,000, read that entire 1,000-channel range in one operation and slice in memory. Reduces disk seeks from 5,000 to ~100 per file.
+
+**Expected speedup:** 10-50x for inference, enables real-time stacked waterfall rendering.
+
+**Priority:** High (blocks interactive ML dashboard and stacked waterfall UX)
+
+---
+
 ## References
 
 - Breakthrough Listen Open Data: http://seti.berkeley.edu/opendata
