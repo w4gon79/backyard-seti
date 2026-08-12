@@ -6,7 +6,7 @@
     <title>📊 Incoherent Stack - Phase 2C</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=8">
     <link rel="stylesheet" href="/static/css/style.css?v=31">
-    <link rel="stylesheet" href="/static/css/stack.css?v=15">
+    <link rel="stylesheet" href="/static/css/stack.css?v=16">
     <!-- Plotly for waterfall plots -->
     <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 </head>
@@ -189,6 +189,55 @@
 
     </div>
 
+    <!-- Two-Layer Barycentric Filter -->
+    <div class="stack-panel two-layer-panel">
+        <div class="panel-header">
+            <span>🔬 Two-Layer Barycentric Filter</span>
+            <span class="two-layer-desc">Cross-epoch RFI elimination + targeted stacking</span>
+        </div>
+        <div class="two-layer-body">
+            <div class="two-layer-controls">
+                <div class="control-group">
+                    <label for="tl-target">Target</label>
+                    <input type="text" id="tl-target" value="PROXCEN" placeholder="e.g. PROXCEN">
+                </div>
+                <div class="control-row">
+                    <div class="control-group">
+                        <label for="tl-tolerance" title="Barycentric frequency match tolerance in Hz">Tolerance (Hz)</label>
+                        <input type="number" id="tl-tolerance" value="10" step="1" min="1">
+                    </div>
+                    <div class="control-group">
+                        <label for="tl-min-epochs" title="Minimum epochs a hit must appear in to survive">Min Epochs</label>
+                        <input type="number" id="tl-min-epochs" value="3" step="1" min="2">
+                    </div>
+                </div>
+                <div class="control-row">
+                    <div class="control-group">
+                        <label for="tl-min-snr" title="Minimum SNR threshold for the cross-epoch filter">Min SNR</label>
+                        <input type="number" id="tl-min-snr" value="8" step="0.5" min="0">
+                    </div>
+                    <div class="control-group">
+                        <label for="tl-stack-width" title="Stack window width in MHz per candidate">Stack Width (MHz)</label>
+                        <input type="number" id="tl-stack-width" value="0.05" step="0.01" min="0.01">
+                    </div>
+                </div>
+                <div class="control-group">
+                    <label for="tl-n-sigma" title="Peak detection threshold in sigma for the targeted stack">N Sigma</label>
+                    <input type="number" id="tl-n-sigma" value="5" step="0.5" min="1">
+                </div>
+                <button id="tl-run-btn" class="btn-primary" title="Run the two-layer pipeline: cross-epoch filter then targeted stack">▶ Run Pipeline</button>
+            </div>
+            <div class="two-layer-results" id="tl-results-area">
+                <div class="two-layer-idle">
+                    <div class="two-layer-idle-icon">🔬</div>
+                    <p><strong>Two-Layer Filter Pipeline</strong></p>
+                    <p class="two-layer-idle-hint">Layer 1 eliminates RFI by requiring barycentric consistency across epochs.
+                       Layer 2 stacks surviving candidates for SNR boost. No candidates = filter working correctly.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- History -->
     <div class="stack-panel stack-history-panel">
         <div class="panel-header">
@@ -216,6 +265,6 @@
     </div>
 </div>
 
-<script src="/static/js/stack.js?v=21"></script>
+<script src="/static/js/stack.js?v=22"></script>
 </body>
 </html>

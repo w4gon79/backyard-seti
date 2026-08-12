@@ -1172,3 +1172,243 @@ function escapeHtml(str) {
 }
 
 })();
+
+// ─── Two-Layer Barycentric Filter ────────────────────────────────────
+(function() {
+'use strict';
+
+var pollTimer = null;
+var currentJobId = null;
+
+document.addEventListener('DOMContentLoaded', function() {
+    var btn = document.getElementById('tl-run-btn');
+    if (btn) btn.onclick = runPipeline;
+});
+
+async function runPipeline() {
+    var target = document.getElementById('tl-target').value.trim();
+    var tolerance = parseInt(document.getElementById('tl-tolerance').value, 10);
+    var minEpochs = parseInt(document.getElementById('tl-min-epochs').value, 10);
+    var minSnr = parseFloat(document.getElementById('tl-min-snr').value);
+    var stackWidth = parseFloat(document.getElementById('tl-stack-width').value);
+    var nSigma = parseFloat(document.getElementById('tl-n-sigma').value);
+
+    if (!target) { alert('Please enter a target'); return; }
+    if (isNaN(tolerance) || tolerance < 1) { alert('Invalid tolerance'); return; }
+    if (isNaN(minEpochs) || minEpochs < 2) { alert('Min epochs must be >= 2'); return; }
+
+    var btn = document.getElementById('tl-run-btn');
+    btn.disabled = true;
+    btn.textContent = '⏳ Running...';
+
+    showRunning();
+
+    try {
+        var resp = await fetch('/api/stack/two-layer', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                target: target,
+                tolerance_hz: tolerance,
+                min_epochs: minEpochs,
+                min_snr: minSnr,
+                stack_width: stackWidth,
+                n_sigma: nSigma
+            })
+        });
+        var data = await resp.json();
+        if (data.error) throw new Error(data.error);
+
+        currentJobId = data.job_id;
+        startPolling();
+    } catch(err) {
+        showError(err.message);
+        btn.disabled = false;
+        btn.textContent = '▶ Run Pipeline';
+    }
+}
+
+function startPolling() {
+    if (pollTimer) clearInterval(pollTimer);
+    pollStatus();
+    pollTimer = setInterval(pollStatus, 3000);
+}
+
+function stopPolling() {
+    if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+    }
+}
+
+async function pollStatus() {
+    if (!currentJobId) return;
+    try {
+        var resp = await fetch('/api/stack/two-layer/' + currentJobId);
+        var data = await resp.json();
+        if (data.error) throw new Error(data.error);
+
+        var pct = data.progress || 0;
+        var fill = document.getElementById('tl-progress-fill');
+        var msg = document.getElementById('tl-status-msg');
+        if (fill) fill.style.width = pct + '%';
+        if (msg) msg.textContent = data.progress_msg || data.status || 'Running...';
+
+        // Update phase badge
+        var badge = document.getElementById('tl-phase-badge');
+        if (badge) {
+            var phase = data.phase || '';
+            var phaseText = '';
+            var phaseClass = 'tl-phase-badge';
+            if (phase === 'filter_start' || phase === 'filter_done') {
+                phaseText = 'Layer 1: Filter';
+                phaseClass += ' tl-phase-filter';
+            } else if (phase === 'stack_start' || phase === 'stack_done') {
+                phaseText = 'Layer 2: Stack';
+                phaseClass += ' tl-phase-stack';
+            } else if (phase === 'complete') {
+                phaseText = 'Complete';
+                phaseClass += ' tl-phase-done';
+            } else if (phase === 'init') {
+                phaseText = 'Initializing';
+                phaseClass += ' tl-phase-done';
+            }
+            badge.textContent = phaseText;
+            badge.className = phaseClass;
+            badge.style.display = phaseText ? '' : 'none';
+        }
+
+        if (data.status === 'complete') {
+            stopPolling();
+            await loadResults(currentJobId);
+        } else if (data.status === 'error') {
+            stopPolling();
+            showError(data.progress_msg || data.error || 'Unknown error');
+            var btn = document.getElementById('tl-run-btn');
+            btn.disabled = false;
+            btn.textContent = '▶ Run Pipeline';
+        }
+    } catch(err) {
+        console.error('Two-layer poll error:', err);
+    }
+}
+
+async function loadResults(jobId) {
+    try {
+        var resp = await fetch('/api/stack/two-layer/' + jobId + '/results');
+        var data = await resp.json();
+        if (data.error) throw new Error(data.error);
+
+        renderResults(data);
+
+        var btn = document.getElementById('tl-run-btn');
+        btn.disabled = false;
+        btn.textContent = '▶ Run Pipeline';
+    } catch(err) {
+        showError(err.message);
+    }
+}
+
+function renderResults(data) {
+    var area = document.getElementById('tl-results-area');
+    if (!area) return;
+
+    var summary = data.summary || {};
+    var layer1 = data.layer1 || {};
+    var layer2 = data.layer2 || {};
+    var candidates = (layer1.candidates || []);
+    var stackResults = (layer2.results || []);
+    var verdict = summary.verdict || 'NO_CANDIDATES';
+
+    var html = '';
+
+    // Summary stats
+    html += '<div class="tl-summary-stats">';
+    html += '<div class="tl-stat"><div class="tl-stat-label">ON Freqs Checked</div><div class="tl-stat-value blue">' + (summary.total_on_freqs || 0).toLocaleString() + '</div></div>';
+    html += '<div class="tl-stat"><div class="tl-stat-label">Layer 1 Candidates</div><div class="tl-stat-value ' + (candidates.length > 0 ? 'yellow' : 'green') + '">' + candidates.length + '</div></div>';
+    var nStacked = (layer2.n_candidates_stacked || 0);
+    var nPeaks = (summary.candidates_after_layer2 || 0);
+    html += '<div class="tl-stat"><div class="tl-stat-label">Layer 2 Stacked</div><div class="tl-stat-value blue">' + nStacked + '</div></div>';
+    html += '<div class="tl-stat"><div class="tl-stat-label">With Peaks</div><div class="tl-stat-value ' + (nPeaks > 0 ? 'red' : 'green') + '">' + nPeaks + '</div></div>';
+    html += '</div>';
+
+    // Verdict banner
+    if (verdict === 'NO_CANDIDATES') {
+        html += '<div class="tl-verdict tl-verdict-none">';
+        html += '<div class="tl-verdict-icon">✅</div>';
+        html += '<div class="tl-verdict-title">NO CANDIDATES</div>';
+        html += '<div class="tl-verdict-sub">Filter working correctly — all frequencies eliminated as single-epoch RFI</div>';
+        html += '</div>';
+    } else if (verdict === 'CANDIDATES_FOUND') {
+        html += '<div class="tl-verdict tl-verdict-found">';
+        html += '<div class="tl-verdict-icon">⚠️</div>';
+        html += '<div class="tl-verdict-title">CANDIDATES FOUND</div>';
+        html += '<div class="tl-verdict-sub">Needs human review — signal(s) survived both filter layers</div>';
+        html += '</div>';
+    } else if (verdict === 'NO_PEAKS_IN_STACK') {
+        html += '<div class="tl-verdict tl-verdict-none">';
+        html += '<div class="tl-verdict-icon">✅</div>';
+        html += '<div class="tl-verdict-title">NO PEAKS IN STACK</div>';
+        html += '<div class="tl-verdict-sub">Candidates survived Layer 1 but didn\'t stack coherently — likely residual RFI</div>';
+        html += '</div>';
+    }
+
+    // Candidate table (if any)
+    if (candidates.length > 0) {
+        html += '<table class="tl-cand-table">';
+        html += '<thead><tr><th>#</th><th>Bary Freq (MHz)</th><th>Epochs</th><th>Max SNR</th><th>Mean Drift (Hz/s)</th><th>Stack Peaks</th><th>Status</th></tr></thead>';
+        html += '<tbody>';
+        for (var i = 0; i < candidates.length; i++) {
+            var c = candidates[i];
+            var sr = stackResults[i] || {};
+            var freq = c.barycentric_freq_mhz || 0;
+            var epCount = c.epoch_count || 0;
+            var maxSnr = c.max_snr || 0;
+            var drift = c.mean_drift_rate || 0;
+            var stackPeaks = sr.peaks ? sr.peaks.length : 0;
+            var status = sr.stack_success === false ? '<span style="color:#ef5350;">Failed: ' + escapeHtml(sr.error || '') + '</span>' : (stackPeaks > 0 ? '<span style="color:#ff9800;">⚠ Peaks (' + stackPeaks + ')</span>' : '<span style="color:#66bb6a;">✓ Clean</span>');
+
+            html += '<tr>';
+            html += '<td>' + (i + 1) + '</td>';
+            html += '<td class="tl-freq">' + freq.toFixed(8) + '</td>';
+            html += '<td class="tl-epoch-count">' + epCount + '</td>';
+            html += '<td class="tl-snr">' + maxSnr.toFixed(1) + '</td>';
+            html += '<td>' + drift.toFixed(6) + '</td>';
+            html += '<td>' + stackPeaks + '</td>';
+            html += '<td>' + status + '</td>';
+            html += '</tr>';
+        }
+        html += '</tbody></table>';
+    }
+
+    // Timestamp
+    if (data.timestamp) {
+        html += '<div style="margin-top:10px;color:#546e7a;font-size:0.8em;">Completed: ' + escapeHtml(data.timestamp) + '</div>';
+    }
+
+    area.innerHTML = html;
+}
+
+function showRunning() {
+    var area = document.getElementById('tl-results-area');
+    if (!area) return;
+    area.innerHTML =
+        '<div style="text-align:center;padding:20px;">' +
+        '<div class="spinner-lg"></div>' +
+        '<div id="tl-phase-badge" class="tl-phase-badge tl-phase-done" style="margin-top:10px;">Initializing</div>' +
+        '<div class="tl-progress-bar" style="margin-top:12px;"><div id="tl-progress-fill" class="tl-progress-fill" style="width:0%;"></div></div>' +
+        '<div id="tl-status-msg" class="tl-status-msg">Starting pipeline...</div>' +
+        '</div>';
+}
+
+function showError(msg) {
+    var area = document.getElementById('tl-results-area');
+    if (!area) return;
+    area.innerHTML =
+        '<div style="padding:20px;color:#ef5350;">' +
+        '<div style="font-size:1.5em;margin-bottom:8px;">⚠️ Error</div>' +
+        '<div>' + escapeHtml(msg) + '</div>' +
+        '</div>';
+}
+
+})();

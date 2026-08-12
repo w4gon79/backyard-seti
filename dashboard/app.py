@@ -3671,6 +3671,297 @@ def api_stack_stacked_waterfall(job_id):
     })
 
 
+# ─── API: Two-Layer Barycentric Filter Pipeline ─────────────────────
+
+_two_layer_jobs = {}  # job_id -> {thread, status, progress, msg, result, ...}
+TWO_LAYER_OUTPUT_DIR = os.path.join(SETI_ROOT, 'results', 'two_layer')
+os.makedirs(TWO_LAYER_OUTPUT_DIR, exist_ok=True)
+
+
+@app.route('/api/stack/two-layer', methods=['POST'])
+def api_two_layer_run():
+    """Start a two-layer SETI filter pipeline job.
+
+    Layer 1: Cross-epoch barycentric filter (find hits at the same
+             barycentric-corrected frequency across multiple epochs).
+    Layer 2: Targeted incoherent stack on surviving candidates.
+
+    POST body JSON:
+        target:       str   (e.g. 'PROXCEN')
+        tolerance_hz: float (default 10)
+        min_epochs:   int   (default 3)
+        min_snr:      float (default 8)
+        stack_width:  float (MHz, default 0.05)
+        n_sigma:      float (default 5.0)
+        epochs:       list of str (optional, default = all available)
+    """
+    params = request.json or {}
+    target = params.get('target', 'PROXCEN')
+    tolerance_hz = params.get('tolerance_hz', 10)
+    min_epochs = params.get('min_epochs', 3)
+    min_snr = params.get('min_snr', 8)
+    stack_width = params.get('stack_width', 0.05)
+    n_sigma = params.get('n_sigma', 5.0)
+    epochs_param = params.get('epochs', None)
+
+    job_id = str(_uuid.uuid4())[:8]
+
+    job_state = {
+        'job_id': job_id,
+        'status': 'running',
+        'progress': 0,
+        'progress_msg': 'Initializing...',
+        'phase': 'init',
+        'result': None,
+        'target': target,
+        'tolerance_hz': tolerance_hz,
+        'min_epochs': min_epochs,
+        'min_snr': min_snr,
+        'stack_width': stack_width,
+        'n_sigma': n_sigma,
+        'candidates_found': 0,
+    }
+    _two_layer_jobs[job_id] = job_state
+
+    def run_thread():
+        try:
+            # ─── Imports ────────────────────────────────────────────
+            sys.path.insert(0, SETI_ROOT)
+            sys.path.insert(0, os.path.join(SETI_ROOT, 'src'))
+            sys.path.insert(0, os.path.join(SETI_ROOT, 'ml'))
+
+            from barycentric_correct import cross_epoch_match
+            from incoherent_stack import EPOCHS
+            from ml.two_layer_pipeline import get_scan_dirs, targeted_stack
+
+            # ─── Determine epochs ──────────────────────────────────
+            if epochs_param:
+                epoch_labels = epochs_param
+            else:
+                epoch_labels = list(EPOCHS.keys())
+
+            # ─── Layer 1: Cross-Epoch Barycentric Filter ───────────
+            job_state['phase'] = 'filter_start'
+            job_state['progress'] = 5
+            job_state['progress_msg'] = 'Finding scan directories...'
+
+            scan_dirs = get_scan_dirs(target)
+            if len(scan_dirs) < 2:
+                job_state['status'] = 'error'
+                job_state['progress_msg'] = (
+                    f'Need at least 2 scan directories, found {len(scan_dirs)}. '
+                    f'Make sure results/ contains corrected scan folders for {target}.'
+                )
+                return
+
+            job_state['progress'] = 10
+            job_state['progress_msg'] = (
+                f'Layer 1: Filtering {len(scan_dirs)} scans...'
+            )
+
+            t0 = time.time()
+            xepoch_result = cross_epoch_match(
+                scan_dirs,
+                freq_tolerance_hz=tolerance_hz,
+                min_epochs=min_epochs,
+                min_snr=min_snr,
+            )
+            elapsed = time.time() - t0
+
+            candidates = xepoch_result.get('candidates', [])
+            summary = xepoch_result.get('summary', {})
+
+            job_state['phase'] = 'filter_done'
+            job_state['progress'] = 50
+            job_state['progress_msg'] = (
+                f'Layer 1 complete ({elapsed:.1f}s): '
+                f'{len(candidates)} candidates from '
+                f'{summary.get("total_on_frequencies", "?")} ON freqs'
+            )
+            job_state['candidates_found'] = len(candidates)
+
+            # ─── Layer 2: Targeted Stack (if candidates exist) ─────
+            if len(candidates) == 0:
+                job_state['phase'] = 'complete'
+                job_state['progress'] = 100
+                job_state['progress_msg'] = 'No candidates survived cross-epoch filter.'
+                job_state['status'] = 'complete'
+
+                # Save summary
+                output_path = os.path.join(
+                    TWO_LAYER_OUTPUT_DIR,
+                    f'{target}_tol{tolerance_hz}_ep{min_epochs}_snr{min_snr}.json',
+                )
+                result_data = {
+                    'target': target,
+                    'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S'),
+                    'layer1': xepoch_result,
+                    'layer2': {'results': [], 'n_candidates_stacked': 0},
+                    'summary': {
+                        'total_on_freqs': summary.get('total_on_frequencies', 0),
+                        'candidates_after_layer1': 0,
+                        'candidates_after_layer2': 0,
+                        'verdict': 'NO_CANDIDATES',
+                    },
+                }
+                with open(output_path, 'w') as f:
+                    json.dump(result_data, f, indent=2, default=str)
+
+                job_state['result'] = result_data
+                return
+
+            # Run targeted stacks on each candidate
+            job_state['phase'] = 'stack_start'
+            job_state['progress'] = 55
+            job_state['progress_msg'] = (
+                f'Layer 2: Stacking {len(candidates)} candidates...'
+            )
+
+            stack_results = []
+            for i, cand in enumerate(candidates):
+                freq = cand['barycentric_freq_mhz']
+                job_state['progress_msg'] = (
+                    f'Layer 2: Stacking candidate {i+1}/{len(candidates)} '
+                    f'at {freq:.6f} MHz...'
+                )
+                job_state['progress'] = 55 + int(40 * (i + 1) / len(candidates))
+
+                try:
+                    sr = targeted_stack(
+                        freq, stack_width, epoch_labels, target=target,
+                    )
+
+                    if sr is None:
+                        stack_results.append({
+                            'candidate': cand,
+                            'stack_success': False,
+                            'error': 'Insufficient epoch data',
+                        })
+                        continue
+
+                    n_peaks = len(sr['peaks'])
+                    stack_results.append({
+                        'candidate': cand,
+                        'stack_success': True,
+                        'n_epochs': sr['n_epochs'],
+                        'median': sr['median'],
+                        'sigma': sr['sigma'],
+                        'peaks': sr['peaks'],
+                        'used_epochs': sr['used_epochs'],
+                        'snr_improvement': sr['snr_improvement'],
+                        'epoch_info': sr.get('epoch_info', []),
+                    })
+                except Exception as e:
+                    stack_results.append({
+                        'candidate': cand,
+                        'stack_success': False,
+                        'error': str(e),
+                    })
+
+            job_state['phase'] = 'stack_done'
+            job_state['progress'] = 95
+
+            n_stacked = sum(1 for r in stack_results if r.get('stack_success'))
+            n_with_peaks = sum(
+                1 for r in stack_results
+                if r.get('peaks')
+            )
+
+            verdict = 'CANDIDATES_FOUND' if n_with_peaks > 0 else 'NO_PEAKS_IN_STACK'
+
+            job_state['phase'] = 'complete'
+            job_state['progress'] = 100
+            job_state['progress_msg'] = (
+                f'Pipeline complete: {len(candidates)} layer-1 candidates, '
+                f'{n_stacked} stacked, {n_with_peaks} with peaks.'
+            )
+            job_state['status'] = 'complete'
+
+            # Save results
+            output_path = os.path.join(
+                TWO_LAYER_OUTPUT_DIR,
+                f'{target}_tol{tolerance_hz}_ep{min_epochs}_snr{min_snr}.json',
+            )
+            result_data = {
+                'target': target,
+                'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S'),
+                'layer1': {
+                    'summary': summary,
+                    'candidates': candidates,
+                },
+                'layer2': {
+                    'results': stack_results,
+                    'n_candidates_stacked': n_stacked,
+                },
+                'summary': {
+                    'total_on_freqs': summary.get('total_on_frequencies', 0),
+                    'candidates_after_layer1': len(candidates),
+                    'candidates_after_layer2': n_with_peaks,
+                    'verdict': verdict,
+                },
+            }
+            with open(output_path, 'w') as f:
+                json.dump(result_data, f, indent=2, default=str)
+
+            job_state['result'] = result_data
+
+        except Exception as e:
+            job_state['status'] = 'error'
+            job_state['progress_msg'] = str(e)
+            import traceback
+            traceback.print_exc()
+
+    thread = _threading.Thread(target=run_thread, daemon=True)
+    job_state['thread'] = thread
+    thread.start()
+
+    return jsonify({
+        'job_id': job_id,
+        'status': 'running',
+        'target': target,
+    })
+
+
+@app.route('/api/stack/two-layer/<job_id>')
+def api_two_layer_status(job_id):
+    """Poll two-layer pipeline job status."""
+    job = _two_layer_jobs.get(job_id)
+    if not job:
+        return jsonify({'error': 'Job not found'}), 404
+
+    resp = {
+        'job_id': job_id,
+        'status': job['status'],
+        'progress': job['progress'],
+        'progress_msg': job['progress_msg'],
+        'phase': job.get('phase', ''),
+        'target': job.get('target'),
+        'candidates_found': job.get('candidates_found', 0),
+    }
+
+    if job['status'] == 'error':
+        resp['error'] = job.get('progress_msg', 'Unknown error')
+
+    return jsonify(resp)
+
+
+@app.route('/api/stack/two-layer/<job_id>/results')
+def api_two_layer_results(job_id):
+    """Get full results for a completed two-layer pipeline job."""
+    job = _two_layer_jobs.get(job_id)
+    if not job:
+        return jsonify({'error': 'Job not found'}), 404
+
+    if job['status'] != 'complete':
+        return jsonify({
+            'error': 'Job not complete',
+            'status': job['status'],
+            'progress': job['progress'],
+        }), 400
+
+    return jsonify(job.get('result', {}))
+
+
 # ─── Main ─────────────────────────────────────────────────────────────
 
 # Ensure DB schema is up to date (creates stack_jobs table if missing)
