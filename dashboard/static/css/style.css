@@ -1012,3 +1012,6 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
     .modal-content { padding: 8px; width: 98%; }
     #waterfall-plot { height: 220px !important; }
 }
+
+.btn-danger-small { padding: 2px 8px; font-size: 0.85em; background: #4a1010; color: #ef5350; border: 1px solid #6a2020; border-radius: 4px; cursor: pointer; vertical-align: middle; margin-left: 4px; }
+.btn-danger-small:hover { background: #6a2020; color: #fff; }

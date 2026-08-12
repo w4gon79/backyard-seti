@@ -177,6 +177,7 @@
                     <select id="bary-cross-history" onchange="if(this.value) loadCrossEpochRun(this.value)" style="max-width:500px;font-size:0.85em;">
                         <option value="">Loading...</option>
                     </select>
+                    <button id="btn-delete-xepoch" class="btn-danger-small" onclick="deleteCrossEpochRun()" title="Delete selected run">✕</button>
                 </div>
                 <div id="bary-status" class="bary-status"></div>
             </div>
@@ -320,6 +321,6 @@
     </div>
 </div>
 
-<script src="/static/js/dashboard.js?v=60"></script>
+<script src="/static/js/dashboard.js?v=61"></script>
 </body>
 </html>

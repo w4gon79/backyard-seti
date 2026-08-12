@@ -2177,6 +2177,28 @@ async function loadCrossEpochRun(val) {
     }
 }
 
+async function deleteCrossEpochRun() {
+    var select = document.getElementById('bary-cross-history');
+    if (!select || !select.value) {
+        alert('Select a run to delete first.');
+        return;
+    }
+    var val = select.value;
+    if (!/^\d+$/.test(val)) {
+        alert('Can only delete DB-cached runs.');
+        return;
+    }
+    if (!confirm('Delete cross-epoch run #' + val + '?')) return;
+    try {
+        var resp = await fetch('/api/db/cross-epoch/' + val, { method: 'DELETE' });
+        var data = await resp.json();
+        if (data.error) { alert(data.error); return; }
+        loadCrossEpochHistory();
+    } catch(e) {
+        alert('Delete failed: ' + e.message);
+    }
+}
+
 // ── Barycentric Corrected Hits: Load Cached ────────────────────────
 
 async function loadCachedCorrected() {

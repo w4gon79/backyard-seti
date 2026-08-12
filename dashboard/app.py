@@ -2449,6 +2449,20 @@ def api_db_cross_epoch_load(result_id):
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/db/cross-epoch/<int:result_id>', methods=['DELETE'])
+def api_db_cross_epoch_delete(result_id):
+    """Delete a cached cross-epoch result by id."""
+    try:
+        from db import get_db
+        conn = get_db()
+        conn.execute('DELETE FROM cross_epoch_results WHERE id = ?', (result_id,))
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True, 'deleted': result_id})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 # ─── API: Incoherent Stack ────────────────────────────────────────────
 
 import uuid as _uuid
