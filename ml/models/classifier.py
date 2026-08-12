@@ -1,14 +1,16 @@
-"""Binary CNN classifier for SETI signal classification.
+"""Binary CNN classifier for SETI signal classification - v2.
 
-Reuses the same conv encoder backbone from the autoencoder, but replaces
-the decoder with a classification head (linear + sigmoid).
+Reuses the same conv encoder backbone, adds metadata features
+(drift_rate, snr, freq) concatenated to the latent vector before
+the classification head.
 
 Output: probability of being RFI (1 = RFI, 0 = candidate).
 
 Architecture:
   Input: (1, crop_size, crop_size) grayscale waterfall crop
-  Encoder: 3 conv layers -> flatten -> linear -> latent_dim
-  Head: linear -> sigmoid
+         + (3,) metadata vector [drift_rate, log_snr, freq] (normalized)
+  Encoder: conv layers -> flatten -> linear -> latent_dim
+  Head: cat(latent, metadata) -> linear -> sigmoid
 """
 
 import torch
@@ -16,12 +18,14 @@ import torch.nn as nn
 
 
 class WaterfallClassifier(nn.Module):
-    def __init__(self, crop_size=64, latent_dim=32, base_channels=32, n_layers=3, dropout=0.3):
+    def __init__(self, crop_size=128, latent_dim=64, base_channels=32,
+                 n_layers=3, dropout=0.4, metadata_dim=3):
         super().__init__()
         self.crop_size = crop_size
         self.latent_dim = latent_dim
+        self.metadata_dim = metadata_dim
 
-        # Build encoder conv layers (same as autoencoder)
+        # Build encoder conv layers
         enc_layers = []
         in_ch = 1
         out_ch = base_channels
@@ -40,13 +44,16 @@ class WaterfallClassifier(nn.Module):
         # Latent projection
         self.encoder_fc = nn.Linear(self.flat_dim, latent_dim)
 
-        # Classification head
+        # Classification head: latent + metadata -> prediction
+        head_input = latent_dim + metadata_dim
         self.head = nn.Sequential(
-            nn.Linear(latent_dim, 16),
+            nn.Linear(head_input, 32),
             nn.LeakyReLU(0.2, inplace=True),
             nn.Dropout(dropout),
+            nn.Linear(32, 16),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Dropout(dropout * 0.5),
             nn.Linear(16, 1),
-            # sigmoid applied in forward via BCEWithLogitsLoss
         )
 
     def encode(self, x):
@@ -55,23 +62,24 @@ class WaterfallClassifier(nn.Module):
         z = self.encoder_fc(h)
         return z
 
-    def forward(self, x):
+    def forward(self, x, metadata=None):
         z = self.encode(x)
+        if metadata is not None:
+            z = torch.cat([z, metadata], dim=1)
         logits = self.head(z).squeeze(1)
         return logits
 
-    def predict_proba(self, x, device='cpu'):
+    def predict_proba(self, x, metadata=None, device='cpu'):
         """Return probability of RFI (class 1)."""
         self.eval()
         with torch.no_grad():
-            logits = self.forward(x.to(device))
+            x = x.to(device)
+            if metadata is not None:
+                metadata = metadata.to(device)
+            logits = self.forward(x, metadata)
             return torch.sigmoid(logits)
 
 
-def compute_classifier_score(model, batch, device='cpu'):
-    """Compute RFI probability for each sample.
-    
-    Returns tensor of shape (batch_size,) with values in [0, 1].
-    1 = confident RFI, 0 = confident candidate.
-    """
-    return model.predict_proba(batch, device)
+def compute_classifier_score(model, batch_x, batch_meta, device='cpu'):
+    """Compute RFI probability for each sample."""
+    return model.predict_proba(batch_x, batch_meta, device)

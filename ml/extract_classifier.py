@@ -1,22 +1,21 @@
-"""Extract clean training data for the classifier.
+"""Extract clean training data for the classifier - v2.
 
-Two classes:
-  - RFI: hits at frequencies appearing in BOTH ON and OFF (confirmed RFI)
-  - Candidate: ON-only hits at SNR >= threshold, no OFF freq match
-
-Extracts waterfall crops from HDF5 files, saves balanced .npz cache.
+Key changes from v1:
+  - Larger crops (128x128 default) for more visual context
+  - Metadata features (drift_rate, snr, freq) saved alongside crops
+  - Metadata is normalized and fed to the classifier dense head
 
 Usage:
-    python ml/extract_classifier.py --target PROXCEN --crop-size 64 --snr-min 8 --max-rfi 2000
+    python ml/extract_classifier.py --target PROXCEN --crop-size 128 --snr-min 8 --max-rfi 2000
 """
 
 import os
 import sys
 import time
+import json
 import argparse
 import numpy as np
 import sqlite3
-import random
 
 SETI_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, SETI_ROOT)
@@ -25,13 +24,13 @@ sys.path.insert(0, os.path.join(SETI_ROOT, 'src'))
 from ml.extract import extract_crops_from_file, find_h5_for_hit
 
 
-def extract_clean_training_data(target='PROXCEN', crop_size=64, snr_min=8,
+# Metadata fields to extract from DB for each hit
+META_FIELDS = ['drift_rate', 'snr', 'freq']
+
+
+def extract_clean_training_data(target='PROXCEN', crop_size=128, snr_min=8,
                                  max_rfi=2000, db_path=None):
-    """Extract balanced clean training data for the classifier.
-    
-    RFI class: random sample of ON hits at frequencies also in OFF.
-    Candidate class: all ON-only hits at SNR >= snr_min.
-    """
+    """Extract balanced clean training data with crops + metadata."""
     if db_path is None:
         db_path = os.path.join(SETI_ROOT, 'data', 'seti_hits.db')
     
@@ -41,10 +40,9 @@ def extract_clean_training_data(target='PROXCEN', crop_size=64, snr_min=8,
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
     
-    # Build temp tables of rounded frequencies for fast lookup
+    # Build temp table of OFF frequencies for fast lookup
     print("Building frequency index tables...")
     t0 = time.time()
-    c.execute('DROP TABLE IF EXISTS on_freqs')
     c.execute('DROP TABLE IF EXISTS off_freqs')
     c.execute('CREATE TEMP TABLE off_freqs AS SELECT DISTINCT ROUND(freq, 3) AS f FROM hits WHERE on_off LIKE "%OFF%"')
     c.execute('CREATE INDEX IF NOT EXISTS idx_off_f ON off_freqs(f)')
@@ -55,7 +53,7 @@ def extract_clean_training_data(target='PROXCEN', crop_size=64, snr_min=8,
     print(f"\nFetching clean candidates (ON-only, SNR >= {snr_min})...")
     t0 = time.time()
     c.execute("""
-        SELECT h.id, h.source_file, h.freq, h.snr, h.on_off
+        SELECT h.id, h.source_file, h.freq, h.snr, h.on_off, h.drift_rate
         FROM hits h
         JOIN scans s ON h.scan_id = s.scan_id
         WHERE s.target = ?
@@ -67,8 +65,7 @@ def extract_clean_training_data(target='PROXCEN', crop_size=64, snr_min=8,
     candidate_hits = c.fetchall()
     print(f"  Found {len(candidate_hits)} candidates ({time.time()-t0:.1f}s)")
     
-    # RFI hits: ON hits at frequencies also in OFF (confirmed RFI)
-    # Sample randomly, cap at max_rfi
+    # RFI hits: ON hits at frequencies also in OFF, sampled
     print(f"\nFetching confirmed RFI sample (cap {max_rfi})...")
     t0 = time.time()
     c.execute("""
@@ -82,9 +79,8 @@ def extract_clean_training_data(target='PROXCEN', crop_size=64, snr_min=8,
     total_rfi_available = c.fetchone()[0]
     print(f"  Total RFI available at SNR >= {snr_min}: {total_rfi_available}")
     
-    # Sample evenly across SNR range to get diverse RFI examples
     c.execute("""
-        SELECT h.id, h.source_file, h.freq, h.snr, h.on_off
+        SELECT h.id, h.source_file, h.freq, h.snr, h.on_off, h.drift_rate
         FROM hits h
         JOIN scans s ON h.scan_id = s.scan_id
         WHERE s.target = ?
@@ -97,7 +93,6 @@ def extract_clean_training_data(target='PROXCEN', crop_size=64, snr_min=8,
     rfi_hits = c.fetchall()
     print(f"  Sampled {len(rfi_hits)} RFI hits ({time.time()-t0:.1f}s)")
     
-    # Cleanup temp tables
     c.execute('DROP TABLE IF EXISTS off_freqs')
     conn.commit()
     conn.close()
@@ -109,15 +104,15 @@ def extract_clean_training_data(target='PROXCEN', crop_size=64, snr_min=8,
         print("ERROR: No RFI hits found!")
         return None
     
-    # Extract crops for each class
+    # Extract crops + metadata for each class
     all_crops = []
     all_labels = []
     all_hit_ids = []
+    all_metadata = []  # (n_samples, 3) array: [drift_rate, snr, freq]
     
     for class_label, class_name, hits in [(0, 'candidate', candidate_hits), (1, 'rfi', rfi_hits)]:
-        print(f"\n=== Extracting {class_name} crops ({len(hits)} hits) ===")
+        print(f"\n=== Extracting {class_name} crops ({len(hits)} hits, {crop_size}x{crop_size}) ===")
         
-        # Group by source file
         file_groups = {}
         for hit in hits:
             sf = hit['source_file']
@@ -127,6 +122,7 @@ def extract_clean_training_data(target='PROXCEN', crop_size=64, snr_min=8,
         
         class_crops = []
         class_ids = []
+        class_meta = []
         
         for file_idx, (source_file, file_hits) in enumerate(file_groups.items()):
             h5_path = find_h5_for_hit(file_hits[0], FINE_DIRS)
@@ -149,12 +145,19 @@ def extract_clean_training_data(target='PROXCEN', crop_size=64, snr_min=8,
                 if i < len(crops):
                     class_crops.append(crops[i])
                     class_ids.append(hit['id'])
+                    # Metadata: drift_rate, snr, freq
+                    class_meta.append([
+                        hit['drift_rate'] or 0.0,
+                        hit['snr'] or 0.0,
+                        hit['freq'] or 0.0,
+                    ])
         
         print(f"  {class_name}: {len(class_crops)} crops extracted")
         
         all_crops.extend(class_crops)
         all_labels.extend([class_label] * len(class_crops))
         all_hit_ids.extend(class_ids)
+        all_metadata.extend(class_meta)
     
     if not all_crops:
         print("ERROR: No crops extracted!")
@@ -163,6 +166,30 @@ def extract_clean_training_data(target='PROXCEN', crop_size=64, snr_min=8,
     crops_array = np.array(all_crops, dtype=np.float32)
     labels_array = np.array(all_labels, dtype=np.int32)
     hit_ids_array = np.array(all_hit_ids, dtype=np.int64)
+    metadata_array = np.array(all_metadata, dtype=np.float32)
+    
+    # Normalize metadata: log-scale SNR (skewed), z-score freq, keep drift_rate raw
+    meta_norm = metadata_array.copy()
+    # SNR: log1p then z-score
+    meta_norm[:, 1] = np.log1p(meta_norm[:, 1])
+    snr_mean, snr_std = meta_norm[:, 1].mean(), meta_norm[:, 1].std()
+    if snr_std > 0:
+        meta_norm[:, 1] = (meta_norm[:, 1] - snr_mean) / snr_std
+    # Freq: z-score (rough, just for model input)
+    freq_mean, freq_std = meta_norm[:, 2].mean(), meta_norm[:, 2].std()
+    if freq_std > 0:
+        meta_norm[:, 2] = (meta_norm[:, 2] - freq_mean) / freq_std
+    # Drift rate: z-score (most are near 0)
+    drift_mean, drift_std = meta_norm[:, 0].mean(), meta_norm[:, 0].std()
+    if drift_std > 0:
+        meta_norm[:, 0] = (meta_norm[:, 0] - drift_mean) / drift_std
+    
+    # Save normalization stats for inference
+    meta_stats = {
+        'drift_rate': {'mean': float(drift_mean), 'std': float(drift_std)},
+        'snr': {'mean': float(snr_mean), 'std': float(snr_std), 'log1p': True},
+        'freq': {'mean': float(freq_mean), 'std': float(freq_std)},
+    }
     
     n_cand = np.sum(labels_array == 0)
     n_rfi = np.sum(labels_array == 1)
@@ -171,7 +198,9 @@ def extract_clean_training_data(target='PROXCEN', crop_size=64, snr_min=8,
     print(f"  Total crops: {len(crops_array)}")
     print(f"  Candidates: {n_cand}")
     print(f"  RFI: {n_rfi}")
-    print(f"  Shape: {crops_array.shape}")
+    print(f"  Crop shape: {crops_array.shape}")
+    print(f"  Metadata shape: {metadata_array.shape}")
+    print(f"  Metadata stats: {meta_stats}")
     
     # Save to cache
     cache_dir = os.path.join(SETI_ROOT, 'ml', 'data')
@@ -182,7 +211,11 @@ def extract_clean_training_data(target='PROXCEN', crop_size=64, snr_min=8,
         crops=crops_array,
         labels=labels_array,
         hit_ids=hit_ids_array,
+        metadata=meta_norm,
+        metadata_raw=metadata_array,
+        meta_stats_json=np.array(json.dumps(meta_stats)),  # store as string
     )
+    import json
     print(f"\nSaved to {cache_path} ({os.path.getsize(cache_path)/1e6:.1f} MB)")
     
     return cache_path
@@ -191,9 +224,9 @@ def extract_clean_training_data(target='PROXCEN', crop_size=64, snr_min=8,
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Extract clean classifier training data')
     parser.add_argument('--target', default='PROXCEN')
-    parser.add_argument('--crop-size', type=int, default=64)
-    parser.add_argument('--snr-min', type=float, default=8, help='Min SNR for training examples')
-    parser.add_argument('--max-rfi', type=int, default=2000, help='Max RFI samples (for balancing)')
+    parser.add_argument('--crop-size', type=int, default=128)
+    parser.add_argument('--snr-min', type=float, default=8)
+    parser.add_argument('--max-rfi', type=int, default=2000)
     args = parser.parse_args()
     
     extract_clean_training_data(
