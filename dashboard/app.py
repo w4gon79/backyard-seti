@@ -2026,6 +2026,20 @@ def api_barycentric_cross_epoch_load():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/barycentric/cross-epoch/delete', methods=['DELETE'])
+def api_barycentric_cross_epoch_delete():
+    """Delete a legacy file-cached cross-epoch result by filename."""
+    filename = request.args.get('file', '')
+    if not filename or not re.match(r'^[A-Za-z0-9_-]+\.json$', filename):
+        return jsonify({'error': 'Invalid filename'}), 400
+    
+    cache_path = os.path.join(_cross_epoch_cache_dir(), filename)
+    if os.path.isfile(cache_path):
+        os.remove(cache_path)
+        return jsonify({'success': True, 'deleted': filename})
+    return jsonify({'error': 'File not found'}), 404
+
+
 @app.route('/api/barycentric/corrected/<scan_id>')
 def api_barycentric_corrected_load(scan_id):
     """Load pre-computed barycentric correction results for a scan."""

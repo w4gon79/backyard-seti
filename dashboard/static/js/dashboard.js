@@ -2184,18 +2184,28 @@ async function deleteCrossEpochRun() {
         return;
     }
     var val = select.value;
-    if (!/^\d+$/.test(val)) {
-        alert('Can only delete DB-cached runs.');
-        return;
-    }
-    if (!confirm('Delete cross-epoch run #' + val + '?')) return;
-    try {
-        var resp = await fetch('/api/db/cross-epoch/' + val, { method: 'DELETE' });
-        var data = await resp.json();
-        if (data.error) { alert(data.error); return; }
-        loadCrossEpochHistory();
-    } catch(e) {
-        alert('Delete failed: ' + e.message);
+    if (/^\d+$/.test(val)) {
+        // DB-cached run
+        if (!confirm('Delete cross-epoch run #' + val + '?')) return;
+        try {
+            var resp = await fetch('/api/db/cross-epoch/' + val, { method: 'DELETE' });
+            var data = await resp.json();
+            if (data.error) { alert(data.error); return; }
+            loadCrossEpochHistory();
+        } catch(e) {
+            alert('Delete failed: ' + e.message);
+        }
+    } else {
+        // Legacy file-cached run
+        if (!confirm('Delete cached run?')) return;
+        try {
+            var resp = await fetch('/api/barycentric/cross-epoch/delete?file=' + encodeURIComponent(val), { method: 'DELETE' });
+            var data = await resp.json();
+            if (data.error) { alert(data.error); return; }
+            loadCrossEpochHistory();
+        } catch(e) {
+            alert('Delete failed: ' + e.message);
+        }
     }
 }
 
