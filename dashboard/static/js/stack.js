@@ -1059,6 +1059,12 @@ function renderHistory(jobs) {
     var items = container.querySelectorAll('.history-item');
     for (var i = 0; i < items.length; i++) {
         items[i].onclick = function() {
+            // Guard: warn if a stack job is currently running
+            if (pollTimer) {
+                if (!confirm('A stack job is currently running. Load historical results instead?')) {
+                    return;
+                }
+            }
             var jobId = this.getAttribute('data-job');
             var status = this.getAttribute('data-status');
             if (status === 'complete') {
@@ -1652,6 +1658,12 @@ function tlRenderHistory(jobs) {
     var items = container.querySelectorAll('.history-item');
     for (var k = 0; k < items.length; k++) {
         items[k].onclick = function() {
+            // Guard: warn if a two-layer job is currently running
+            if (pollTimer) {
+                if (!confirm('A pipeline is currently running. Load historical results instead?')) {
+                    return;
+                }
+            }
             var jobId = this.getAttribute('data-job');
             var status = this.getAttribute('data-status');
             if (status === 'complete') {
