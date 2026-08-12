@@ -1399,7 +1399,7 @@ function renderResults(data) {
     // Candidate table (if any)
     if (candidates.length > 0) {
         html += '<table class="tl-cand-table">';
-        html += '<thead><tr><th>#</th><th>Bary Freq (MHz)</th><th>Epochs</th><th>Max SNR</th><th>Mean Drift (Hz/s)</th><th>Stack Peaks</th><th>Status</th></tr></thead>';
+        html += '<thead><tr><th>#</th><th>Bary Freq (MHz)</th><th>Epochs</th><th>Max SNR</th><th>Mean Drift (Hz/s)</th><th>Stack Peaks</th><th>Status</th><th>Action</th></tr></thead>';
         html += '<tbody>';
         for (var i = 0; i < candidates.length; i++) {
             var c = candidates[i];
@@ -1411,6 +1411,8 @@ function renderResults(data) {
             var stackPeaks = sr.peaks ? sr.peaks.length : 0;
             var status = sr.stack_success === false ? '<span style="color:#ef5350;">Failed: ' + escapeHtmlLocal(sr.error || '') + '</span>' : (stackPeaks > 0 ? '<span style="color:#ff9800;">\u26a0 Peaks (' + stackPeaks + ')</span>' : '<span style="color:#66bb6a;">\u2714 Clean</span>');
 
+            // Build peak list for waterfall display
+            var peaksJson = encodeURIComponent(JSON.stringify(sr.peaks || []));
             html += '<tr>';
             html += '<td>' + (i + 1) + '</td>';
             html += '<td class="tl-freq">' + freq.toFixed(8) + '</td>';
@@ -1419,6 +1421,7 @@ function renderResults(data) {
             html += '<td>' + drift.toFixed(6) + '</td>';
             html += '<td>' + stackPeaks + '</td>';
             html += '<td>' + status + '</td>';
+            html += '<td><button class="btn-waterfall" onclick="showTLWaterfall(' + freq + ', ' + '\'' + peaksJson + '\'' + ')">\u{1f50d} View</button></td>';
             html += '</tr>';
         }
         html += '</tbody></table>';
@@ -1452,6 +1455,136 @@ function showError(msg) {
         '<div style="font-size:1.5em;margin-bottom:8px;">Error</div>' +
         '<div>' + escapeHtmlLocal(msg) + '</div>' +
         '</div>';
+}
+
+// Show waterfall for a two-layer candidate frequency
+// Uses the existing waterfall modal from the main stack page
+window.showTLWaterfall = function(freq, peaksJson) {
+    var modal = document.getElementById('waterfall-modal');
+    var title = document.getElementById('waterfall-title');
+    var metaDiv = document.getElementById('waterfall-meta');
+    var bodyDiv = document.getElementById('waterfall-body');
+
+    if (!modal) {
+        alert('Waterfall modal not found on page');
+        return;
+    }
+
+    title.textContent = 'Two-Layer Candidate \u2014 ' + freq.toFixed(6) + ' MHz';
+
+    // Parse peaks if available
+    var peaks = [];
+    try { peaks = JSON.parse(decodeURIComponent(peaksJson)); } catch(e) {}
+
+    // Build meta info
+    var metaHtml = '<div class="wm-item"><span class="wm-label">Bary Freq:</span><span class="wm-val">' + freq.toFixed(8) + ' MHz</span></div>';
+    if (peaks.length > 0) {
+        var topPeak = peaks[0];
+        metaHtml += '<div class="wm-item"><span class="wm-label">Top peak SNR:</span><span class="wm-val">' + (topPeak.snr || 0).toFixed(2) + '</span></div>';
+        metaHtml += '<div class="wm-item"><span class="wm-label">Total peaks:</span><span class="wm-val">' + peaks.length + '</span></div>';
+    }
+    metaDiv.innerHTML = metaHtml;
+
+    // Show loading
+    bodyDiv.innerHTML = '<div class="waterfall-loading"><div class="spinner"></div><div>Loading waterfall data...</div><div style="font-size:0.8em;color:#546e7a;margin-top:4px;">Reading HDF5 file at ' + freq.toFixed(6) + ' MHz</div></div>';
+    modal.style.display = 'flex';
+
+    // Try to find the first ON HDF5 file for this target
+    // Use the waterfall API endpoint, same as regular stack peaks
+    // Determine the file based on known PROXCEN epochs
+    var epochSeqs = {
+        '57791': '72989',
+        '57846': '49534',
+        '57930': '41709',
+        '58020': '21048'
+    };
+    // Use first available epoch's ON file
+    var fileList = [
+        'fine/Parkes_57791_72989_PROXCEN_S_fine.h5',
+        'fine/Parkes_57846_49534_PROXCEN_S_fine.h5',
+        'fine/Parkes_57930_41709_PROXCEN_S_fine.h5',
+        'fine/Parkes_58020_21048_PROXCEN_S_fine.h5'
+    ];
+
+    // Try each file until one works
+    var fileIdx = 0;
+    function tryNextFile() {
+        if (fileIdx >= fileList.length) {
+            bodyDiv.innerHTML = '<div class="waterfall-error">Could not load waterfall from any available HDF5 file.</div>';
+            return;
+        }
+        var file = fileList[fileIdx];
+        var url = '/api/waterfall?file=' + encodeURIComponent(file) +
+                  '&freq_mhz=' + freq + '&width_chans=200&max_tints=20';
+
+        fetch(url).then(function(resp) { return resp.json(); }).then(function(data) {
+            if (data.error) {
+                fileIdx++;
+                tryNextFile();
+                return;
+            }
+            // Render the waterfall plot
+            bodyDiv.innerHTML = '<div id="waterfall-plot" style="width:100%;height:400px;"></div>';
+            renderTLWaterfallPlot(data, freq, bodyDiv);
+        }).catch(function(err) {
+            fileIdx++;
+            tryNextFile();
+        });
+    }
+    tryNextFile();
+};
+
+function renderTLWaterfallPlot(data, centerFreq, bodyDiv) {
+    var plotDiv = document.getElementById('waterfall-plot');
+    if (!plotDiv) {
+        bodyDiv.innerHTML = '<div id="waterfall-plot" style="width:100%;height:400px;"></div>';
+        plotDiv = document.getElementById('waterfall-plot');
+    }
+
+    var z = data.data;
+    var freqs = data.freqs;
+    var times = data.times;
+
+    var traces = [{
+        type: 'heatmap',
+        z: z,
+        x: freqs,
+        y: times,
+        zmin: -2,
+        zmax: 10,
+        colorscale: 'Viridis',
+        reversescale: true,
+        hovertemplate: '%{x:.6f} MHz<br>t=%{y:.1f}s<br>Power=%{z:.2f}<extra></extra>',
+        name: 'Power'
+    }];
+
+    // Center frequency marker
+    traces.push({
+        type: 'scatter',
+        mode: 'lines',
+        x: [centerFreq, centerFreq],
+        y: [times[0], times[times.length - 1]],
+        line: { color: '#ffff00', width: 1, dash: 'dot' },
+        name: 'Bary freq',
+        hoverinfo: 'skip',
+        showlegend: false
+    });
+
+    var layout = {
+        paper_bgcolor: 'transparent',
+        plot_bgcolor: '#0a0e14',
+        font: { color: '#c8c8e0', size: 11 },
+        xaxis: { title: 'Frequency (MHz)', gridcolor: '#1e3a5f', tickformat: '.4f' },
+        yaxis: { title: 'Time (s)', gridcolor: '#1e3a5f', autorange: 'reversed' },
+        margin: { l: 60, r: 20, t: 30, b: 50 },
+        height: 400,
+    };
+
+    Plotly.newPlot(plotDiv, traces, layout, {
+        displayModeBar: true,
+        responsive: true,
+        modeBarButtonsToRemove: ['lasso2d', 'autoScale2d']
+    });
 }
 
 async function tlLoadHistory() {
