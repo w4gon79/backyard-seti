@@ -3967,6 +3967,31 @@ def api_two_layer_run():
 
             job_state['result'] = result_data
 
+            # Persist to database so results survive restarts
+            try:
+                from db import get_db
+                conn = get_db()
+                # Strip large arrays from saved JSON
+                slim_for_db = json.loads(json.dumps(result_data, default=str))
+                conn.execute('''
+                    INSERT INTO two_layer_jobs
+                    (job_id, target, tolerance_hz, min_epochs, min_snr,
+                     stack_width, n_sigma, status, progress, progress_msg,
+                     n_candidates, n_stacked, n_with_peaks, verdict,
+                     result_json, completed_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 'complete', 100, ?, ?, ?, ?, ?, ?, datetime('now'))
+                ''', (
+                    job_id, target, tolerance_hz, min_epochs, min_snr,
+                    stack_width, n_sigma, job_state['progress_msg'],
+                    len(candidates), n_stacked, n_with_peaks, verdict,
+                    json.dumps(slim_for_db),
+                ))
+                conn.commit()
+                conn.close()
+                print(f'  Two-layer job {job_id} saved to DB')
+            except Exception as db_err:
+                print(f'  Two-layer DB persist error: {db_err}')
+
         except Exception as e:
             job_state['status'] = 'error'
             job_state['progress_msg'] = str(e)
@@ -4027,8 +4052,20 @@ def api_two_layer_status(job_id):
 @app.route('/api/stack/two-layer/<job_id>/results')
 def api_two_layer_results(job_id):
     """Get full results for a completed two-layer pipeline job."""
+    # Try in-memory first (for freshly completed jobs)
     job = _two_layer_jobs.get(job_id)
     if not job:
+        # Fall back to DB (for jobs from previous dashboard runs)
+        try:
+            from db import get_db
+            conn = get_db()
+            row = conn.execute(
+                'SELECT * FROM two_layer_jobs WHERE job_id = ?', (job_id,)).fetchone()
+            conn.close()
+            if row and row['status'] == 'complete' and row['result_json']:
+                return jsonify(json.loads(row['result_json']))
+        except Exception:
+            pass
         return jsonify({'error': 'Job not found'}), 404
 
     if job['status'] != 'complete':
@@ -4052,6 +4089,103 @@ def api_two_layer_results(job_id):
         },
     }
     # Include layer 2 results but strip stack spectra arrays
+    for sr in full_result.get('layer2', {}).get('results', []):
+        slim_sr = {k: v for k, v in sr.items() if k != 'stack_result'}
+        if 'stack_result' in sr:
+            slim_sr['stack_result'] = {
+                'freq_center': sr['stack_result'].get('freq_center'),
+                'n_epochs': sr['stack_result'].get('n_epochs'),
+                'median': sr['stack_result'].get('median'),
+                'sigma': sr['stack_result'].get('sigma'),
+                'peaks': sr['stack_result'].get('peaks', []),
+                'used_epochs': sr['stack_result'].get('used_epochs', []),
+                'snr_improvement': sr['stack_result'].get('snr_improvement'),
+                'epoch_info': sr['stack_result'].get('epoch_info', []),
+                'stack_width_mhz': sr['stack_result'].get('stack_width_mhz'),
+            }
+        slim_result['layer2']['results'].append(slim_sr)
+
+    return jsonify(slim_result)
+
+
+@app.route('/api/stack/two-layer/history')
+def api_two_layer_history():
+    """List past two-layer pipeline jobs from DB."""
+    try:
+        from db import get_db
+        conn = get_db()
+        rows = conn.execute('''
+            SELECT job_id, target, tolerance_hz, min_epochs, min_snr,
+                   stack_width, n_sigma, status, n_candidates, n_stacked,
+                   n_with_peaks, verdict, created_at, completed_at
+            FROM two_layer_jobs
+            ORDER BY created_at DESC
+            LIMIT 50
+        ''').fetchall()
+        conn.close()
+        jobs = []
+        for r in rows:
+            jobs.append({
+                'job_id': r['job_id'],
+                'target': r['target'],
+                'tolerance_hz': r['tolerance_hz'],
+                'min_epochs': r['min_epochs'],
+                'min_snr': r['min_snr'],
+                'stack_width': r['stack_width'],
+                'n_sigma': r['n_sigma'],
+                'status': r['status'],
+                'n_candidates': r['n_candidates'],
+                'n_stacked': r['n_stacked'],
+                'n_with_peaks': r['n_with_peaks'],
+                'verdict': r['verdict'],
+                'created_at': r['created_at'],
+                'completed_at': r['completed_at'],
+            })
+        return jsonify({'jobs': jobs})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/stack/two-layer/<job_id>/results')
+def api_two_layer_results(job_id):
+    """Get full results for a completed two-layer pipeline job."""
+    # Try in-memory first (for freshly completed jobs)
+    job = _two_layer_jobs.get(job_id)
+    if job:
+        if job['status'] != 'complete':
+            return jsonify({
+                'error': 'Job not complete',
+                'status': job['status'],
+                'progress': job['progress'],
+            }), 400
+
+        full_result = job.get('result', {})
+    else:
+        # Fall back to DB (for jobs from previous dashboard runs)
+        try:
+            from db import get_db
+            conn = get_db()
+            row = conn.execute(
+                'SELECT * FROM two_layer_jobs WHERE job_id = ?', (job_id,)).fetchone()
+            conn.close()
+            if row and row['status'] == 'complete' and row['result_json']:
+                full_result = json.loads(row['result_json'])
+            else:
+                return jsonify({'error': 'Job not found'}), 404
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
+    # Build slim result (strip large arrays like stack spectra)
+    slim_result = {
+        'target': full_result.get('target'),
+        'timestamp': full_result.get('timestamp'),
+        'summary': full_result.get('summary'),
+        'layer1': full_result.get('layer1'),
+        'layer2': {
+            'n_candidates_stacked': full_result.get('layer2', {}).get('n_candidates_stacked', 0),
+            'results': [],
+        },
+    }
     for sr in full_result.get('layer2', {}).get('results', []):
         slim_sr = {k: v for k, v in sr.items() if k != 'stack_result'}
         if 'stack_result' in sr:
@@ -4101,6 +4235,23 @@ if __name__ == '__main__':
         conn.close()
     except Exception as _orphan_err:
         print(f"  Orphan recovery error: {_orphan_err}")
+
+    # Orphan recovery: mark any running two-layer jobs as interrupted
+    try:
+        from db import get_db
+        conn = get_db()
+        tl_orphans = conn.execute(
+            "SELECT job_id FROM two_layer_jobs WHERE status = 'running'"
+        ).fetchall()
+        for o in tl_orphans:
+            conn.execute(
+                "UPDATE two_layer_jobs SET status = 'interrupted', progress_msg = 'Interrupted by dashboard restart' WHERE job_id = ?",
+                (o['job_id'],))
+            print(f"  Orphan recovery: two-layer job {o['job_id']} marked as interrupted")
+        conn.commit()
+        conn.close()
+    except Exception as _tl_orphan_err:
+        print(f"  Two-layer orphan recovery error: {_tl_orphan_err}")
 
     print(f"SETI Dashboard starting on http://localhost:8070")
     print(f"  Data dir: {DATA_DIR}")

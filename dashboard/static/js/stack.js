@@ -4,7 +4,7 @@
 (function() {
 'use strict';
 
-// ─── State ────────────────────────────────────────────────────────────
+// â”€â”€â”€ State â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 var epochsData = [];
 var currentJobId = null;
 var pollTimer = null;
@@ -12,7 +12,7 @@ var sortCol = 'snr';
 var sortDir = 'desc';
 var currentResults = null;
 
-// ─── Init ─────────────────────────────────────────────────────────────
+// â”€â”€â”€ Init â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 document.addEventListener('DOMContentLoaded', function() {
     loadEpochs();
     loadHistory().then(function() {
@@ -74,7 +74,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 
-// ─── Epochs ───────────────────────────────────────────────────────────
+// â”€â”€â”€ Epochs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function loadEpochs() {
     try {
         var resp = await fetch('/api/stack/epochs');
@@ -101,7 +101,7 @@ function renderEpochs() {
         html += '<label class="epoch-item">' +
             '<input type="checkbox" checked data-epoch="' + escapeHtml(ep.label) + '">' +
             '<span class="epoch-label">' + escapeHtml(ep.label) + '</span>' +
-            '<span class="epoch-meta">' + ep.n_pairs + ' pairs · MJD ' + ep.mjd_int + '</span>' +
+            '<span class="epoch-meta">' + ep.n_pairs + ' pairs Â· MJD ' + ep.mjd_int + '</span>' +
             '</label>';
     }
     container.innerHTML = html;
@@ -125,7 +125,7 @@ function updateEpochCount() {
         var gain = Math.sqrt(checked).toFixed(2);
         var badge = document.getElementById('stack-snr-badge');
         badge.style.display = '';
-        badge.innerHTML = 'SNR Gain: <strong>√' + checked + ' = ' + gain + '×</strong>';
+        badge.innerHTML = 'SNR Gain: <strong>âˆš' + checked + ' = ' + gain + 'Ã—</strong>';
     } else {
         document.getElementById('stack-snr-badge').style.display = 'none';
     }
@@ -140,7 +140,7 @@ function getSelectedEpochs() {
     return epochs;
 }
 
-// ─── Run Stack ────────────────────────────────────────────────────────
+// â”€â”€â”€ Run Stack â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function runStack() {
     var target = document.getElementById('stack-target').value.trim();
     var freqCenter = parseFloat(document.getElementById('stack-freq-center').value);
@@ -154,7 +154,7 @@ async function runStack() {
 
     var btn = document.getElementById('stack-run-btn');
     btn.disabled = true;
-    btn.textContent = '⏳ Running...';
+    btn.textContent = 'â³ Running...';
 
     // Show running view
     showView('running');
@@ -184,11 +184,11 @@ async function runStack() {
     } catch(err) {
         showError(err.message);
         btn.disabled = false;
-        btn.textContent = '▶ Run Stack';
+        btn.textContent = 'â–¶ Run Stack';
     }
 }
 
-// ─── Polling ──────────────────────────────────────────────────────────
+// â”€â”€â”€ Polling â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function startPolling() {
     if (pollTimer) clearInterval(pollTimer);
     pollStatus(); // Fire immediately
@@ -226,14 +226,14 @@ async function pollStatus() {
             showError(data.progress_msg || data.error || 'Unknown error');
             var btn = document.getElementById('stack-run-btn');
             btn.disabled = false;
-            btn.textContent = '▶ Run Stack';
+            btn.textContent = 'â–¶ Run Stack';
         }
     } catch(err) {
         console.error('Poll error:', err);
     }
 }
 
-// ─── Results ──────────────────────────────────────────────────────────
+// â”€â”€â”€ Results â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function loadResults(jobId) {
     try {
         var resp = await fetch('/api/stack/results/' + jobId);
@@ -259,7 +259,7 @@ async function loadResults(jobId) {
         // Re-enable run button
         var btn = document.getElementById('stack-run-btn');
         btn.disabled = false;
-        btn.textContent = '▶ Run Stack';
+        btn.textContent = 'â–¶ Run Stack';
 
         // Refresh history
         loadHistory();
@@ -276,15 +276,15 @@ function renderSummary(data) {
 
     var html = '';
     html += '<div class="summary-stat"><div class="stat-label">Epochs Stacked</div><div class="stat-value blue">' + nEpochs + '</div></div>';
-    html += '<div class="summary-stat"><div class="stat-label">SNR Improvement</div><div class="stat-value green">×' + snrImprove + '</div></div>';
-    html += '<div class="summary-stat"><div class="stat-label">Stack σ (noise)</div><div class="stat-value yellow">' + (stackSigma ? stackSigma.toFixed(4) : '--') + '</div></div>';
+    html += '<div class="summary-stat"><div class="stat-label">SNR Improvement</div><div class="stat-value green">Ã—' + snrImprove + '</div></div>';
+    html += '<div class="summary-stat"><div class="stat-label">Stack Ïƒ (noise)</div><div class="stat-value yellow">' + (stackSigma ? stackSigma.toFixed(4) : '--') + '</div></div>';
     html += '<div class="summary-stat"><div class="stat-label">Peaks Found</div><div class="stat-value ' + (nPeaks > 0 ? 'green' : 'red') + '">' + nPeaks + '</div></div>';
     document.getElementById('stack-summary').innerHTML = html;
 
     // Update header badge
     var badge = document.getElementById('stack-snr-badge');
     badge.style.display = '';
-    badge.innerHTML = 'SNR Gain: <strong>√' + nEpochs + ' = ×' + snrImprove + '</strong>';
+    badge.innerHTML = 'SNR Gain: <strong>âˆš' + nEpochs + ' = Ã—' + snrImprove + '</strong>';
 
     // Result badge in panel header
     var rb = document.getElementById('stack-result-badge');
@@ -386,20 +386,20 @@ function renderPeaksTable() {
         // Classification badge
         var freqKey = freq.toFixed(6);
         var cls = classMap[freqKey];
-        var classBadge = '<span class="peak-class pending" data-freq="' + freqKey + '">···</span>';
+        var classBadge = '<span class="peak-class pending" data-freq="' + freqKey + '">Â·Â·Â·</span>';
         if (cls) {
-            var clsIcon = cls.class === 'candidate' ? '●' : (cls.class === 'possible' ? '●' : '●');
+            var clsIcon = cls.class === 'candidate' ? 'â—' : (cls.class === 'possible' ? 'â—' : 'â—');
             classBadge = '<span class="peak-class ' + cls.class + '" title="' + escapeHtml(cls.reasons.join('; ')) + '" data-freq="' + freqKey + '">' + clsIcon + '</span>';
         }
 
         // Cross-epoch badge
         var xref = xrefMap[freqKey];
-        var xrefBadge = '<span class="xref-badge none">—</span>';
+        var xrefBadge = '<span class="xref-badge none">â€”</span>';
         if (xref) {
             var nCands = xref.candidates.length;
             var topCand = xref.candidates[0];
             var title = topCand.epoch_count + ' epochs, SNR ' + (topCand.max_snr || 0).toFixed(1) + ', drift ' + (topCand.mean_drift || 0).toFixed(2) + ' Hz/s';
-            xrefBadge = '<span class="xref-badge match" title="' + escapeHtml(title) + '" data-candidates=\'' + encodeURIComponent(JSON.stringify(xref.candidates)) + '\' onclick="showXrefDetail(this)">🔗 ' + nCands + '</span>';
+            xrefBadge = '<span class="xref-badge match" title="' + escapeHtml(title) + '" data-candidates=\'' + encodeURIComponent(JSON.stringify(xref.candidates)) + '\' onclick="showXrefDetail(this)">ðŸ”— ' + nCands + '</span>';
         }
 
         html += '<tr data-peak="' + peakJson + '">' +
@@ -409,7 +409,7 @@ function renderPeaksTable() {
             '<td class="peak-width">' + width + '</td>' +
             '<td class="peak-class-cell">' + classBadge + '</td>' +
             '<td class="xref-cell">' + xrefBadge + '</td>' +
-            '<td><button class="btn-waterfall" onclick="event.stopPropagation(); showStackWaterfall(this.closest(\'tr\'));">🔍 View</button></td>' +
+            '<td><button class="btn-waterfall" onclick="event.stopPropagation(); showStackWaterfall(this.closest(\'tr\'));">ðŸ” View</button></td>' +
             '</tr>';
     }
     document.getElementById('stack-peaks-tbody').innerHTML = html;
@@ -582,7 +582,7 @@ function renderInteractiveSpectrum(data) {
     });
 }
 
-// ─── Waterfall Modal ──────────────────────────────────────────────────
+// â”€â”€â”€ Waterfall Modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 window.showStackWaterfall = function(rowEl) {
     var peakJson = rowEl.getAttribute('data-peak');
     if (!peakJson) return;
@@ -596,7 +596,7 @@ window.showStackWaterfall = function(rowEl) {
     var metaDiv = document.getElementById('waterfall-meta');
     var bodyDiv = document.getElementById('waterfall-body');
 
-    title.textContent = 'Waterfall — ' + freq.toFixed(6) + ' MHz';
+    title.textContent = 'Waterfall â€” ' + freq.toFixed(6) + ' MHz';
 
     // If we have a stack job context, try the stacked waterfall endpoint.
     // Falls back to single-file waterfall if stacked endpoint fails.
@@ -634,11 +634,11 @@ window.showStackWaterfall = function(rowEl) {
     });
 };
 
-// ─── Stacked Waterfall (single epoch vs stacked comparison) ──────────
+// â”€â”€â”€ Stacked Waterfall (single epoch vs stacked comparison) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Tries the stacked endpoint first, falls back to single-file waterfall
 // if it fails (OOM/timeout on large HDF5 files).
 function showStackedWaterfallSafe(jobId, freq, fileFallback, modal, title, metaDiv, bodyDiv) {
-    title.textContent = 'Waterfall — ' + freq.toFixed(6) + ' MHz';
+    title.textContent = 'Waterfall â€” ' + freq.toFixed(6) + ' MHz';
     metaDiv.innerHTML =
         '<div class="wm-item"><span class="wm-label">Freq:</span><span class="wm-val">' + freq.toFixed(6) + ' MHz</span></div>';
     bodyDiv.innerHTML =
@@ -915,7 +915,7 @@ function closeWaterfallModal() {
     if (plotDiv && plotDiv.data) Plotly.purge(plotDiv);
 }
 
-// ─── Peak Classification Loader ─────────────────────────────────────
+// â”€â”€â”€ Peak Classification Loader â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function loadClassifications(jobId) {
     try {
         var resp = await fetch('/api/stack/peaks/' + jobId + '/classify');
@@ -930,7 +930,7 @@ async function loadClassifications(jobId) {
     }
 }
 
-// ─── Cross-Epoch Reference Loader ────────────────────────────────────
+// â”€â”€â”€ Cross-Epoch Reference Loader â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function loadCrossRef(jobId) {
     try {
         var resp = await fetch('/api/stack/peaks/' + jobId + '/crossref');
@@ -945,7 +945,7 @@ async function loadCrossRef(jobId) {
     }
 }
 
-// ─── Cross-Epoch Detail Modal ────────────────────────────────────────
+// â”€â”€â”€ Cross-Epoch Detail Modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 window.showXrefDetail = function(el) {
     var encoded = el.getAttribute('data-candidates');
     if (!encoded) return;
@@ -958,7 +958,7 @@ window.showXrefDetail = function(el) {
     var metaDiv = document.getElementById('waterfall-meta');
     var bodyDiv = document.getElementById('waterfall-body');
 
-    title.textContent = '🔗 Cross-Epoch Candidates';
+    title.textContent = 'ðŸ”— Cross-Epoch Candidates';
 
     var metaHtml = '<div class="wm-item"><span class="wm-label">Matched peaks:</span><span class="wm-val">' + cands.length + '</span></div>';
     metaDiv.innerHTML = metaHtml;
@@ -980,7 +980,7 @@ window.showXrefDetail = function(el) {
     modal.style.display = 'flex';
 };
 
-// ─── Auto-connect to running job on page load ─────────────────────────
+// â”€â”€â”€ Auto-connect to running job on page load â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function autoConnectToRunningJob() {
     var items = document.querySelectorAll('.history-item');
     for (var i = 0; i < items.length; i++) {
@@ -998,7 +998,7 @@ function autoConnectToRunningJob() {
     }
 }
 
-// ─── History ──────────────────────────────────────────────────────────
+// â”€â”€â”€ History â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function loadHistory() {
     try {
         var resp = await fetch('/api/stack/history');
@@ -1022,7 +1022,7 @@ function renderHistory(jobs) {
     var html = '';
     for (var i = 0; i < jobs.length; i++) {
         var j = jobs[i];
-        var statusIcon = j.status === 'complete' ? '✅' : (j.status === 'error' ? '❌' : (j.status === 'interrupted' ? '⏸️' : (j.status === 'superseded' ? '⏭️' : '⏳')));
+        var statusIcon = j.status === 'complete' ? 'âœ…' : (j.status === 'error' ? 'âŒ' : (j.status === 'interrupted' ? 'â¸ï¸' : (j.status === 'superseded' ? 'â­ï¸' : 'â³')));
         var statusClass = j.status || 'unknown';
         var time = j.created_at || '';
         // Truncate time to just date + HH:MM
@@ -1035,16 +1035,16 @@ function renderHistory(jobs) {
 
         var resumeBtn = '';
         if (j.status === 'error' || j.status === 'interrupted') {
-            resumeBtn = '<button class="btn-resume-small" data-resume="' + j.job_id + '">▶ Resume</button>';
+            resumeBtn = '<button class="btn-resume-small" data-resume="' + j.job_id + '">â–¶ Resume</button>';
         }
-        var deleteBtn = '<button class="btn-delete-small" data-delete="' + j.job_id + '">✕</button>';
+        var deleteBtn = '<button class="btn-delete-small" data-delete="' + j.job_id + '">âœ•</button>';
 
         var itemClass = j.status === 'superseded' ? ' history-item-superseded' : '';
         html += '<div class="history-item' + itemClass + '" data-job="' + j.job_id + '" data-status="' + j.status + '">' +
             '<span class="history-status ' + statusClass + '">' + statusIcon + '</span>' +
             '<div class="history-info">' +
                 '<span class="history-target">' + escapeHtml(j.target || '?') + '</span>' +
-                '<span class="history-freq">' + (j.freq_center || 0).toFixed(1) + ' MHz ±' + (j.width_mhz || 0).toFixed(0) + '</span>' +
+                '<span class="history-freq">' + (j.freq_center || 0).toFixed(1) + ' MHz Â±' + (j.width_mhz || 0).toFixed(0) + '</span>' +
                 '<span class="history-epochs">' + (j.n_epochs || 0) + ' epochs</span>' +
                 peakInfo +
             '</div>' +
@@ -1142,11 +1142,11 @@ async function resumeStackJob(oldJobId) {
     } catch(err) {
         showError(err.message);
         btn.disabled = false;
-        btn.textContent = '▶ Run Stack';
+        btn.textContent = 'â–¶ Run Stack';
     }
 }
 
-// ─── View Management ──────────────────────────────────────────────────
+// â”€â”€â”€ View Management â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function showView(view) {
     var views = ['idle', 'running', 'complete', 'error'];
     for (var i = 0; i < views.length; i++) {
@@ -1160,7 +1160,7 @@ function showError(msg) {
     document.getElementById('stack-error-msg').textContent = msg;
 }
 
-// ─── Utilities ────────────────────────────────────────────────────────
+// â”€â”€â”€ Utilities â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function escapeHtml(str) {
     if (!str) return '';
     return String(str)
@@ -1173,9 +1173,19 @@ function escapeHtml(str) {
 
 })();
 
-// ─── Two-Layer Barycentric Filter ────────────────────────────────────
+// â”€â”€â”€ Two-Layer Barycentric Filter â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 (function() {
 'use strict';
+
+function escapeHtmlLocal(str) {
+    if (!str) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
 
 var pollTimer = null;
 var currentJobId = null;
@@ -1185,6 +1195,10 @@ document.addEventListener('DOMContentLoaded', function() {
     if (btn) btn.onclick = runPipeline;
     // Auto-reconnect to running job on page load
     checkForRunningJob();
+    // Load two-layer history
+    tlLoadHistory();
+    var refreshBtn = document.getElementById('tl-refresh-history');
+    if (refreshBtn) refreshBtn.onclick = tlLoadHistory;
 });
 
 async function checkForRunningJob() {
@@ -1199,7 +1213,7 @@ async function checkForRunningJob() {
             if (fill) fill.style.width = (data.progress || 0) + '%';
             if (msg) msg.textContent = data.progress_msg || 'Reconnected to running job...';
             var btn = document.getElementById('tl-run-btn');
-            if (btn) { btn.disabled = true; btn.textContent = '⏳ Running...'; }
+            if (btn) { btn.disabled = true; btn.textContent = 'â³ Running...'; }
             startPolling();
         }
     } catch(e) {
@@ -1221,7 +1235,7 @@ async function runPipeline() {
 
     var btn = document.getElementById('tl-run-btn');
     btn.disabled = true;
-    btn.textContent = '⏳ Running...';
+    btn.textContent = 'â³ Running...';
 
     showRunning();
 
@@ -1246,7 +1260,7 @@ async function runPipeline() {
     } catch(err) {
         showError(err.message);
         btn.disabled = false;
-        btn.textContent = '▶ Run Pipeline';
+        btn.textContent = 'â–¶ Run Pipeline';
     }
 }
 
@@ -1308,7 +1322,7 @@ async function pollStatus() {
             showError(data.progress_msg || data.error || 'Unknown error');
             var btn = document.getElementById('tl-run-btn');
             btn.disabled = false;
-            btn.textContent = '▶ Run Pipeline';
+            btn.textContent = 'â–¶ Run Pipeline';
         }
     } catch(err) {
         console.error('Two-layer poll error:', err);
@@ -1325,7 +1339,7 @@ async function loadResults(jobId) {
 
         var btn = document.getElementById('tl-run-btn');
         btn.disabled = false;
-        btn.textContent = '▶ Run Pipeline';
+        btn.textContent = 'â–¶ Run Pipeline';
     } catch(err) {
         showError(err.message);
     }
@@ -1357,21 +1371,21 @@ function renderResults(data) {
     // Verdict banner
     if (verdict === 'NO_CANDIDATES') {
         html += '<div class="tl-verdict tl-verdict-none">';
-        html += '<div class="tl-verdict-icon">✅</div>';
+        html += '<div class="tl-verdict-icon">âœ…</div>';
         html += '<div class="tl-verdict-title">NO CANDIDATES</div>';
-        html += '<div class="tl-verdict-sub">Filter working correctly — all frequencies eliminated as single-epoch RFI</div>';
+        html += '<div class="tl-verdict-sub">Filter working correctly â€” all frequencies eliminated as single-epoch RFI</div>';
         html += '</div>';
     } else if (verdict === 'CANDIDATES_FOUND') {
         html += '<div class="tl-verdict tl-verdict-found">';
-        html += '<div class="tl-verdict-icon">⚠️</div>';
+        html += '<div class="tl-verdict-icon">âš ï¸</div>';
         html += '<div class="tl-verdict-title">CANDIDATES FOUND</div>';
-        html += '<div class="tl-verdict-sub">Needs human review — signal(s) survived both filter layers</div>';
+        html += '<div class="tl-verdict-sub">Needs human review â€” signal(s) survived both filter layers</div>';
         html += '</div>';
     } else if (verdict === 'NO_PEAKS_IN_STACK') {
         html += '<div class="tl-verdict tl-verdict-none">';
-        html += '<div class="tl-verdict-icon">✅</div>';
+        html += '<div class="tl-verdict-icon">âœ…</div>';
         html += '<div class="tl-verdict-title">NO PEAKS IN STACK</div>';
-        html += '<div class="tl-verdict-sub">Candidates survived Layer 1 but didn\'t stack coherently — likely residual RFI</div>';
+        html += '<div class="tl-verdict-sub">Candidates survived Layer 1 but didn\'t stack coherently â€” likely residual RFI</div>';
         html += '</div>';
     }
 
@@ -1388,7 +1402,7 @@ function renderResults(data) {
             var maxSnr = c.max_snr || 0;
             var drift = c.mean_drift_rate || 0;
             var stackPeaks = sr.peaks ? sr.peaks.length : 0;
-            var status = sr.stack_success === false ? '<span style="color:#ef5350;">Failed: ' + escapeHtml(sr.error || '') + '</span>' : (stackPeaks > 0 ? '<span style="color:#ff9800;">⚠ Peaks (' + stackPeaks + ')</span>' : '<span style="color:#66bb6a;">✓ Clean</span>');
+            var status = sr.stack_success === false ? '<span style="color:#ef5350;">Failed: ' + escapeHtmlLocal(sr.error || '') + '</span>' : (stackPeaks > 0 ? '<span style="color:#ff9800;">âš  Peaks (' + stackPeaks + ')</span>' : '<span style="color:#66bb6a;">âœ“ Clean</span>');
 
             html += '<tr>';
             html += '<td>' + (i + 1) + '</td>';
@@ -1405,7 +1419,7 @@ function renderResults(data) {
 
     // Timestamp
     if (data.timestamp) {
-        html += '<div style="margin-top:10px;color:#546e7a;font-size:0.8em;">Completed: ' + escapeHtml(data.timestamp) + '</div>';
+        html += '<div style="margin-top:10px;color:#546e7a;font-size:0.8em;">Completed: ' + escapeHtmlLocal(data.timestamp) + '</div>';
     }
 
     area.innerHTML = html;
@@ -1428,9 +1442,62 @@ function showError(msg) {
     if (!area) return;
     area.innerHTML =
         '<div style="padding:20px;color:#ef5350;">' +
-        '<div style="font-size:1.5em;margin-bottom:8px;">⚠️ Error</div>' +
-        '<div>' + escapeHtml(msg) + '</div>' +
+        '<div style="font-size:1.5em;margin-bottom:8px;">Error</div>' +
+        '<div>' + escapeHtmlLocal(msg) + '</div>' +
         '</div>';
+}
+
+async function tlLoadHistory() {
+    try {
+        var resp = await fetch('/api/stack/two-layer/history');
+        var data = await resp.json();
+        if (data.error) throw new Error(data.error);
+        tlRenderHistory(data.jobs || []);
+    } catch(err) {
+        console.error('Two-layer history error:', err);
+    }
+}
+
+function tlRenderHistory(jobs) {
+    var container = document.getElementById('tl-history-list');
+    if (!container) return;
+    if (jobs.length === 0) {
+        container.innerHTML = '<div class="history-placeholder">No previous runs.</div>';
+        return;
+    }
+    var html = '';
+    for (var i = 0; i < jobs.length; i++) {
+        var j = jobs[i];
+        var icon = j.status === 'complete' ? '\u2705' : (j.status === 'error' ? '\u274c' : '\u23f3');
+        var verdictColor = j.verdict === 'NO_CANDIDATES' ? '#66bb6a' : '#ff9800';
+        var verdictText = j.verdict === 'NO_CANDIDATES' ? 'No candidates' :
+                          (j.verdict === 'CANDIDATES_FOUND' ? (j.n_with_peaks || 0) + ' with peaks' :
+                          (j.verdict === 'NO_PEAKS_IN_STACK' ? 'No peaks' : j.verdict || ''));
+        var time = j.created_at || '';
+        if (time.length > 16) time = time.substring(0, 16);
+        html += '<div class="history-item" data-job="' + j.job_id + '" data-status="' + j.status + '">' +
+            '<span class="history-status ' + j.status + '">' + icon + '</span>' +
+            '<div class="history-info">' +
+                '<span class="history-target">' + escapeHtmlLocal(j.target) + ' &middot; ' + (j.tolerance_hz || 10) + 'Hz</span>' +
+                '<span class="history-freq">' + (j.n_candidates || 0) + ' candidates, ' + (j.n_stacked || 0) + ' stacked</span>' +
+                '<span style="color:' + verdictColor + ';font-size:0.85em;">' + verdictText + '</span>' +
+            '</div>' +
+            '<span class="history-time">' + time + '</span>' +
+            '</div>';
+    }
+    container.innerHTML = html;
+
+    var items = container.querySelectorAll('.history-item');
+    for (var k = 0; k < items.length; k++) {
+        items[k].onclick = function() {
+            var jobId = this.getAttribute('data-job');
+            var status = this.getAttribute('data-status');
+            if (status === 'complete') {
+                currentJobId = jobId;
+                loadResults(jobId);
+            }
+        };
+    }
 }
 
 })();
