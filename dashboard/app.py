@@ -4007,6 +4007,23 @@ def api_two_layer_status(job_id):
     return jsonify(resp)
 
 
+@app.route('/api/stack/two-layer/active')
+def api_two_layer_active():
+    """Check for any running two-layer jobs (for page refresh auto-reconnect)."""
+    for job_id, job in _two_layer_jobs.items():
+        if job.get('status') in ('running', 'pending'):
+            return jsonify({
+                'job_id': job_id,
+                'status': job['status'],
+                'progress': job.get('progress', 0),
+                'progress_msg': job.get('progress_msg', ''),
+                'phase': job.get('phase', ''),
+                'target': job.get('target', ''),
+                'candidates_found': job.get('candidates_found', 0),
+            })
+    return jsonify({'job_id': None, 'status': 'none'})
+
+
 @app.route('/api/stack/two-layer/<job_id>/results')
 def api_two_layer_results(job_id):
     """Get full results for a completed two-layer pipeline job."""

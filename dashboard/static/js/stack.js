@@ -1183,7 +1183,29 @@ var currentJobId = null;
 document.addEventListener('DOMContentLoaded', function() {
     var btn = document.getElementById('tl-run-btn');
     if (btn) btn.onclick = runPipeline;
+    // Auto-reconnect to running job on page load
+    checkForRunningJob();
 });
+
+async function checkForRunningJob() {
+    try {
+        var resp = await fetch('/api/stack/two-layer/active');
+        var data = await resp.json();
+        if (data.job_id && data.status === 'running') {
+            currentJobId = data.job_id;
+            showRunning();
+            var fill = document.getElementById('tl-progress-fill');
+            var msg = document.getElementById('tl-status-msg');
+            if (fill) fill.style.width = (data.progress || 0) + '%';
+            if (msg) msg.textContent = data.progress_msg || 'Reconnected to running job...';
+            var btn = document.getElementById('tl-run-btn');
+            if (btn) { btn.disabled = true; btn.textContent = '⏳ Running...'; }
+            startPolling();
+        }
+    } catch(e) {
+        // No active job, that's fine
+    }
+}
 
 async function runPipeline() {
     var target = document.getElementById('tl-target').value.trim();
