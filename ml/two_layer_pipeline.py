@@ -42,17 +42,22 @@ from incoherent_stack import (
 
 
 def get_scan_dirs(target='PROXCEN'):
-    """Find scan result directories for a target."""
+    """Find scan result directories for a target.
+    
+    Only returns scans that have COMPLETE barycentric corrections
+    (barycentric/combined_corrected.json exists). Scans with only raw
+    hits are excluded to prevent cross_epoch_match from auto-correcting
+    partial/incomplete scans on the fly.
+    """
     results_dir = os.path.join(SETI_ROOT, 'results')
     scan_dirs = []
     if os.path.isdir(results_dir):
         for d in sorted(os.listdir(results_dir)):
             full = os.path.join(results_dir, d)
             if os.path.isdir(full) and target in d:
-                # Check it has barycentric data or raw hits
-                has_bary = os.path.isdir(os.path.join(full, 'barycentric'))
-                has_hits = any(f.endswith('_fine') for f in os.listdir(full))
-                if has_bary or has_hits:
+                # ONLY include scans with pre-computed barycentric data
+                combined = os.path.join(full, 'barycentric', 'combined_corrected.json')
+                if os.path.isfile(combined):
                     scan_dirs.append(full)
     return scan_dirs
 
@@ -109,8 +114,8 @@ def targeted_stack(candidate_freq, stack_width_mhz, epoch_labels, target='PROXCE
     Returns dict with stack result or None on failure.
     """
     target_info = TARGET_COORDS.get(target, TARGET_COORDS.get('PROXCEN'))
-    target_ra = target_info['ra']
-    target_dec = target_info['dec']
+    # TARGET_COORDS values are (ra_hours, dec_degrees) tuples
+    target_ra, target_dec = target_info
     
     freq_center = candidate_freq
     
