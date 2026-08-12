@@ -2104,7 +2104,7 @@ def api_barycentric_delete(scan_id):
     Removes the entire barycentric/ subdirectory and all corrected data.
     The scan itself is not affected — correction can be re-run later.
     """
-    if not re.match(r'^[A-Za-z0-9_]+$', scan_id):
+    if not re.match(r'^[A-Za-z0-9_-]+$', scan_id):
         return jsonify({'error': 'Invalid scan_id'}), 400
     
     scan_dir = _get_scan_dir(scan_id)
