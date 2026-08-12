@@ -120,7 +120,7 @@ def analyze_candidate(candidate, stack_result, n_sigma=5.0):
             multi_check['note'] = f'{len(peaks)} peaks, irregular spacing'
             scorecard['rfi_score'] += 10
         else:
-            multi_check['note'] = f'{len(peaks)} peaks (single or few)')
+            multi_check['note'] = f'{len(peaks)} peaks (single or few)'
         
         scorecard['checks']['multi_channel'] = multi_check
     else:
