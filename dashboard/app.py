@@ -2861,6 +2861,18 @@ def api_stack_resume(job_id):
     # Reuse the same chunk dir so existing chunks are found
     chunk_dir = os.path.join(STACK_OUTPUT_DIR, f'chunks_{job_id}')
 
+    # Mark the old job as superseded so the Resume button disappears
+    try:
+        from db import get_db
+        conn = get_db()
+        conn.execute(
+            "UPDATE stack_jobs SET status = 'superseded', progress_msg = ? WHERE job_id = ?",
+            ('Resumed as ' + new_job_id, job_id,))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
     job_state = {
         'job_id': new_job_id,
         'status': 'running',
