@@ -4252,6 +4252,7 @@ if __name__ == '__main__':
     import numpy as np  # needed by header endpoint
 
     # Orphan recovery: mark any running stack jobs as interrupted
+    # (scan subprocess may still be running, but the dashboard lost its handle)
     try:
         from db import get_db
         conn = get_db()
@@ -4262,7 +4263,7 @@ if __name__ == '__main__':
             conn.execute(
                 "UPDATE stack_jobs SET status = 'interrupted', progress_msg = 'Interrupted by dashboard restart' WHERE job_id = ?",
                 (o['job_id'],))
-            print(f"  Orphan recovery: stack job {o['job_id']} ({o['target']}) marked as interrupted")
+            print(f"  Orphan recovery: stack job {o['job_id']} ({o['target']}) marked as interrupted (auto-resume on next page load)")
         conn.commit()
         conn.close()
     except Exception as _orphan_err:

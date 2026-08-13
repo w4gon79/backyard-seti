@@ -1000,6 +1000,25 @@ function autoConnectToRunningJob() {
             break; // Only auto-connect to the first running job
         }
     }
+    // If no running job found, check for interrupted jobs (orphaned by server restart)
+    // and auto-resume the most recent one.
+    if (!currentJobId) {
+        for (var i = 0; i < items.length; i++) {
+            var status = items[i].getAttribute('data-status');
+            if (status === 'interrupted') {
+                var jobId = items[i].getAttribute('data-job');
+                // Show the running view with a reconnect message
+                currentJobId = jobId;
+                showView('running');
+                document.getElementById('stack-running-status').textContent = 'Resuming interrupted job ' + jobId + '...';
+                document.getElementById('stack-running-fill').style.width = '0%';
+                document.getElementById('stack-running-epoch').textContent = '';
+                // Trigger a resume
+                resumeStackJob(jobId);
+                break;
+            }
+        }
+    }
 }
 
 // ─── History ──────────────────────────────────────────────────────────
