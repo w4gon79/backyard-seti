@@ -1489,6 +1489,14 @@ def api_download_status():
     })
 
 
+@app.route('/api/download/clear', methods=['POST'])
+def api_download_clear():
+    """Clear all completed/errored/cancelled downloads from the queue."""
+    download_state['queue'] = [q for q in download_state['queue']
+                               if q['status'] == 'downloading' or q['status'] == 'queued']
+    return jsonify({'success': True, 'remaining': len(download_state['queue'])})
+
+
 @app.route('/api/download/cancel', methods=['POST'])
 def api_download_cancel():
     """Cancel a queued or active download."""
@@ -4001,7 +4009,9 @@ def api_two_layer_run():
             with open(output_path, 'w') as f:
                 json.dump(result_data, f, indent=2, default=str)
 
-            job_state['result'] = result_data
+            # Normalize through JSON round-trip to strip numpy types that
+            # break Flask's jsonify() on the results endpoint.
+            job_state['result'] = json.loads(json.dumps(result_data, default=str))
 
             # Persist to database so results survive restarts
             try:
