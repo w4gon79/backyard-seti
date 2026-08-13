@@ -57,9 +57,9 @@ def analyze_candidate(candidate, stack_result, n_sigma=5.0):
         'rfi_type': None,
     }
     
-    if len(stack) == 0 or len(grid) == 0:
-        scorecard['assessment'] = 'INSUFFICIENT_DATA'
-        return scorecard
+    # Note: stack and grid may be empty (stripped for DB storage).
+    # The analysis primarily uses peaks, sigma, median, and candidate metadata.
+    # Only power_concentration check needs the raw stack array.
     
     # ─── Check 1: Drift Slope ─────────────────────────────────────
     # The stacked spectrum is 1D (frequency axis only, time-averaged).
@@ -192,22 +192,32 @@ def analyze_candidate(candidate, stack_result, n_sigma=5.0):
     # ─── Check 6: Stack Power Concentration ───────────────────────
     # What fraction of total stack power is in the top peaks vs noise?
     # High concentration = one dominant strong signal (could be RFI or real)
-    threshold = median + n_sigma * sigma
-    above = stack[stack > threshold]
-    total_power = np.sum(np.abs(stack - median))
-    peak_power = np.sum(np.abs(above - median))
-    concentration = peak_power / total_power if total_power > 0 else 0
-    
-    power_check = {
-        'power_concentration': concentration,
-        'flag': False,
-    }
-    if concentration > 0.5:
-        power_check['flag'] = True
-        power_check['note'] = f'{concentration*100:.0f}% of power in peaks = dominant signal'
-        scorecard['rfi_score'] += 10
-    
-    scorecard['checks']['power_concentration'] = power_check
+    # Only runs if we have the raw stack array (not available in DB-stripped results)
+    if len(stack) > 0 and sigma > 0:
+        threshold = median + n_sigma * sigma
+        above = stack[stack > threshold]
+        total_power = np.sum(np.abs(stack - median))
+        peak_power = np.sum(np.abs(above - median))
+        concentration = peak_power / total_power if total_power > 0 else 0
+        
+        power_check = {
+            'power_concentration': concentration,
+            'flag': False,
+        }
+        if concentration > 0.5:
+            power_check['flag'] = True
+            power_check['note'] = f'{concentration*100:.0f}% of power in peaks = dominant signal'
+            scorecard['rfi_score'] += 10
+        else:
+            power_check['note'] = f'{concentration*100:.0f}% of power in peaks'
+        
+        scorecard['checks']['power_concentration'] = power_check
+    else:
+        scorecard['checks']['power_concentration'] = {
+            'power_concentration': None,
+            'flag': False,
+            'note': 'Stack array not available (stripped for storage)',
+        }
     
     # ─── Overall Assessment ───────────────────────────────────────
     scorecard['rfi_score'] = min(scorecard['rfi_score'], 100)

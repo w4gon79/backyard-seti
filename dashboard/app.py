@@ -4077,6 +4077,24 @@ def api_two_layer_history():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/stack/two-layer/delete/<job_id>', methods=['DELETE'])
+def api_two_layer_delete(job_id):
+    """Delete a two-layer pipeline job from DB."""
+    if not re.match(r'^[A-Za-z0-9_-]+$', job_id):
+        return jsonify({'error': 'Invalid job_id'}), 400
+    try:
+        from db import get_db
+        conn = get_db()
+        conn.execute('DELETE FROM two_layer_jobs WHERE job_id = ?', (job_id,))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    if job_id in _two_layer_jobs:
+        del _two_layer_jobs[job_id]
+    return jsonify({'success': True, 'deleted': job_id})
+
+
 @app.route('/api/stack/two-layer/<job_id>')
 def api_two_layer_status(job_id):
     """Poll two-layer pipeline job status."""

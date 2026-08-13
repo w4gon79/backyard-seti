@@ -1650,6 +1650,7 @@ function tlRenderHistory(jobs) {
                 '<span class="history-freq">' + (j.n_candidates || 0) + ' candidates, ' + (j.n_stacked || 0) + ' stacked</span>' +
                 '<span style="color:' + verdictColor + ';font-size:0.85em;">' + escapeHtmlLocal(verdictText) + '</span>' +
             '</div>' +
+            '<button class="btn-delete-small" data-delete="' + escapeHtmlLocal(j.job_id) + '">\u2715</button>' +
             '<span class="history-time">' + escapeHtmlLocal(time) + '</span>' +
             '</div>';
     }
@@ -1669,6 +1670,24 @@ function tlRenderHistory(jobs) {
             if (status === 'complete') {
                 currentJobId = jobId;
                 loadResults(jobId);
+            }
+        };
+    }
+
+    // Delete button handlers
+    var deleteBtns = container.querySelectorAll('.btn-delete-small');
+    for (var d = 0; d < deleteBtns.length; d++) {
+        deleteBtns[d].onclick = function(e) {
+            e.stopPropagation();
+            var delJobId = this.getAttribute('data-delete');
+            if (confirm('Delete two-layer job ' + delJobId + '?')) {
+                fetch('/api/stack/two-layer/delete/' + delJobId, { method: 'DELETE' })
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) {
+                        if (data.error) { alert('Error: ' + data.error); return; }
+                        tlLoadHistory();
+                    })
+                    .catch(function(err) { alert('Delete failed: ' + err.message); });
             }
         };
     }
