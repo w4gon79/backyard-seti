@@ -4153,6 +4153,7 @@ def api_two_layer_results(job_id):
         'timestamp': full_result.get('timestamp'),
         'summary': full_result.get('summary'),
         'layer1': full_result.get('layer1'),
+        'layer25': full_result.get('layer25'),
         'layer2': {
             'n_candidates_stacked': full_result.get('layer2', {}).get('n_candidates_stacked', 0),
             'results': [],
