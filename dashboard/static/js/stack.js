@@ -987,6 +987,7 @@ window.showXrefDetail = function(el) {
 // ─── Auto-connect to running job on page load ─────────────────────────
 function autoConnectToRunningJob() {
     var items = document.querySelectorAll('.history-item');
+    // First priority: reconnect to actively running jobs
     for (var i = 0; i < items.length; i++) {
         var status = items[i].getAttribute('data-status');
         if (status === 'running' || status === 'pending') {
@@ -997,26 +998,21 @@ function autoConnectToRunningJob() {
             document.getElementById('stack-running-fill').style.width = '0%';
             document.getElementById('stack-running-epoch').textContent = '';
             startPolling();
-            break; // Only auto-connect to the first running job
+            return;
         }
     }
-    // If no running job found, check for interrupted jobs (orphaned by server restart)
-    // and auto-resume the most recent one.
-    if (!currentJobId) {
-        for (var i = 0; i < items.length; i++) {
-            var status = items[i].getAttribute('data-status');
-            if (status === 'interrupted') {
-                var jobId = items[i].getAttribute('data-job');
-                // Show the running view with a reconnect message
-                currentJobId = jobId;
-                showView('running');
-                document.getElementById('stack-running-status').textContent = 'Resuming interrupted job ' + jobId + '...';
-                document.getElementById('stack-running-fill').style.width = '0%';
-                document.getElementById('stack-running-epoch').textContent = '';
-                // Trigger a resume
-                resumeStackJob(jobId);
-                break;
-            }
+    // Second priority: auto-resume the most recent interrupted job
+    for (var i = 0; i < items.length; i++) {
+        var status = items[i].getAttribute('data-status');
+        if (status === 'interrupted') {
+            var jobId = items[i].getAttribute('data-job');
+            currentJobId = jobId;
+            showView('running');
+            document.getElementById('stack-running-status').textContent = 'Resuming interrupted job ' + jobId + '...';
+            document.getElementById('stack-running-fill').style.width = '0%';
+            document.getElementById('stack-running-epoch').textContent = '';
+            resumeStackJob(jobId);
+            return;
         }
     }
 }
