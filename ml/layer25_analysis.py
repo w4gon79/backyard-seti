@@ -46,7 +46,8 @@ def analyze_candidate(candidate, stack_result, n_sigma=5.0):
     sigma = stack_result.get('sigma', 1)
     median = stack_result.get('median', 0)
     n_epochs = stack_result.get('n_epochs', 0)
-    total_epochs_expected = 4  # PROXCEN has 4 epochs
+    # Use actual number of Layer 1 scans, not hardcoded value
+    total_epochs_expected = candidate.get('total_epochs_available', n_epochs) or n_epochs
     
     scorecard = {
         'frequency_mhz': freq,

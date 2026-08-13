@@ -3797,29 +3797,43 @@ def api_two_layer_run():
             from ml.two_layer_pipeline import get_scan_dirs, targeted_stack
 
             # ─── Determine epochs ──────────────────────────────────
+            # Only use epochs that have barycentrically-corrected scan data
+            # Map scan dirs to epoch labels based on which HDF5 files they contain
+            scan_dirs = get_scan_dirs(target)
+            available_epoch_labels = []
+            for sd in scan_dirs:
+                # Check which epoch this scan dir corresponds to by looking
+                # at the HDF5 filenames inside
+                import glob as _glob
+                h5_files = _glob.glob(os.path.join(sd, '**/*_fine.h5'), recursive=True)
+                for h5 in h5_files:
+                    fname = os.path.basename(h5)
+                    # Parkes_57791_72989_PROXCEN_S_fine.h5 -> epoch 57791
+                    parts = fname.split('_')
+                    if len(parts) >= 2:
+                        mjd = parts[1]
+                        if mjd in EPOCHS and mjd not in available_epoch_labels:
+                            available_epoch_labels.append(mjd)
+            available_epoch_labels.sort()
+            
             if epochs_param:
-                epoch_labels = epochs_param
+                # User specified epochs, intersect with available
+                epoch_labels = [e for e in epochs_param if e in available_epoch_labels]
             else:
-                epoch_labels = list(EPOCHS.keys())
+                epoch_labels = available_epoch_labels
+
+            if len(epoch_labels) < 2:
+                job_state['status'] = 'error'
+                job_state['progress_msg'] = (
+                    f'Need at least 2 barycentrically-corrected epochs, found {len(epoch_labels)}. '
+                    f'Available: {available_epoch_labels}'
+                )
+                return
 
             # ─── Layer 1: Cross-Epoch Barycentric Filter ───────────
             job_state['phase'] = 'filter_start'
             job_state['progress'] = 5
-            job_state['progress_msg'] = 'Finding scan directories...'
-
-            scan_dirs = get_scan_dirs(target)
-            if len(scan_dirs) < 2:
-                job_state['status'] = 'error'
-                job_state['progress_msg'] = (
-                    f'Need at least 2 scan directories, found {len(scan_dirs)}. '
-                    f'Make sure results/ contains corrected scan folders for {target}.'
-                )
-                return
-
-            job_state['progress'] = 10
-            job_state['progress_msg'] = (
-                f'Layer 1: Filtering {len(scan_dirs)} scans...'
-            )
+            job_state['progress_msg'] = f'Layer 1: Filtering {len(scan_dirs)} scans ({len(epoch_labels)} epochs)...'
 
             t0 = time.time()
             xepoch_result = cross_epoch_match(
@@ -3880,6 +3894,11 @@ def api_two_layer_run():
             )
 
             stack_results = []
+            # Inject total_epochs_available into each candidate for Layer 2.5
+            total_available = len(epoch_labels)
+            for cand in candidates:
+                cand['total_epochs_available'] = total_available
+            
             for i, cand in enumerate(candidates):
                 freq = cand['barycentric_freq_mhz']
                 job_state['progress_msg'] = (
