@@ -1390,7 +1390,7 @@ function renderResults(data) {
         html += '<div class="tl-verdict tl-verdict-none">';
         html += '<div class="tl-verdict-icon">\u2714</div>';
         html += '<div class="tl-verdict-title">NO CANDIDATES</div>';
-        html += '<div class="tl-verdict-sub">Filter working correctly \u2014 all frequencies eliminated as single-epoch RFI</div>';
+        html += '<div class="tl-verdict-sub">All frequencies eliminated as single-epoch RFI</div>';
         html += '</div>';
     } else if (verdict === 'CANDIDATES_FOUND') {
         html += '<div class="tl-verdict tl-verdict-found">';
