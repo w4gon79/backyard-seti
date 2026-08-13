@@ -1454,7 +1454,7 @@ function renderResults(data) {
             html += '<td>' + stackPeaks + '</td>';
             html += '<td>' + status + '</td>';
             html += '<td>' + assessHtml + '</td>';
-            html += '<td><button class="btn-waterfall" onclick="showTLWaterfall(' + freq + ', ' + '\'' + peaksJson + '\'' + ')">\u{1f50d} View</button></td>';
+            html += '<td><button class="btn-waterfall" onclick="showTLWaterfall(' + freq + ', ' + '\'' + peaksJson + '\'' + ', ' + drift + ')">\u{1f50d} View</button></td>';
             html += '</tr>';
             // Hidden detail row for scorecard
             html += '<tr id="tl-scorecard-row-' + i + '" style="display:none;">';
@@ -1582,7 +1582,7 @@ function showError(msg) {
 
 // Show waterfall for a two-layer candidate frequency
 // Uses the existing waterfall modal from the main stack page
-window.showTLWaterfall = function(freq, peaksJson) {
+window.showTLWaterfall = function(freq, peaksJson, driftRate) {
     var modal = document.getElementById('waterfall-modal');
     var title = document.getElementById('waterfall-title');
     var metaDiv = document.getElementById('waterfall-meta');
@@ -1648,7 +1648,7 @@ window.showTLWaterfall = function(freq, peaksJson) {
             }
             // Render the waterfall plot
             bodyDiv.innerHTML = '<div id="waterfall-plot" style="width:100%;height:400px;"></div>';
-            renderTLWaterfallPlot(data, freq, bodyDiv);
+            renderTLWaterfallPlot(data, freq, bodyDiv, driftRate);
         }).catch(function(err) {
             fileIdx++;
             tryNextFile();
@@ -1657,7 +1657,7 @@ window.showTLWaterfall = function(freq, peaksJson) {
     tryNextFile();
 };
 
-function renderTLWaterfallPlot(data, centerFreq, bodyDiv) {
+function renderTLWaterfallPlot(data, centerFreq, bodyDiv, driftRate) {
     var plotDiv = document.getElementById('waterfall-plot');
     if (!plotDiv) {
         bodyDiv.innerHTML = '<div id="waterfall-plot" style="width:100%;height:400px;"></div>';
@@ -1692,6 +1692,23 @@ function renderTLWaterfallPlot(data, centerFreq, bodyDiv) {
         hoverinfo: 'skip',
         showlegend: false
     });
+
+    // Measured drift track (driftRate is in Hz/s, freqs are in MHz)
+    if (driftRate && Math.abs(driftRate) > 1e-9) {
+        var t0 = times[0];
+        var t1 = times[times.length - 1];
+        var driftMHz = driftRate / 1e6; // Hz/s -> MHz/s
+        traces.push({
+            type: 'scatter',
+            mode: 'lines',
+            x: [centerFreq, centerFreq + driftMHz * (t1 - t0)],
+            y: [t0, t1],
+            line: { color: '#ff4444', width: 2, dash: 'dash' },
+            name: 'Drift ' + driftRate.toFixed(3) + ' Hz/s',
+            hovertemplate: '%{x:.6f} MHz<br>t=%{y:.1f}s<br>Drift track<extra></extra>',
+            showlegend: true
+        });
+    }
 
     var layout = {
         paper_bgcolor: 'transparent',
