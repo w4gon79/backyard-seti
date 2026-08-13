@@ -24,18 +24,18 @@ cadence sets** for PROXCEN, spanning January to October 2017:
 |-------|-----|------|-----------|--------|
 | 1 | 57783 | Jan 30 | 200 | Available |
 | 2 | 57790 | Feb 6 | 200 | Available |
-| 3 | 57791 | Feb 7 | 200 | **Scanned** |
+| 3 | 57791 | Feb 7 | 200 | **Scanned + Bary** |
 | 4 | 57804 | Feb 20 | 200 | Available |
 | 5 | 57805 | Feb 21 | 200 | Available |
 | 6 | 57808 | Feb 24 | 200 | Available |
 | 7 | 57809 | Feb 25 | 200 | Available |
-| 8 | 57846 | Apr 3 | 200 | **Scanning** |
+| 8 | 57846 | Apr 3 | 200 | **Scanned + Bary** |
 | 9 | 57847 | Apr 4 | 200 | Available |
 | 10 | 57850 | Apr 7 | 200 | Available |
 | 11 | 57854 | Apr 11 | 200 | Available |
 | 12 | 57904 | May 31 | 200 | Available |
 | 13 | 57910 | Jun 6 | 200 | Available |
-| 14 | 57930 | Jun 26 | 200 | **Downloading** |
+| 14 | 57930 | Jun 26 | 200 | **Scanned + Bary** |
 | 15 | 57932 | Jun 28 | 200 | Available |
 | 16 | 57933 | Jun 29 | 200 | Available |
 | 17 | 57939 | Jul 5 | 200 | Available |
@@ -44,7 +44,7 @@ cadence sets** for PROXCEN, spanning January to October 2017:
 | 20 | 57942 | Jul 8 | **404** | Unavailable |
 | 21 | 57943 | Jul 9 | **404** | Unavailable |
 | 22 | 57944 | Jul 10 | **404** | Unavailable |
-| 23 | 58020 | Sep 24 | 200 | **Scanned** |
+| 23 | 58020 | Sep 24 | 200 | **Scanned + Bary** |
 | 24 | 58026 | Sep 30 | **404** | Unavailable |
 | 25 | 58027 | Oct 1 | **404** | Unavailable |
 | 26 | 58029 | Oct 3 | **404** | Unavailable |
@@ -77,7 +77,7 @@ resume capability handles unattended processing.
 
 ---
 
-## Current State (2026-08-08)
+## Current State (2026-08-13)
 
 ### Pipeline Components
 
@@ -109,20 +109,19 @@ resume capability handles unattended processing.
 
 ### Search Results So Far
 
-All 36 PROXCEN **mid-res** files processed at SNR 25 and SNR 10. Drift range: 
-0.00001 to 5 Hz/s, both polarities.
+Four PROXCEN epochs scanned at SNR 5 (57791, 57846, 57930, 58020).
+Barycentric correction applied to all four. Cross-epoch matching operational.
 
-**Result: Zero hits across all 36 mid-res files at both thresholds.**
+**Two-layer pipeline validated (2026-08-13):**
+- Layer 1 (cross-epoch filter): Killed 30,211 single-epoch hits at min_epochs=3
+- Layer 2 (incoherent stack): Stacks surviving candidates across epochs
+- Layer 2.5 (RFI scorecard): Automated scoring of stacked candidates
+- min_epochs=2 produces candidates (all RFI by scorecard)
+- min_epochs=3 produces zero candidates (filter working correctly)
 
-**Root cause (confirmed 2026-08-07): drift rate resolution mismatch.**
-turbo_seti min drift step = df / (n_timesteps * tsamp). Mid-res data has 
-df=2861 Hz and tsamp=1.074s, giving 166 Hz/s drift resolution. Any signal 
-drifting slower than 166 Hz/s is invisible. This is a fundamental limit of 
-the mid-res format, not a bug.
-
-Fine-res data (df=2.79 Hz, tsamp=18.25s) gives 0.0076 Hz/s drift resolution. 
-Fine-res pipeline validated: synthetic injection recovered at SNR 698, real 
-data produces legitimate hits across 580 MHz band.
+**Conclusion:** Pipeline is solid. No technosignature candidates from
+Proxima Centauri across 4 epochs, which is the expected result. More
+epochs increase stacking sensitivity (SNR scales as sqrt(N)).
 
 ---
 
@@ -244,109 +243,204 @@ probabilities.
 
 ---
 
-## Phase 3: ML Signal Classification
+## Phase 3: Multi-Target Survey
 
-**Goal:** Train a model to distinguish interesting signals from RFI based on 
-morphology, not just frequency coincidence.
+**Goal:** Generalize the pipeline beyond Proxima Centauri to survey any
+BL target with fine-res cadence data. This requires removing PROXCEN
+hardcoding throughout the codebase and making target selection a
+first-class concept in the dashboard.
 
-### 3A. Training Set Generation
+**Rationale:** Proxima Centauri proved out every pipeline stage. Now we
+need breadth. Different stars have different Doppler corrections,
+different RFI environments (different telescope pointings), and
+different expected drift rates. Surveying multiple targets is how we
+actually search, not just validate tooling.
+
+### What's Hardcoded Today
+
+The following components have PROXCEN assumptions baked in and must be
+generalized:
+
+**1. `incoherent_stack.py` (CRITICAL)**
+- `EPOCHS` dict is hardcoded to 4 PROXCEN MJDs with fixed sequence numbers
+- File naming constructs `Parkes_{mjd}_{seq}_PROXCEN_S_fine.h5` directly
+- `_load_epoch_data()` uses PROXCEN-specific target suffix (_S, _R)
+- Must become: target-driven epoch discovery from scan results + DB
+
+**2. `ml/two_layer_pipeline.py` (CRITICAL)**
+- `get_scan_dirs()` searches `G:\seti\results\` for `PROXCEN_*` dirs
+- `targeted_stack()` uses PROXCEN-specific file naming
+- `TARGET_COORDS` dict has a handful of targets but not dynamically queried
+- Must become: scan the DB for any target's completed scans
+
+**3. `src/barycentric_correct.py` (MODERATE)**
+- `TARGET_COORDS` dict is statically defined (works for any target already
+  in the dict, but new targets need manual addition)
+- File discovery searches `data/PROXCEN` dir specifically
+- Must become: query BL API or SIMBAD for arbitrary target coordinates
+
+**4. `dashboard/app.py` (MODERATE)**
+- `PROXCEN_DIR` hardcoded data directory
+- Stack endpoint defaults to PROXCEN
+- Two-layer endpoint defaults to PROXCEN
+- Regular stack waterfall file paths use PROXCEN naming
+- Must become: target parameter flows through all endpoints
+
+**5. `dashboard/static/js/stack.js` (MODERATE)**
+- File path construction uses `PROXCEN_S_fine.h5` naming
+- Epoch list hardcoded to 4 PROXCEN MJDs for waterfall display
+- Must become: fetch epoch list from API per-target
+
+**6. `dashboard/static/js/dashboard.js` (MINOR)**
+- Download default target is PROXCEN
+- Must become: use whatever target is selected in the UI
+
+### 3A. Target Registry
+
+**Goal:** Centralized target management with automatic coordinate lookup.
+
+**Design:**
+1. `targets` table in SQLite: name, ra_hours, dec_deg, aliases,
+   priority, notes
+2. Seed with known BL targets (PROXCEN, Tabby's Star, Barnard's Star,
+   Sirius, etc.)
+3. Dashboard page for browsing/adding targets
+4. On new target add: query BL API to check data availability
+5. Coordinates also resolvable via SIMBAD/CDS API for arbitrary names
+
+**Deliverable:** Target registry + dashboard UI for target management.
+
+### 3B. Per-Target Data Organization
+
+**Goal:** Data directories and scan results organized by target, not
+flattened into PROXCEN-specific paths.
+
+**Current structure:**
+```
+G:\seti\data\fine\              # flat, PROXCEN files mixed with any others
+G:\seti\results\PROXCEN_2026-...  # scan results keyed by target+date
+G:\seti\data\PROXCEN\            # legacy PROXCEN-specific dir
+```
+
+**Target structure:**
+```
+G:\seti\data\{TARGET}\fine\     # per-target data directories
+G:\seti\results\{TARGET}_2026-...# already keyed by target (OK)
+```
+
+**Migration:** Move existing PROXCEN fine files into
+`data/PROXCEN/fine/`. Update `FINE_DIRS` in `incoherent_stack.py` to be
+target-aware. Update file discovery in barycentric_correct.py and
+two_layer_pipeline.py to search per-target directories.
+
+**Deliverable:** Clean per-target data layout + migration script.
+
+### 3C. Dynamic Epoch Discovery
+
+**Goal:** Replace hardcoded `EPOCHS` dict with dynamic discovery from the
+scan database.
+
+**Design:**
+1. Query `scans` table for all completed scans of a given target
+2. For each scan, extract MJD and ON/OFF sequence numbers from the file
+   headers (or derive from filenames using the telescope field)
+3. Build the epoch mapping at runtime instead of compile time
+4. Validate each epoch has complete ABABAB cadence (3 ON + 3 OFF)
+
+**Deliverable:** `get_target_epochs(target)` function replacing the
+static `EPOCHS` dict. Used by incoherent_stack, two_layer_pipeline,
+and barycentric_correct.
+
+### 3D. Generalized File Naming
+
+**Goal:** Support any BL telescope/target naming convention, not just
+Parkes PROXCEN.
+
+**BL filename pattern:** `{telescope}_{mjd}_{seq}_{target}_{S|R}_{res}.h5`
+
+Examples across targets:
+- `Parkes_57791_72989_PROXCEN_S_fine.h5`
+- `GBT_58132_5678_KIC8462852_S_fine.h5`
+- `Parkes_58020_21048_PROXCEN_S_fine.h5`
+
+**Changes needed:**
+1. Parse target name from filename position (already done in some places)
+2. Use parsed target instead of hardcoded 'PROXCEN'
+3. Handle GBT vs Parkes telescope conventions (different cadence patterns)
+4. File discovery: glob by `{telescope}_*_{target}_*_{res}.h5`
+
+**Deliverable:** Target-agnostic file discovery + naming utilities.
+
+### 3E. Dashboard Multi-Target UI
+
+**Goal:** Dashboard supports selecting any target from the registry and
+running the full pipeline against it.
+
+**Changes:**
+1. **Main dashboard:** Target selector dropdown (populated from DB).
+   Download, scan, and barycentric correct all use the selected target.
+2. **Stack page:** Target selector. Epoch list fetched dynamically.
+   Stack and two-layer runs parameterized by target.
+3. **Sky map:** Show all targets in registry with observation status.
+4. **Target detail page:** Per-target summary showing epochs available,
+   scan status, cross-epoch candidates, stack results.
+
+**Deliverable:** Multi-target dashboard with target selector throughout.
+
+### 3F. Automated Pipeline Per Target
+
+**Goal:** One-click (or scheduled) full pipeline run for any target.
+
+**Workflow:**
+1. Select target from registry
+2. Dashboard shows available epochs from BL API
+3. Download missing fine-res files
+4. Run turbo_seti batch search on all files
+5. Run ON/OFF RFI rejection
+6. Apply barycentric correction
+7. Cross-epoch match
+8. Two-layer pipeline (Layer 1 + Layer 2 + Layer 2.5 scorecard)
+9. Generate per-target report
+
+**Output:** Per-target summary with traffic-light scoring:
+- RED: No candidates survived cross-epoch filter
+- YELLOW: Candidates found but flagged as RFI by scorecard
+- GREEN: Unexplained candidates, warrant manual review
+
+**Deliverable:** End-to-end automated pipeline runnable for any target.
+
+---
+
+## Phase 4: ML Signal Classification (NICE TO HAVE)
+
+**Status:** Deprioritized as of 2026-08-13. The two-layer pipeline with
+Layer 2.5 RFI scorecard already handles most signal classification
+needs. ML may add value later but is not blocking survey work.
+
+Kept here for future reference if ML becomes valuable.
+
+### 4A. Training Set Generation
 
 **Goal:** Create labeled examples for a classifier.
 
 **Sources:**
-1. **RFI examples:** Harvest from OFF frames and known RFI frequencies in our 
-   data. Categories: constant (zero drift), chirped (linear drift but present 
-   in both ON/OFF), intermittent (appears in some epochs only), broadband 
-   (wide bandwidth), multi-tone (harmonically related narrowband signals).
-2. **Synthetic signal examples:** Generate waterfall plots with injected 
-   signals at various SNR (5-30), drift rates (0.01-5 Hz/s), and bandwidths 
-   (narrowband to ~100 Hz).
-3. **Real astronomy signals:** Known pulsars, satellites, and aircraft 
-   transponder signals from other BL observations (for variety).
+1. **RFI examples:** Harvest from OFF frames and known RFI frequencies.
+2. **Synthetic signal examples:** Inject at various SNR, drift rates,
+   bandwidths.
+3. **Real astronomy signals:** Known pulsars, satellites from other BL
+   observations.
 
-**Deliverable:** Labeled waterfall image dataset, ~10,000 examples minimum.
+**Deliverable:** Labeled waterfall image dataset.
 
-### 3B. Waterfall CNN Classifier
+### 4B. Waterfall CNN Classifier
 
-**Architecture:** Convolutional Neural Network on waterfall plot tiles.
+Train on waterfall tiles to classify: noise, RFI types, candidate signal.
+RTX 2060 6GB limits model size but can handle a small ResNet variant.
 
-**Input:** 256x256 or 512x512 waterfall tiles (frequency x time), normalized 
-to dB above local noise floor.
+### 4C. Unsupervised Anomaly Detection
 
-**Output:** Per-tile classification: noise, RFI constant, RFI chirped, RFI 
-broadband, candidate signal.
-
-**Training:**
-1. Start with a pretrained image model (ResNet, EfficientNet) and fine-tune 
-   on waterfall tiles
-2. Alternative: train from scratch if the domain is different enough from 
-   natural images
-3. Data augmentation: random frequency/time shifts, noise injection, 
-   bandwidth variation
-
-**Reference:** Zhang et al. 2019 (Breakthrough Listen) used a similar 
-approach. We can use their architecture as a starting point.
-
-**Deliverable:** Trained model + inference script + classification results 
-on PROXCEN data.
-
-### 3C. Unsupervised Anomaly Detection
-
-**Goal:** Find signals that do not fit any known category.
-
-**Method:**
-1. Extract all hit features from low-SNR pipeline runs: drift rate, SNR, 
-   bandwidth, duty cycle, persistence across ON/OFF, frequency spacing to 
-   nearest other hit
-2. Apply UMAP or t-SNE dimensionality reduction
-3. Cluster with DBSCAN or HDBSCAN
-4. Outliers (points far from any cluster) are potential novel signals
-5. RFI forms tight clusters due to predictable morphology. Real signals may 
-   look subtly different.
-
-**Deliverable:** `anomaly_detect.py` + outlier list + visualization.
-
----
-
-## Phase 4: Automated Target Survey
-
-**Goal:** Scale the pipeline to many targets with minimal manual intervention.
-
-### 4A. Target Selection
-
-**Sources:**
-- BL priority targets list (nearby stars, exoplanet hosts)
-- TESS objects of interest (confirmed exoplanets within 100 ly)
-- Anomalous stars (Tabby's Star, Boyajian variables)
-- SETI candidate revisit list
-
-**Selection criteria:**
-- Has ON/OFF cadence data available through BL API
-- Mid-res files available (manageable download size)
-- At least 2 observation epochs for cross-correlation
-
-### 4B. Fully Automated Pipeline
-
-**Workflow:**
-1. Query BL API for target
-2. Download all available mid-res cadence files
-3. Run turbo_seti batch search at SNR 10
-4. Run ON/OFF RFI rejection
-5. Apply barycentric correction
-6. Cross-correlate across epochs
-7. Run ML classifier on any candidates
-8. Generate report: hits, candidates, RFI catalog, detection efficiency
-
-**Output:** Per-target summary report with traffic-light scoring:
-- RED: No hits, pipeline validated
-- YELLOW: Hits found but explained by RFI
-- GREEN: Unexplained ON-only candidates across multiple epochs
-
-### 4C. Scheduled Runs
-
-**Option:** Set up as a cron job or scheduled task. Download and process 
-new BL data as it becomes available. BL releases data roughly 6-12 months 
-after observation.
+Feature extraction + UMAP/t-SNE + DBSCAN clustering. Outliers are
+potential novel signals.
 
 ---
 
@@ -392,22 +486,26 @@ after observation.
 
 ---
 
-## Priority Order (Approved 2026-08-08)
-
-We follow this strictly, one step at a time. No skipping ahead.
-Proxima Centauri is our testbed for every phase.
+## Priority Order (Updated 2026-08-13)
 
 1. ~~Signal injection test~~ (Phase 1A) -- COMPLETE
-2. ~~Fine-res full pipeline run~~ -- 57791 scanning, 58020 queued. IN PROGRESS.
-3. ~~Sub-band edge deduplication~~ -- Low priority, not blocking.
-4. ~~RFI characterization~~ (Phase 1B) -- Will harvest from OFF frames after scans complete.
-5. ~~Barycentric correction + cross-epoch~~ (Phase 2A-2B) -- COMPLETE. SQLite-backed, dashboard integrated, SNR post-filter working. Validated with 57791 vs 58020.
-6. **Cross-epoch hit stacking** (Phase 2B) -- False alarm probabilities. Validate with 4 epochs (Feb, Apr, Jul, Sep).
-7. **Incoherent stack** (Phase 2C) -- Deep sensitivity from all 25 PROXCEN epochs. SNR 1.5 -> ~7.5.
-8. **ML training set** (Phase 3A) -- Harvest from PROXCEN OFF frames + synthetic injections.
-9. **CNN classifier** (Phase 3B) -- Train on PROXCEN waterfall tiles. Novel contribution.
-10. **Unsupervised anomaly detection** (Phase 3C) -- Catch what turbo_seti structurally cannot.
-11. **Automated multi-target survey** (Phase 4) -- Scale beyond Proxima to full BL target list.
+2. ~~Fine-res pipeline~~ -- 4 epochs scanned, more downloading. IN PROGRESS.
+3. ~~Barycentric correction + cross-epoch~~ (Phase 2A-2B) -- COMPLETE.
+4. ~~Incoherent stack + two-layer pipeline~~ (Phase 2C) -- COMPLETE.
+   Layer 1 filter, Layer 2 stack, Layer 2.5 RFI scorecard all operational.
+   Validated: 30,211 hits killed at min_epochs=3, zero false candidates.
+5. **Scan remaining PROXCEN epochs** -- More epochs = deeper stacking.
+   4 of 20 available done. Downloading more now.
+6. **Multi-target survey** (Phase 3) -- Generalize beyond PROXCEN.
+   This is the next development priority.
+   - 3A: Target registry (SQLite + dashboard UI)
+   - 3B: Per-target data organization
+   - 3C: Dynamic epoch discovery (kill hardcoded EPOCHS dict)
+   - 3D: Generalized file naming (any telescope/target)
+   - 3E: Dashboard multi-target UI
+   - 3F: Automated per-target pipeline
+7. **ML classification** (Phase 4) -- NICE TO HAVE, not blocking.
+   Revisit if the two-layer scorecard proves insufficient.
 
 ### Full-Band Processing Notes
 
@@ -454,5 +552,5 @@ reduce sub-band count by 90%+ for initial reconnaissance.
 ---
 
 *Document created: 2026-08-06*
-*Last updated: 2026-08-10*
+*Last updated: 2026-08-13*
 *Authors: Carl & Joel*
