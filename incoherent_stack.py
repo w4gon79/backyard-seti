@@ -134,6 +134,48 @@ def load_spectrum_window(h5_path, f_start_mhz, f_stop_mhz):
         return None, None
 
 
+def load_spectrum_window_2d(h5_path, f_start_mhz, f_stop_mhz):
+    """Load a frequency window from an HDF5 file as a 2D time-series.
+    
+    Returns (freqs_mhz, power_2d) where power_2d has shape (n_times, n_channels).
+    Does NOT average across time integrations.
+    Returns (None, None) on failure.
+    """
+    from blimpy import Waterfall
+    
+    try:
+        wf = Waterfall(h5_path, load_data=True, f_start=f_start_mhz, f_stop=f_stop_mhz)
+        data = np.array(wf.data, dtype=np.float64)  # shape: (n_tints, 1, n_chans)
+        
+        if data.ndim == 3:
+            data = data[:, 0, :]  # squeeze IF -> (n_tints, n_chans)
+        
+        # Get frequency axis
+        try:
+            freqs = np.array(wf.container.sf_freqs, dtype=np.float64)
+        except Exception:
+            # Fallback: compute from header
+            h = wf.header
+            fch1 = float(h['fch1'])
+            nchans = int(h['nchans'])
+            foff = float(h['foff'])
+            freqs = np.array([fch1 + i * foff for i in range(nchans)])
+        
+        # Ensure freqs matches data channel count
+        if len(freqs) != data.shape[1]:
+            n = data.shape[1]
+            freqs = np.linspace(f_start_mhz, f_stop_mhz, n)
+        
+        return freqs, data
+    
+    except Exception as e:
+        print(f"    ERROR loading 2D {os.path.basename(h5_path)}: {e}")
+        return None, None
+    except BaseException as e:
+        print(f"    FATAL loading 2D {os.path.basename(h5_path)}: {e}")
+        return None, None
+
+
 def build_common_grid(freq_center_mhz, width_mhz, chan_width_mhz=2.7939677e-6):
     """Build the common barycentric frequency grid.
     
@@ -149,11 +191,16 @@ def build_common_grid(freq_center_mhz, width_mhz, chan_width_mhz=2.7939677e-6):
 
 def process_epoch(epoch_label, epoch_info, target_ra, target_dec,
                   f_start_obs, f_stop_obs, common_grid, telescope='parkes',
-                  progress_callback=None):
+                  progress_callback=None, return_time_series=False):
     """Process one epoch: load ON/OFF pairs, subtract, correct, interpolate.
     
     Returns the stacked (averaged) residual spectrum for this epoch,
     or None on failure.
+    
+    If *return_time_series* is True, also returns a 2D time-series residual
+    (n_times, n_channels) from the first valid ON/OFF pair, interpolated
+    onto the observed frequency grid.  The return value becomes
+    (interpolated, time_series_2d) or (None, None).
     
     If *progress_callback* is provided it is called with a status dict at
     key milestones (pair load, epoch done).
@@ -240,6 +287,8 @@ def process_epoch(epoch_label, epoch_info, target_ra, target_dec,
                 'epoch': epoch_label,
                 'status': 'no_valid_pairs',
             })
+        if return_time_series:
+            return None, None
         return None
     
     # Average residuals across the 3 ON/OFF pairs within this epoch
@@ -275,6 +324,40 @@ def process_epoch(epoch_label, epoch_info, target_ra, target_dec,
             'mean': float(np.mean(interpolated)),
             'std': float(np.std(interpolated)),
         })
+    
+    if return_time_series:
+        # Build 2D time-series residual from the first valid ON/OFF pair.
+        # We need to reload with 2D data for the first pair that produced a residual.
+        time_series_2d = None
+        for pair_idx, (on_seq, off_seq) in enumerate(seqs):
+            on_file = f"Parkes_{mjd_int}_{on_seq}_PROXCEN_S_fine.h5"
+            off_file = f"Parkes_{mjd_int}_{off_seq}_PROXCEN_R_fine.h5"
+            on_path = find_h5(on_file)
+            off_path = find_h5(off_file)
+            if not on_path or not off_path:
+                continue
+            
+            on_freqs_2d, on_2d = load_spectrum_window_2d(on_path, f_start_obs, f_stop_obs)
+            if on_freqs_2d is None:
+                continue
+            off_freqs_2d, off_2d = load_spectrum_window_2d(off_path, f_start_obs, f_stop_obs)
+            if off_freqs_2d is None:
+                continue
+            
+            # Interpolate OFF onto ON frequency grid if needed
+            if len(off_freqs_2d) != len(on_freqs_2d) or not np.allclose(off_freqs_2d, on_freqs_2d, rtol=1e-12):
+                off_2d_interp = np.empty_like(on_2d)
+                for t in range(off_2d.shape[0]):
+                    off_2d_interp[t] = np.interp(on_freqs_2d, off_freqs_2d, off_2d[t])
+                off_2d = off_2d_interp
+            
+            # Ensure same number of time steps (use min)
+            n_times = min(on_2d.shape[0], off_2d.shape[0])
+            residual_2d = on_2d[:n_times] - off_2d[:n_times]
+            time_series_2d = residual_2d
+            break
+        
+        return interpolated, time_series_2d
     
     return interpolated
 

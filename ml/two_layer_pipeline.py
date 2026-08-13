@@ -105,6 +105,83 @@ def run_cross_epoch_filter(scan_dirs, tolerance_hz=10, min_epochs=3, min_snr=8):
     return result
 
 
+def _compute_pulse_periodicity(time_series_2d, common_grid, freq_center, stack_width_mhz):
+    """Extract power curve at peak frequency and compute autocorrelation.
+    
+    Returns dict: {period_s, confidence, duty_cycle, has_periodicity}
+    """
+    if time_series_2d is None or time_series_2d.ndim != 2 or time_series_2d.shape[0] < 4:
+        return {'period_s': None, 'confidence': 0.0, 'duty_cycle': 0.0,
+                'has_periodicity': False}
+    
+    n_times, n_chans = time_series_2d.shape
+    
+    # Find the peak channel in the mean spectrum
+    mean_spec = np.mean(time_series_2d, axis=0)
+    peak_idx = np.argmax(mean_spec)
+    
+    # Extract 1D power curve at the peak channel
+    power_curve = time_series_2d[:, peak_idx]
+    
+    # Mean-subtract and normalize
+    pc_mean = np.mean(power_curve)
+    pc_centered = power_curve - pc_mean
+    pc_std = np.std(pc_centered)
+    if pc_std == 0:
+        return {'period_s': None, 'confidence': 0.0, 'duty_cycle': 0.0,
+                'has_periodicity': False}
+    pc_normalized = pc_centered / pc_std
+    
+    # Compute autocorrelation (positive lags only)
+    autocorr = np.correlate(pc_normalized, pc_normalized, mode='full')
+    # Keep only positive lags (second half), exclude lag=0
+    mid = len(autocorr) // 2
+    pos_lags = autocorr[mid + 1:]
+    lags = np.arange(1, len(pos_lags) + 1)
+    
+    if len(pos_lags) < 2:
+        return {'period_s': None, 'confidence': 0.0, 'duty_cycle': 0.0,
+                'has_periodicity': False}
+    
+    # Find the highest peak in the autocorrelation
+    peak_lag_idx = np.argmax(pos_lags)
+    peak_height = pos_lags[peak_lag_idx]
+    peak_lag = lags[peak_lag_idx]
+    
+    # Noise floor: median absolute deviation of autocorrelation (excluding the peak region)
+    mask = np.ones(len(pos_lags), dtype=bool)
+    # Exclude a window around the peak (+/- 3 lags)
+    win = 3
+    mask[max(0, peak_lag_idx - win):min(len(mask), peak_lag_idx + win + 1)] = False
+    if mask.sum() > 0:
+        noise_floor = np.median(np.abs(pos_lags[mask]))
+    else:
+        noise_floor = np.median(np.abs(pos_lags))
+    
+    if noise_floor > 0:
+        confidence = float(min(peak_height / (noise_floor * 3), 1.0))  # 3x MAD = strong
+    else:
+        confidence = 0.0
+    
+    # Estimate duty cycle: fraction of time the signal is above its mean
+    above = power_curve > pc_mean
+    duty_cycle = float(np.mean(above))
+    
+    # Estimate period in seconds (Parkes typical integration time ~1.07s per record)
+    # The HDF5 time resolution is in the header; we approximate with common Parkes value
+    dt_seconds = 1.07  # seconds per time integration (Parkes fine channel)
+    period_s = float(peak_lag * dt_seconds)
+    
+    has_periodicity = confidence > 0.5 and peak_height > 0.3
+    
+    return {
+        'period_s': period_s if has_periodicity else None,
+        'confidence': round(confidence, 3),
+        'duty_cycle': round(duty_cycle, 3),
+        'has_periodicity': has_periodicity,
+    }
+
+
 def targeted_stack(candidate_freq, stack_width_mhz, epoch_labels, target='PROXCEN',
                    telescope='parkes', n_sigma=5.0):
     """Layer 2: Stack a narrow window around a single candidate frequency.
@@ -130,14 +207,16 @@ def targeted_stack(candidate_freq, stack_width_mhz, epoch_labels, target='PROXCE
     epoch_spectra = []
     used_epochs = []
     epoch_info = []
+    time_series_2d = None  # from first epoch for pulse analysis
     
     for label in epoch_labels:
         if label not in EPOCHS:
             continue
         
-        spec = process_epoch(
+        spec, ts = process_epoch(
             label, EPOCHS[label], target_ra, target_dec,
             f_start_obs, f_stop_obs, common_grid, telescope,
+            return_time_series=True,
         )
         
         if spec is not None:
@@ -151,6 +230,9 @@ def targeted_stack(candidate_freq, stack_width_mhz, epoch_labels, target='PROXCE
                 'median': ep_median,
                 'sigma': ep_sigma,
             })
+            # Keep the first available time-series for pulse analysis
+            if time_series_2d is None and ts is not None:
+                time_series_2d = ts
     
     if len(epoch_spectra) < 2:
         return None
@@ -164,6 +246,20 @@ def targeted_stack(candidate_freq, stack_width_mhz, epoch_labels, target='PROXCE
     
     peaks = find_peaks(stack, common_grid, n_sigma=n_sigma)
     
+    # Compute power concentration scalar
+    if sigma > 0:
+        threshold = median + n_sigma * sigma
+        above = stack[stack > threshold]
+        total_power = np.sum(np.abs(stack - median))
+        peak_power = np.sum(np.abs(above - median))
+        power_concentration = float(peak_power / total_power) if total_power > 0 else 0.0
+    else:
+        power_concentration = 0.0
+    
+    # Compute pulse periodicity from time-series data
+    pulse_periodicity = _compute_pulse_periodicity(
+        time_series_2d, common_grid, freq_center, stack_width_mhz)
+    
     return {
         'freq_center': freq_center,
         'stack_width_mhz': stack_width_mhz,
@@ -176,6 +272,8 @@ def targeted_stack(candidate_freq, stack_width_mhz, epoch_labels, target='PROXCE
         'n_epochs': n,
         'epoch_info': epoch_info,
         'snr_improvement': float(np.sqrt(n)),
+        'power_concentration': power_concentration,
+        'pulse_periodicity': pulse_periodicity,
     }
 
 

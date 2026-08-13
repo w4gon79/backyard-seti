@@ -5,14 +5,15 @@ produce deterministic RFI checks. No ML required.
 
 Checks:
   1. Drift slope: measure signal slope across time. Zero drift = terrestrial.
-  2. Pulse periodicity: autocorrelation of time-series power. Strong
-     periodicity = radar/pulsed RFI.
-  3. Multi-channel structure: count parallel narrowband components.
+  2. Multi-channel structure: count parallel narrowband components.
      Regular spacing = communication sidebands.
-  4. Duty cycle: fraction of time the signal is above threshold.
-     Low duty cycle = pulsed radar. High = continuous beacon.
-  5. Epoch consistency: does the signal appear in ALL epochs?
+  3. SNR analysis: extremely high SNR = strong local transmitter.
+  4. Epoch consistency: does the signal appear in ALL epochs?
      Missing epochs = intermittent RFI.
+  5. Peak width distribution: very narrow = unresolved narrowband RFI.
+  6. Power concentration: fraction of stack power in peaks vs noise.
+  7. Pulse periodicity: autocorrelation of time-series power. Strong
+     periodicity = radar/pulsed RFI.
 
 Output: per-candidate scorecard with flags and an overall RFI probability.
 """
@@ -58,9 +59,8 @@ def analyze_candidate(candidate, stack_result, n_sigma=5.0):
         'rfi_type': None,
     }
     
-    # Note: stack and grid may be empty (stripped for DB storage).
-    # The analysis primarily uses peaks, sigma, median, and candidate metadata.
-    # Only power_concentration check needs the raw stack array.
+    # Power concentration and pulse periodicity are pre-computed during
+    # Layer 2 stacking and stored as scalars/dicts in stack_result.
     
     # ─── Check 1: Drift Slope ─────────────────────────────────────
     # The stacked spectrum is 1D (frequency axis only, time-averaged).
@@ -193,32 +193,63 @@ def analyze_candidate(candidate, stack_result, n_sigma=5.0):
     # ─── Check 6: Stack Power Concentration ───────────────────────
     # What fraction of total stack power is in the top peaks vs noise?
     # High concentration = one dominant strong signal (could be RFI or real)
-    # Only runs if we have the raw stack array (not available in DB-stripped results)
-    if len(stack) > 0 and sigma > 0:
-        threshold = median + n_sigma * sigma
-        above = stack[stack > threshold]
-        total_power = np.sum(np.abs(stack - median))
-        peak_power = np.sum(np.abs(above - median))
-        concentration = peak_power / total_power if total_power > 0 else 0
-        
-        power_check = {
-            'power_concentration': concentration,
-            'flag': False,
-        }
+    # Read the pre-computed scalar from stack_result (computed during Layer 2).
+    concentration = stack_result.get('power_concentration', None)
+    
+    power_check = {
+        'power_concentration': concentration,
+        'flag': False,
+    }
+    if concentration is not None:
         if concentration > 0.5:
             power_check['flag'] = True
             power_check['note'] = f'{concentration*100:.0f}% of power in peaks = dominant signal'
             scorecard['rfi_score'] += 10
         else:
             power_check['note'] = f'{concentration*100:.0f}% of power in peaks'
-        
-        scorecard['checks']['power_concentration'] = power_check
     else:
-        scorecard['checks']['power_concentration'] = {
-            'power_concentration': None,
-            'flag': False,
-            'note': 'Stack array not available (stripped for storage)',
-        }
+        power_check['note'] = 'Power concentration not computed'
+    
+    scorecard['checks']['power_concentration'] = power_check
+    
+    # ─── Check 7: Pulse Periodicity ───────────────────────────────
+    # Autocorrelation of time-series power at the peak frequency channel.
+    # Strong periodicity = radar or pulsed RFI.
+    pulse_data = stack_result.get('pulse_periodicity', {})
+    pulse_check = {
+        'has_periodicity': pulse_data.get('has_periodicity', False),
+        'period_s': pulse_data.get('period_s', None),
+        'confidence': pulse_data.get('confidence', 0.0),
+        'duty_cycle': pulse_data.get('duty_cycle', 0.0),
+        'flag': False,
+    }
+    
+    if pulse_data.get('has_periodicity', False):
+        period = pulse_data.get('period_s', None)
+        conf = pulse_data.get('confidence', 0.0)
+        duty = pulse_data.get('duty_cycle', 0.0)
+        if period is not None and conf > 0.5:
+            pulse_check['flag'] = True
+            pulse_check['note'] = (
+                f'Periodic signal detected: period={period:.2f}s, '
+                f'confidence={conf:.0%}, duty={duty:.0%} = radar/pulsed RFI'
+            )
+            scorecard['flags'].append('PULSE_PERIODICITY')
+            scorecard['rfi_score'] += 25
+            if scorecard['rfi_type'] is None:
+                scorecard['rfi_type'] = 'pulsed_radar'
+        elif period is not None:
+            pulse_check['note'] = (
+                f'Weak periodicity: period={period:.2f}s, '
+                f'confidence={conf:.0%}'
+            )
+            scorecard['rfi_score'] += 5
+        else:
+            pulse_check['note'] = 'No significant periodicity detected'
+    else:
+        pulse_check['note'] = 'No significant periodicity detected'
+    
+    scorecard['checks']['pulse_periodicity'] = pulse_check
     
     # ─── Overall Assessment ───────────────────────────────────────
     scorecard['rfi_score'] = min(scorecard['rfi_score'], 100)

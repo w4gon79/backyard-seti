@@ -1517,6 +1517,16 @@ function buildScorecardDetail(sc, idx) {
     var pVal = p.power_concentration != null ? (p.power_concentration * 100).toFixed(1) + '%' : 'N/A';
     html += buildCheckRow('Power Concentration', pVal, p.flag, p.note);
 
+    // Pulse periodicity
+    var pp = checks.pulse_periodicity || {};
+    var ppVal = 'None';
+    if (pp.has_periodicity && pp.period_s != null) {
+        ppVal = 'period=' + pp.period_s.toFixed(2) + 's (conf=' + (pp.confidence * 100).toFixed(0) + '%, duty=' + (pp.duty_cycle * 100).toFixed(0) + '%)';
+    } else if (pp.confidence != null && pp.confidence > 0) {
+        ppVal = 'No period (conf=' + (pp.confidence * 100).toFixed(0) + '%)';
+    }
+    html += buildCheckRow('Pulse Periodicity', ppVal, pp.flag, pp.note);
+
     html += '</table>';
 
     // Overall assessment

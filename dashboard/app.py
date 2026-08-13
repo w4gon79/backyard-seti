@@ -3931,6 +3931,8 @@ def api_two_layer_run():
                         'used_epochs': sr['used_epochs'],
                         'snr_improvement': sr['snr_improvement'],
                         'epoch_info': sr.get('epoch_info', []),
+                        'power_concentration': sr.get('power_concentration'),
+                        'pulse_periodicity': sr.get('pulse_periodicity'),
                     })
                 except Exception as e:
                     stack_results.append({
