@@ -2569,9 +2569,10 @@ def stack_page():
 @app.route('/api/stack/epochs')
 def api_stack_epochs():
     """List available epochs for stacking."""
+    target = request.args.get('target', 'PROXCEN').upper()
     try:
-        from incoherent_stack import get_available_epochs, EPOCHS
-        epochs = get_available_epochs()
+        from incoherent_stack import get_available_epochs
+        epochs = get_available_epochs(target)
         # Build a summary list with file availability info
         result = []
         for label, info in sorted(epochs.items()):

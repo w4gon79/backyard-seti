@@ -46,8 +46,15 @@ FINE_DIRS = [
     r'G:\seti\data\fine',
 ]
 
-# Epoch definitions: label -> {mjd_int, seqs: [(on_seq, off_seq), ...]}
-EPOCHS = {
+# ---------------------------------------------------------------------------
+# Epoch auto-discovery from data directories
+# ---------------------------------------------------------------------------
+
+import glob as _glob
+import re as _re
+
+# Fallback hardcoded epochs (used if auto-discovery misses something)
+_HARDCODED_EPOCHS = {
     '57791': {
         'mjd_int': 57791,
         'seqs': [('72989', '73331'), ('73670', '74011'), ('74349', '74689')],
@@ -67,13 +74,74 @@ EPOCHS = {
 }
 
 
+def _discover_epochs(target='PROXCEN'):
+    """Scan FINE_DIRS for target's fine-res files and build epoch dict.
+
+    Filename pattern: Parkes_MJD_SEQ_TARGET_[SR]_fine.h5
+    ON/OFF pairs are identified by _S (ON) and _R (OFF) suffixes.
+    Pairs are formed by matching adjacent sequence numbers (S then R).
+    """
+    epochs = {}
+    pat = _re.compile(r'Parkes_(\d+)_(\d+)_' + target + r'_[SR]_fine\.h5$')
+
+    for d in FINE_DIRS:
+        if not os.path.isdir(d):
+            continue
+        for f in os.listdir(d):
+            m = pat.match(f)
+            if not m:
+                continue
+            mjd = m.group(1)
+            seq = m.group(2)
+            is_on = ('_' + target + '_S_') in f
+
+            if mjd not in epochs:
+                epochs[mjd] = {'mjd_int': int(mjd), 'files': [], 'seqs': []}
+            epochs[mjd]['files'].append((seq, is_on, f))
+
+    # Build ON/OFF pairs from discovered files
+    for mjd, info in epochs.items():
+        files = sorted(info['files'], key=lambda x: x[0])
+        pairs = []
+        i = 0
+        while i < len(files) - 1:
+            seq_on, is_on, fname_on = files[i]
+            seq_off, is_off, fname_off = files[i + 1]
+            # Pair pattern: S (ON) followed by R (OFF)
+            if is_on and not is_off:
+                pairs.append((seq_on, seq_off))
+                i += 2
+            else:
+                i += 1
+        info['seqs'] = pairs
+        # Clean up: remove the files list, keep seqs
+        del info['files']
+
+    # Merge with hardcoded epochs for PROXCEN (hardcoded wins if discovery missed pairs)
+    if target.upper() == 'PROXCEN':
+        for mjd, info in _HARDCODED_EPOCHS.items():
+            if mjd not in epochs:
+                epochs[mjd] = info
+            elif not epochs[mjd]['seqs']:
+                epochs[mjd]['seqs'] = info['seqs']
+
+    return dict(sorted(epochs.items()))
+
+
+# Auto-discover at import time (default target)
+EPOCHS = _discover_epochs()
+
+
 # ---------------------------------------------------------------------------
 # Public helpers
 # ---------------------------------------------------------------------------
 
-def get_available_epochs():
-    """Return a copy of the EPOCHS dict (safe for inspection by callers)."""
-    return dict(EPOCHS)
+def get_available_epochs(target='PROXCEN'):
+    """Return a dict of available epochs for the given target.
+
+    Re-runs discovery each call so newly downloaded epochs appear immediately.
+    """
+    return _discover_epochs(target)
 
 
 # ---------------------------------------------------------------------------

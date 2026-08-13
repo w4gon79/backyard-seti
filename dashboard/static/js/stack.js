@@ -77,7 +77,8 @@ document.addEventListener('DOMContentLoaded', function() {
 // ─── Epochs ───────────────────────────────────────────────────────────
 async function loadEpochs() {
     try {
-        var resp = await fetch('/api/stack/epochs');
+        var target = document.getElementById('stack-target').value || 'PROXCEN';
+        var resp = await fetch('/api/stack/epochs?target=' + encodeURIComponent(target));
         var data = await resp.json();
         if (data.error) throw new Error(data.error);
 
@@ -113,6 +114,9 @@ function renderEpochs() {
     }
     updateEpochCount();
 }
+
+// Reload epochs when target changes
+document.getElementById('stack-target').addEventListener('change', loadEpochs);
 
 function updateEpochCount() {
     var cbs = document.querySelectorAll('.epoch-item input[type="checkbox"]');
