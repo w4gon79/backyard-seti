@@ -1432,11 +1432,16 @@ function renderResults(data) {
                               assessment === 'INTERESTING' ? '#66bb6a' : '#546e7a';
             var assessText = assessment.replace(/_/g, ' ');
             var flagText = flags.length > 0 ? flags.join(', ') : '';
-            var assessHtml = '<span style="color:' + assessColor + ';font-weight:600;">' + escapeHtmlLocal(assessText) + '</span>';
+            var assessHtml = '<div class="tl-scorecard-summary" onclick="toggleScorecard(' + i + ')" style="cursor:pointer;" title="Click to expand full scorecard">';
+            assessHtml += '<span style="color:' + assessColor + ';font-weight:600;">' + escapeHtmlLocal(assessText) + '</span>';
             assessHtml += '<span style="color:#546e7a;font-size:0.8em;"> (' + rfiScore + '/100)</span>';
             if (flagText) {
                 assessHtml += '<br><span style="color:#546e7a;font-size:0.75em;">' + escapeHtmlLocal(flagText) + '</span>';
             }
+            assessHtml += '</div>';
+
+            // Build scorecard detail HTML for this candidate
+            var scDetail = buildScorecardDetail(sc, i);
 
             // Build peak list for waterfall display
             var peaksJson = encodeURIComponent(JSON.stringify(sr.peaks || []));
@@ -1451,6 +1456,10 @@ function renderResults(data) {
             html += '<td>' + assessHtml + '</td>';
             html += '<td><button class="btn-waterfall" onclick="showTLWaterfall(' + freq + ', ' + '\'' + peaksJson + '\'' + ')">\u{1f50d} View</button></td>';
             html += '</tr>';
+            // Hidden detail row for scorecard
+            html += '<tr id="tl-scorecard-row-' + i + '" style="display:none;">';
+            html += '<td colspan="9">' + scDetail + '</td>';
+            html += '</tr>';
         }
         html += '</tbody></table>';
     }
@@ -1461,6 +1470,82 @@ function renderResults(data) {
     }
 
     area.innerHTML = html;
+}
+
+window.toggleScorecard = function(idx) {
+    var row = document.getElementById('tl-scorecard-row-' + idx);
+    if (!row) return;
+    row.style.display = row.style.display === 'none' ? '' : 'none';
+};
+
+function buildScorecardDetail(sc, idx) {
+    if (!sc || !sc.checks) return '<div style="padding:12px;color:#546e7a;">No scorecard data available.</div>';
+
+    var checks = sc.checks;
+    var html = '<div style="padding:12px;background:#0a0e14;border-radius:6px;">';
+    html += '<div style="font-size:0.9em;font-weight:600;color:#4fc3f7;margin-bottom:10px;">Detailed RFI Scorecard</div>';
+    html += '<table style="width:100%;border-collapse:collapse;font-size:0.85em;">';
+    html += '<tr style="border-bottom:1px solid #1e3a5f;color:#90a4ae;"><th style="text-align:left;padding:4px;">Check</th><th>Value</th><th>Flag</th><th>Note</th></tr>';
+
+    // Drift
+    var d = checks.drift || {};
+    html += buildCheckRow('Drift Rate', d.drift_rate_hz_s != null ? d.drift_rate_hz_s.toFixed(6) + ' Hz/s' : 'N/A', d.flag, d.note);
+
+    // Multi-channel
+    var m = checks.multi_channel || {};
+    var mVal = m.n_peaks != null ? m.n_peaks + ' peaks' : 'N/A';
+    if (m.median_spacing_hz != null) mVal += ' (' + Math.round(m.median_spacing_hz) + ' Hz spacing)';
+    if (m.spacing_uniformity != null) mVal += ' [' + (m.spacing_uniformity * 100).toFixed(0) + '% uniform]';
+    html += buildCheckRow('Multi-Channel', mVal, m.flag, m.note);
+
+    // SNR
+    var s = checks.snr || {};
+    html += buildCheckRow('Signal SNR', s.max_snr != null ? s.max_snr.toFixed(1) : 'N/A', s.flag, s.note);
+
+    // Epoch coverage
+    var e = checks.epoch_coverage || {};
+    var eVal = e.epochs_present != null ? e.epochs_present + '/' + e.epochs_total + ' (' + (e.coverage * 100).toFixed(0) + '%)' : 'N/A';
+    html += buildCheckRow('Epoch Coverage', eVal, e.flag, e.note);
+
+    // Peak width
+    var w = checks.peak_width || {};
+    var wVal = w.median_width_chans != null ? w.median_width_chans + ' chans (min ' + w.min_width + ', max ' + w.max_width + ')' : 'N/A';
+    html += buildCheckRow('Peak Width', wVal, w.flag, w.note);
+
+    // Power concentration
+    var p = checks.power_concentration || {};
+    var pVal = p.power_concentration != null ? (p.power_concentration * 100).toFixed(1) + '%' : 'N/A';
+    html += buildCheckRow('Power Concentration', pVal, p.flag, p.note);
+
+    html += '</table>';
+
+    // Overall assessment
+    var assessColor = sc.assessment === 'LIKELY_RFI' ? '#ef5350' :
+                      sc.assessment === 'POSSIBLY_RFI' ? '#ff9800' :
+                      sc.assessment === 'NEEDS_REVIEW' ? '#ffeb3b' :
+                      sc.assessment === 'INTERESTING' ? '#66bb6a' : '#546e7a';
+    html += '<div style="margin-top:10px;padding-top:8px;border-top:1px solid #1e3a5f;">';
+    html += '<span style="color:#90a4ae;">Overall: </span>';
+    html += '<span style="color:' + assessColor + ';font-weight:600;">' + escapeHtmlLocal((sc.assessment || 'N/A').replace(/_/g, ' ')) + '</span>';
+    html += '<span style="color:#546e7a;"> | RFI Score: ' + (sc.rfi_score || 0) + '/100</span>';
+    if (sc.rfi_type) {
+        html += '<span style="color:#546e7a;"> | Type: ' + escapeHtmlLocal(sc.rfi_type) + '</span>';
+    }
+    html += '</div>';
+    html += '</div>';
+
+    return html;
+}
+
+function buildCheckRow(name, value, flag, note) {
+    var flagHtml = flag ? '<span style="color:#ef5350;font-weight:600;">FLAGGED</span>' : '<span style="color:#546e7a;">OK</span>';
+    var noteHtml = note ? '<span style="color:#8ab4f8;">' + escapeHtmlLocal(note) + '</span>' : '';
+    return '<tr style="border-bottom:1px solid #112233;">' +
+        '<td style="padding:4px;color:#90a4ae;font-weight:600;">' + escapeHtmlLocal(name) + '</td>' +
+        '<td style="padding:4px;text-align:center;color:#c8c8e0;">' + escapeHtmlLocal(String(value)) + '</td>' +
+        '<td style="padding:4px;text-align:center;">' + flagHtml + '</td>' +
+        '<td style="padding:4px;font-size:0.9em;">' + noteHtml + '</td>' +
+        '</tr>';
 }
 
 function showRunning() {
