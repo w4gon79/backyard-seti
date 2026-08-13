@@ -308,6 +308,11 @@ generalized:
 4. On new target add: query BL API to check data availability
 5. Coordinates also resolvable via SIMBAD/CDS API for arbitrary names
 
+**Current stopgap (2026-08-13):** `TARGET_COORDS` dict in
+`barycentric_correct.py` has 13 hardcoded stars. Works fine for
+PROXCEN and other known targets, but new targets require manual
+addition. The SQLite `targets` table + SIMBAD lookup replaces this.
+
 **Deliverable:** Target registry + dashboard UI for target management.
 
 ### 3B. Per-Target Data Organization
@@ -335,17 +340,26 @@ two_layer_pipeline.py to search per-target directories.
 
 **Deliverable:** Clean per-target data layout + migration script.
 
-### 3C. Dynamic Epoch Discovery
+### 3C. Dynamic Epoch Discovery -- PARTIALLY DONE (2026-08-13)
 
 **Goal:** Replace hardcoded `EPOCHS` dict with dynamic discovery from the
 scan database.
 
-**Design:**
-1. Query `scans` table for all completed scans of a given target
-2. For each scan, extract MJD and ON/OFF sequence numbers from the file
-   headers (or derive from filenames using the telescope field)
-3. Build the epoch mapping at runtime instead of compile time
-4. Validate each epoch has complete ABABAB cadence (3 ON + 3 OFF)
+**What's done:**
+- `incoherent_stack.py` now auto-discovers epochs by scanning `FINE_DIRS`
+  for files matching the target name (e.g. `Parkes_*_TARGET_[SR]_fine.h5`)
+- `/api/stack/epochs` endpoint accepts `?target=` parameter
+- Frontend reloads epoch list when target box changes
+- No more hardcoded MJD/sequence numbers for file discovery
+
+**What's still needed:**
+- Validate each epoch has complete ABABAB cadence (3 ON + 3 OFF) and
+  flag incomplete ones in the UI
+- Cross-reference with scan database to show scan status per epoch
+- Handle multiple telescopes (currently Parkes-only filename pattern)
+
+**Deliverable:** Epoch discovery from DB + file headers, with cadence
+validation.
 
 **Deliverable:** `get_target_epochs(target)` function replacing the
 static `EPOCHS` dict. Used by incoherent_stack, two_layer_pipeline,
