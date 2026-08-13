@@ -3798,22 +3798,24 @@ def api_two_layer_run():
 
             # ─── Determine epochs ──────────────────────────────────
             # Only use epochs that have barycentrically-corrected scan data
-            # Map scan dirs to epoch labels based on which HDF5 files they contain
+            # Map scan dirs to epoch labels by reading the combined_corrected.json
             scan_dirs = get_scan_dirs(target)
             available_epoch_labels = []
             for sd in scan_dirs:
-                # Check which epoch this scan dir corresponds to by looking
-                # at the HDF5 filenames inside
-                import glob as _glob
-                h5_files = _glob.glob(os.path.join(sd, '**/*_fine.h5'), recursive=True)
-                for h5 in h5_files:
-                    fname = os.path.basename(h5)
-                    # Parkes_57791_72989_PROXCEN_S_fine.h5 -> epoch 57791
-                    parts = fname.split('_')
-                    if len(parts) >= 2:
-                        mjd = parts[1]
-                        if mjd in EPOCHS and mjd not in available_epoch_labels:
-                            available_epoch_labels.append(mjd)
+                combined_path = os.path.join(sd, 'barycentric', 'combined_corrected.json')
+                if os.path.isfile(combined_path):
+                    try:
+                        with open(combined_path) as _f:
+                            _combined = json.load(_f)
+                        for _hit in (_combined.get('hits', []) or [])[:50]:
+                            _sf = _hit.get('source_file', '')
+                            _parts = _sf.split('_')
+                            if len(_parts) >= 2:
+                                _mjd = _parts[1]
+                                if _mjd in EPOCHS and _mjd not in available_epoch_labels:
+                                    available_epoch_labels.append(_mjd)
+                    except Exception:
+                        pass
             available_epoch_labels.sort()
             
             if epochs_param:
