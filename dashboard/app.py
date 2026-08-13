@@ -3893,7 +3893,32 @@ def api_two_layer_run():
                 with open(output_path, 'w') as f:
                     json.dump(result_data, f, indent=2, default=str)
 
-                job_state['result'] = result_data
+                # Normalize numpy types for in-memory store
+                job_state['result'] = json.loads(json.dumps(result_data, default=str))
+
+                # Persist to database so results survive restarts
+                try:
+                    from db import get_db
+                    conn = get_db()
+                    slim_for_db = json.loads(json.dumps(result_data, default=str))
+                    conn.execute('''
+                        INSERT INTO two_layer_jobs
+                        (job_id, target, tolerance_hz, min_epochs, min_snr,
+                         stack_width, n_sigma, status, progress, progress_msg,
+                         n_candidates, n_stacked, n_with_peaks, verdict,
+                         result_json, completed_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, 'complete', 100, ?, ?, ?, ?, ?, ?, datetime('now'))
+                    ''', (
+                        job_id, target, tolerance_hz, min_epochs, min_snr,
+                        stack_width, n_sigma, job_state['progress_msg'],
+                        0, 0, 0, 'NO_CANDIDATES',
+                        json.dumps(slim_for_db),
+                    ))
+                    conn.commit()
+                    conn.close()
+                except Exception as e:
+                    print(f'  DB persist error (no-candidate path): {e}')
+
                 return
 
             # Run targeted stacks on each candidate
