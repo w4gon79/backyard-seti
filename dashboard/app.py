@@ -2225,17 +2225,18 @@ def api_waterfall():
         return jsonify({'error': f'File not found: {filepath}'}), 404
 
     try:
-        from blimpy import Waterfall
+        # Header via h5py directly; bitshuffle is registered by importing
+        # hdf5plugin (same plugin blimpy loads internally). Avoids blimpy's
+        # full-row decompression for these ~12 GB fine files.
+        import h5py
+        import hdf5plugin  # noqa: F401
 
-        # Read header first to get channel bandwidth
-        wf_header = Waterfall(full_path, load_data=False)
-        header = wf_header.header
-
-        # Get frequency info
-        fch1 = float(header.get('fch1', 0))
-        nchans = int(header.get('nchans', 1))
-        foff = float(header.get('foff', 0))  # MHz per channel
-        tsamp = float(header.get('tsamp', 18.25))  # seconds
+        with h5py.File(full_path, 'r') as _f:
+            _attrs = _f['data'].attrs
+            fch1 = float(_attrs['fch1'])
+            nchans = int(_attrs['nchans'])
+            foff = float(_attrs['foff'])  # MHz per channel
+            tsamp = float(_attrs.get('tsamp', 18.25))  # seconds
 
         # df in Hz (abs because foff can be negative)
         df_hz = abs(foff) * 1e6
@@ -2251,17 +2252,11 @@ def api_waterfall():
         f_start = max(f_start, f_min_file)
         f_stop = min(f_stop, f_max_file)
 
-        # Load the sub-band data
-        wf = Waterfall(full_path, load_data=True,
-                       f_start=f_start, f_stop=f_stop)
-        data = np.array(wf.data, dtype=np.float32)  # shape: (n_tints, 1, n_chans)
-
-        if data.ndim == 3:
-            data = data[:, 0, :]  # squeeze IF dimension
-        elif data.ndim == 2:
-            pass  # already 2D
-        elif data.ndim == 1:
-            data = data.reshape(1, -1)
+        # Load the sub-band data (direct h5py block reads, no full-file load)
+        from incoherent_stack import load_spectrum_window_2d
+        freqs, data = load_spectrum_window_2d(full_path, f_start, f_stop)
+        if freqs is None:
+            return jsonify({'error': f'Failed to load window {f_start:.6f}-{f_stop:.6f} MHz'}), 500
 
         n_tints, n_chans = data.shape
 
@@ -2295,16 +2290,8 @@ def api_waterfall():
             freqs = freqs[start_idx:end_idx]
             n_chans = target_chans
 
-        # Build frequency axis (MHz) for the loaded sub-band
-        # Waterfall object should have freqs available
-        try:
-            freqs = wf.container.sf_freqs  # MHz
-            freqs = np.array(freqs, dtype=np.float64)
-        except Exception:
-            # Fallback: compute from f_start/f_stop
-            freqs = np.linspace(f_start, f_stop, n_chans)
-
-        # Ensure freqs length matches data
+        # freqs is the exact channel grid from the loader; rebuild only if a
+        # code path above changed n_chans without slicing freqs to match
         if len(freqs) != n_chans:
             freqs = np.linspace(f_start, f_stop, n_chans)
 
