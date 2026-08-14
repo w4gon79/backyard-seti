@@ -157,93 +157,110 @@ def find_h5(filename):
     return None
 
 
+# --- Direct HDF5 window readers (blimpy-free) -------------------------------
+# blimpy's Waterfall(load_data=True, f_start, f_stop) decompresses full time
+# rows of these ~12 GB fine files before trimming to the window: measured
+# 4-8 GB RSS transients per file (dashboard peaked at 16.8 GB during a
+# 100 MHz chunked stack, 2026-08-14). Plain h5py channel slicing needs the
+# bitshuffle plugin registered, hence `import hdf5plugin` (the same one
+# blimpy itself uses); with it, a 1M-channel block reads in ~0.01 s.
+
+_H5_BLOCK_CHANS = 1_048_576  # matches on-disk chunk size of the fine files
+
+
+def _h5_open_window(h5_path, f_start_mhz, f_stop_mhz):
+    """Open a fine .h5 directly and locate the requested channel range.
+
+    Returns (h5file, dataset, ch0, ch1, freqs_mhz) with freqs built from the
+    header (fch1 + i*foff, MHz, float64). Caller must close h5file.
+    Raises on any failure.
+    """
+    import h5py
+    import hdf5plugin  # noqa: F401  registers bitshuffle decompressor
+
+    f = h5py.File(h5_path, 'r')
+    try:
+        ds = f['data']
+        attrs = ds.attrs
+        fch1 = float(attrs['fch1'])   # MHz
+        foff = float(attrs['foff'])   # MHz per channel (sign = direction)
+        nchans = ds.shape[-1]
+
+        i_a = (f_start_mhz - fch1) / foff
+        i_b = (f_stop_mhz - fch1) / foff
+        ch0 = max(0, min(nchans, int(math.floor(min(i_a, i_b)))))
+        ch1 = max(0, min(nchans, int(math.ceil(max(i_a, i_b)))))
+        if ch1 - ch0 < 2:
+            raise ValueError(
+                f'window [{f_start_mhz}, {f_stop_mhz}] MHz outside '
+                f'{os.path.basename(h5_path)} (fch1={fch1}, foff={foff})')
+        freqs = fch1 + np.arange(ch0, ch1, dtype=np.float64) * foff
+        return f, ds, ch0, ch1, freqs
+    except Exception:
+        f.close()
+        raise
+
+
 def load_spectrum_window(h5_path, f_start_mhz, f_stop_mhz):
-    """Load a frequency window from an HDF5 file as a 1D power spectrum.
-    
-    Averages all time integrations to produce a single spectrum.
+    """Load a frequency window from a fine HDF5 file as a 1D power spectrum.
+
+    Direct h5py block reads with streaming time-average: peak RSS is one
+    (n_tints x block_chans) float32 buffer instead of blimpy's full-file
+    load. Averages all time integrations.
     Returns (freqs_mhz, power) or (None, None) on failure.
     """
-    from blimpy import Waterfall
-    
     try:
-        wf = Waterfall(h5_path, load_data=True, f_start=f_start_mhz, f_stop=f_stop_mhz)
-        # float32 end-to-end: a float64 copy of the window doubles peak RSS
-        # for zero scientific benefit at these SNRs
-        data = np.asarray(wf.data, dtype=np.float32)  # shape: (n_tints, 1, n_chans)
-        
-        if data.ndim == 3:
-            data = data[:, 0, :]  # squeeze IF
-        
-        # Average across time integrations -> 1D spectrum
-        spectrum = np.mean(data, axis=0, dtype=np.float32)
-        
-        # Get frequency axis
-        try:
-            freqs = np.array(wf.container.sf_freqs, dtype=np.float64)
-        except Exception:
-            # Fallback: compute from header
-            h = wf.header
-            fch1 = float(h['fch1'])
-            nchans = int(h['nchans'])
-            foff = float(h['foff'])
-            freqs = np.array([fch1 + i * foff for i in range(nchans)])
-        
-        # Ensure freqs matches data length
-        if len(freqs) != len(spectrum):
-            n = len(spectrum)
-            freqs = np.linspace(f_start_mhz, f_stop_mhz, n)
-        
-        return freqs, spectrum
-    
+        f, ds, ch0, ch1, freqs = _h5_open_window(h5_path, f_start_mhz, f_stop_mhz)
     except Exception as e:
-        print(f"    ERROR loading {os.path.basename(h5_path)}: {e}")
+        print(f"    ERROR opening {os.path.basename(h5_path)}: {e}")
         return None, None
-    except BaseException as e:
-        # Some blimpy HDF5 corruption errors are BaseException, not Exception.
-        print(f"    FATAL loading {os.path.basename(h5_path)}: {e}")
+
+    total = np.zeros(ch1 - ch0, dtype=np.float32)
+    n_tints = 0
+    try:
+        try:
+            for c0 in range(ch0, ch1, _H5_BLOCK_CHANS):
+                c1 = min(c0 + _H5_BLOCK_CHANS, ch1)
+                block = ds[:, 0, c0:c1]  # (n_tints, block_chans) float32
+                total[c0 - ch0:c1 - ch0] = block.sum(axis=0, dtype=np.float32)
+            n_tints = ds.shape[0]
+        finally:
+            f.close()
+    except Exception as e:
+        print(f"    ERROR reading {os.path.basename(h5_path)}: {e}")
         return None, None
+
+    if n_tints == 0:
+        return None, None
+    return freqs, total / np.float32(n_tints)
 
 
 def load_spectrum_window_2d(h5_path, f_start_mhz, f_stop_mhz):
-    """Load a frequency window from an HDF5 file as a 2D time-series.
-    
-    Returns (freqs_mhz, power_2d) where power_2d has shape (n_times, n_channels).
-    Does NOT average across time integrations.
-    Returns (None, None) on failure.
+    """Load a frequency window from a fine HDF5 file as a 2D time-series.
+
+    Direct h5py block reads assembled into the final array: no full-file
+    transient, only the returned (n_times, n_chans) float32 array itself.
+    Returns (freqs_mhz, power_2d) or (None, None) on failure.
     """
-    from blimpy import Waterfall
-    
     try:
-        wf = Waterfall(h5_path, load_data=True, f_start=f_start_mhz, f_stop=f_stop_mhz)
-        data = np.asarray(wf.data, dtype=np.float32)  # shape: (n_tints, 1, n_chans)
-        
-        if data.ndim == 3:
-            data = data[:, 0, :]  # squeeze IF -> (n_tints, n_chans)
-        
-        # Get frequency axis
-        try:
-            freqs = np.array(wf.container.sf_freqs, dtype=np.float64)
-        except Exception:
-            # Fallback: compute from header
-            h = wf.header
-            fch1 = float(h['fch1'])
-            nchans = int(h['nchans'])
-            foff = float(h['foff'])
-            freqs = np.array([fch1 + i * foff for i in range(nchans)])
-        
-        # Ensure freqs matches data channel count
-        if len(freqs) != data.shape[1]:
-            n = data.shape[1]
-            freqs = np.linspace(f_start_mhz, f_stop_mhz, n)
-        
-        return freqs, data
-    
+        f, ds, ch0, ch1, freqs = _h5_open_window(h5_path, f_start_mhz, f_stop_mhz)
     except Exception as e:
-        print(f"    ERROR loading 2D {os.path.basename(h5_path)}: {e}")
+        print(f"    ERROR opening 2D {os.path.basename(h5_path)}: {e}")
         return None, None
-    except BaseException as e:
-        print(f"    FATAL loading 2D {os.path.basename(h5_path)}: {e}")
+
+    out = np.empty((ds.shape[0], ch1 - ch0), dtype=np.float32)
+    try:
+        try:
+            for c0 in range(ch0, ch1, _H5_BLOCK_CHANS):
+                c1 = min(c0 + _H5_BLOCK_CHANS, ch1)
+                out[:, c0 - ch0:c1 - ch0] = ds[:, 0, c0:c1]
+        finally:
+            f.close()
+    except Exception as e:
+        print(f"    ERROR reading 2D {os.path.basename(h5_path)}: {e}")
         return None, None
+
+    return freqs, out
 
 
 def build_common_grid(freq_center_mhz, width_mhz, chan_width_mhz=2.7939677e-6):
