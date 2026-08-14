@@ -1462,7 +1462,7 @@ async function pollDownloadStatus() {
         var countChanged = currentCount !== lastDownloadCount;
         var transitionedToInactive = wasActive && !nowActive;
         
-        if (data.queue.length === 0 && !auditRunning) { panel.style.display = 'none'; 
+        if (data.queue.length === 0) { panel.style.display = 'none'; 
             if (countChanged && lastDownloadCount > 0) {
                 lastDownloadCount = currentCount;
                 lastDownloadActive = nowActive;
@@ -1497,22 +1497,7 @@ async function pollDownloadStatus() {
             }
             html += '</div>';
         }
-        // Preserve epoch input across the 10s rebuild
-        var _ae = document.getElementById('audit-epoch-input');
-        var _prevEpoch = _ae ? _ae.value : '';
-        var auditHtml = '<div style="margin-top:8px;border-top:1px solid #2a3b4d;padding-top:8px;">' +
-            '<div style="font-size:0.85em;color:#90a4ae;margin-bottom:4px;">\uD83D\uDD0D Epoch Audit <span style="font-size:0.9em;">(RFI zone scan, ~5 min)</span></div>' +
-            '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">' +
-            '<input type="text" id="audit-epoch-input" placeholder="Epoch e.g. 57910" style="width:130px;padding:4px 8px;background:#1a2634;border:1px solid #2a3b4d;color:#e0e0e0;border-radius:4px;">' +
-            '<button class="btn-small" id="btn-audit-run" onclick="startEpochAudit()">Audit Epoch</button>' +
-            '<span id="audit-status-line" style="font-size:0.85em;color:#90a4ae;"></span>' +
-            '</div></div>';
-        panel.innerHTML = html + '</div>' + auditHtml;
-        if (_prevEpoch) {
-            var _ae2 = document.getElementById('audit-epoch-input');
-            if (_ae2) _ae2.value = _prevEpoch;
-        }
-        auditRenderStatus();   // repaint live audit state after rebuild
+        panel.innerHTML = html + '</div>';
         // Fix 9: Only reload local data when a download just completed or count changed
         if (transitionedToInactive || (countChanged && !nowActive && currentCount < lastDownloadCount)) {
             loadLocalData();
@@ -1566,8 +1551,6 @@ async function auditPollStatus() {
             var pct = d.total > 0 ? Math.round(100 * d.progress / d.total) : 0;
             h = '<span style="color:#4fc3f7;">' + escapeHtml(String(d.epoch)) + ': ' +
                 escapeHtml(d.stage || 'starting') + ' (' + pct + '%)</span>';
-            var panel = document.getElementById('download-panel');
-            if (panel) panel.style.display = 'block';
         } else if (d.error) {
             h = '<span style="color:#ef5350;">error: ' + escapeHtml(d.error) + '</span>';
         } else if (d.result) {
@@ -1581,11 +1564,6 @@ async function auditPollStatus() {
             }
         }
         if (h !== _auditLastHtml) { _auditLastHtml = h; auditRenderStatus(); }
-        // Keep panel visible if audit running even with empty download queue
-        if (auditRunning) {
-            var panel = document.getElementById('download-panel');
-            if (panel) panel.style.display = 'block';
-        }
     } catch(e) {}
 }
 

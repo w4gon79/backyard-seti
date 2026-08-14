@@ -48,6 +48,12 @@
                     <button id="btn-search-bl">Search BL API</button>
                     <button id="btn-search-local" class="btn-secondary">Show Local</button>
                 </div>
+                <div style="margin-top:8px;padding-top:8px;border-top:1px solid #2a3b4d;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+                    <span style="font-size:0.85em;color:#90a4ae;">Epoch Audit</span>
+                    <input type="text" id="audit-epoch-input" placeholder="Epoch e.g. 57910" style="width:130px;padding:4px 8px;background:#1a2634;border:1px solid #2a3b4d;color:#e0e0e0;border-radius:4px;">
+                    <button class="btn-small" id="btn-audit-run" onclick="startEpochAudit()">Audit Epoch</button>
+                    <span id="audit-status-line" style="font-size:0.85em;color:#90a4ae;"></span>
+                </div>
                 <div id="bl-search-results" class="search-results"></div>
                 <div id="local-data-list" class="data-list"></div>
                 <div id="file-selection-controls" class="file-selection-controls" style="display:none;">
@@ -321,6 +327,6 @@
     </div>
 </div>
 
-<script src="/static/js/dashboard.js?v=65"></script>
+<script src="/static/js/dashboard.js?v=66"></script>
 </body>
 </html>
