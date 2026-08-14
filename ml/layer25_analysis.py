@@ -41,7 +41,10 @@ def analyze_candidate(candidate, stack_result, n_sigma=5.0):
     freq = candidate.get('barycentric_freq_mhz', 0)
     candidate_drift = candidate.get('mean_drift_rate', 0)  # Hz/s from turboSETI
     
-    stack = np.array(stack_result.get('stack', []))
+    # None entries (RFI-zoned bins) become NaN with explicit float dtype
+    _raw_stack = stack_result.get('stack', [])
+    stack = np.array([np.nan if v is None else v for v in _raw_stack],
+                     dtype=float)
     grid = np.array(stack_result.get('grid_freqs', []))
     peaks = stack_result.get('peaks', [])
     sigma = stack_result.get('sigma', 1)

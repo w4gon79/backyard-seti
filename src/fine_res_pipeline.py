@@ -29,6 +29,14 @@ import h5py
 import numpy as np
 from pathlib import Path
 
+try:
+    _SETI_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if _SETI_ROOT not in sys.path:
+        sys.path.insert(0, _SETI_ROOT)
+    import rfi_zones
+except Exception:
+    rfi_zones = None
+
 
 def load_checkpoint(out_dir):
     """Load checkpoint.json from output dir if it exists."""
@@ -260,6 +268,17 @@ def process_file(filepath, out_dir, sub_band_chans=8192, overlap_chans=512,
     for i, (f_start, f_stop, ch_start, ch_stop) in enumerate(sub_bands):
         if i < start_sub_band:
             continue
+        # Skip sub-bands fully covered by per-epoch RFI zones
+        if rfi_zones is not None:
+            try:
+                _ep = os.path.basename(filepath).split('_')[1]
+                if rfi_zones.coverage_fraction(f_start, f_stop, _ep) >= 0.99:
+                    if verbose:
+                        print(f"\n  [{i+1}/{len(sub_bands)}] {f_start:.4f}-{f_stop:.4f} "
+                              f"MHz: RFI zone, skipped")
+                    continue
+            except Exception:
+                pass
         sub_name = f"{stem}_sub{i:05d}.h5"
         sub_path = os.path.join(subband_dir, sub_name)
         subband_res_dir = os.path.join(subdir, 'turbo_seti')

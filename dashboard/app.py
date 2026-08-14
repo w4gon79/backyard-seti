@@ -3250,7 +3250,8 @@ def api_stack_spectrum(job_id):
             return jsonify({
                 'job_id': job_id,
                 'grid_freqs': out_freqs.tolist(),
-                'stack_power': out_power.tolist(),
+                # None for NaN bins (RFI-zoned) keeps JSON browser-parseable
+                'stack_power': [None if v != v else v for v in out_power.tolist()],
                 'n_bins': n_total,
                 'n_rendered': len(out_freqs),
             })
@@ -3275,7 +3276,8 @@ def api_stack_spectrum(job_id):
             return jsonify({
                 'job_id': job_id,
                 'grid_freqs': freqs.tolist(),
-                'stack_power': power.tolist(),
+                # None for NaN bins (RFI-zoned) keeps JSON browser-parseable
+                'stack_power': [None if v != v else v for v in power.tolist()],
                 'n_bins': n_total,
                 'n_rendered': len(freqs),
             })

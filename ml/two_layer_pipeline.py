@@ -220,10 +220,14 @@ def targeted_stack(candidate_freq, stack_width_mhz, epoch_labels, target='PROXCE
         )
         
         if spec is not None:
+            if not np.isfinite(spec).any():
+                print(f"  Epoch {label}: fully masked by RFI zones, excluded")
+                continue
             epoch_spectra.append(spec)
             used_epochs.append(label)
-            ep_median = float(np.median(spec))
-            ep_mad = float(np.median(np.abs(spec - ep_median)))
+            _finite = spec[np.isfinite(spec)]
+            ep_median = float(np.median(_finite))
+            ep_mad = float(np.median(np.abs(_finite - ep_median)))
             ep_sigma = float(1.4826 * ep_mad)
             epoch_info.append({
                 'label': label,
@@ -237,11 +241,17 @@ def targeted_stack(candidate_freq, stack_width_mhz, epoch_labels, target='PROXCE
     if len(epoch_spectra) < 2:
         return None
     
-    stack = np.mean(epoch_spectra, axis=0)
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore', RuntimeWarning)
+        stack = np.nanmean(epoch_spectra, axis=0)
     n = len(epoch_spectra)
     
-    median = float(np.median(stack))
-    mad = float(np.median(np.abs(stack - median)))
+    _sfinite = stack[np.isfinite(stack)]
+    if _sfinite.size == 0:
+        return None
+    median = float(np.median(_sfinite))
+    mad = float(np.median(np.abs(_sfinite - median)))
     sigma = float(1.4826 * mad)
     
     peaks = find_peaks(stack, common_grid, n_sigma=n_sigma)
@@ -250,7 +260,7 @@ def targeted_stack(candidate_freq, stack_width_mhz, epoch_labels, target='PROXCE
     if sigma > 0:
         threshold = median + n_sigma * sigma
         above = stack[stack > threshold]
-        total_power = np.sum(np.abs(stack - median))
+        total_power = np.nansum(np.abs(stack - median))
         peak_power = np.sum(np.abs(above - median))
         power_concentration = float(peak_power / total_power) if total_power > 0 else 0.0
     else:
@@ -263,7 +273,7 @@ def targeted_stack(candidate_freq, stack_width_mhz, epoch_labels, target='PROXCE
     return {
         'freq_center': freq_center,
         'stack_width_mhz': stack_width_mhz,
-        'stack': stack.tolist(),
+        'stack': [None if v != v else v for v in stack.tolist()],
         'grid_freqs': common_grid.tolist(),
         'median': median,
         'sigma': sigma,

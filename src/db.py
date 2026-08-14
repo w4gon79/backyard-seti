@@ -76,6 +76,7 @@ def init_db(db_path=None):
                 channel         INTEGER,
                 sub_band        INTEGER,
                 mjd             REAL,
+                rfi_zoned       INTEGER DEFAULT 0,
                 FOREIGN KEY (scan_id) REFERENCES scans(scan_id)
             );
 
@@ -129,6 +130,13 @@ def init_db(db_path=None):
             cols = [r[1] for r in conn.execute('PRAGMA table_info(stack_jobs)').fetchall()]
             if 'epoch_info_json' not in cols:
                 conn.execute('ALTER TABLE stack_jobs ADD COLUMN epoch_info_json TEXT')
+        except Exception:
+            pass
+        # Migration: add rfi_zoned flag to hits if missing
+        try:
+            hcols = [r[1] for r in conn.execute('PRAGMA table_info(hits)').fetchall()]
+            if 'rfi_zoned' not in hcols:
+                conn.execute('ALTER TABLE hits ADD COLUMN rfi_zoned INTEGER DEFAULT 0')
         except Exception:
             pass
         conn.commit()
@@ -243,6 +251,27 @@ def update_scan_barycentric(scan_id, velocity, mjd, ra_hours, dec_deg, telescope
 
 # ─── Hit Operations ──────────────────────────────────────────────────
 
+def _hit_zoned(h):
+    """1 if this hit's frequency falls inside a per-epoch RFI zone."""
+    try:
+        import sys
+        try:
+            import rfi_zones
+        except ImportError:
+            sys.path.insert(0, os.path.dirname(
+                os.path.dirname(os.path.abspath(__file__))))
+            import rfi_zones
+        sf = h.get('source_file', h.get('file', '')) or ''
+        parts = os.path.basename(str(sf)).split('_')
+        if len(parts) > 1 and parts[0] == 'Parkes':
+            f = h.get('freq')
+            if f is not None:
+                return 1 if rfi_zones.in_zone(float(f), parts[1]) else 0
+    except Exception:
+        pass
+    return 0
+
+
 def bulk_insert_hits(scan_id, hits, db_path=None):
     """Insert hits in bulk with transaction batching.
     
@@ -256,8 +285,8 @@ def bulk_insert_hits(scan_id, hits, db_path=None):
             batch = hits[i:i + BATCH]
             conn.executemany('''
                 INSERT INTO hits (scan_id, source_file, on_off, freq, barycentric_freq,
-                                  drift_rate, snr, channel, sub_band, mjd)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                  drift_rate, snr, channel, sub_band, mjd, rfi_zoned)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', [
                 (scan_id,
                  h.get('source_file', h.get('file', '')),
@@ -268,7 +297,8 @@ def bulk_insert_hits(scan_id, hits, db_path=None):
                  h.get('snr', 0),
                  h.get('channel'),
                  h.get('sub_band'),
-                 h.get('mjd'))
+                 h.get('mjd'),
+                 _hit_zoned(h))
                 for h in batch
             ])
             conn.commit()
@@ -302,12 +332,17 @@ def update_barycentric_freqs(scan_id, hit_updates, db_path=None):
 
 
 def get_hits(scan_id, min_snr=0, on_off=None, limit=100, offset=0,
-             order_by='snr DESC', db_path=None):
-    """Query hits with optional filters. Returns list of dicts."""
+             order_by='snr DESC', include_zoned=False, db_path=None):
+    """Query hits with optional filters. Returns list of dicts.
+    
+    include_zoned=False (default) hides hits flagged rfi_zoned=1 from review.
+    """
     conn = get_db(db_path)
     try:
         query = 'SELECT * FROM hits WHERE scan_id = ?'
         params = [scan_id]
+        if not include_zoned:
+            query += ' AND (rfi_zoned IS NULL OR rfi_zoned != 1)'
         if min_snr > 0:
             query += ' AND snr >= ?'
             params.append(min_snr)
@@ -331,12 +366,14 @@ def get_hits(scan_id, min_snr=0, on_off=None, limit=100, offset=0,
         conn.close()
 
 
-def count_hits(scan_id, min_snr=0, on_off=None, db_path=None):
-    """Count hits with optional filters."""
+def count_hits(scan_id, min_snr=0, on_off=None, include_zoned=False, db_path=None):
+    """Count hits with optional filters. Zoned hits hidden unless include_zoned."""
     conn = get_db(db_path)
     try:
         query = 'SELECT COUNT(*) as cnt FROM hits WHERE scan_id = ?'
         params = [scan_id]
+        if not include_zoned:
+            query += ' AND (rfi_zoned IS NULL OR rfi_zoned != 1)'
         if min_snr > 0:
             query += ' AND snr >= ?'
             params.append(min_snr)
@@ -485,6 +522,7 @@ def cross_epoch_search_sql(scan_ids, min_snr=0, tolerance_hz=10, min_epochs=2, d
                 WHERE scan_id IN ({placeholders})
                   AND on_off = 'ON'
                   AND barycentric_freq IS NOT NULL
+                  AND (rfi_zoned IS NULL OR rfi_zoned != 1)
             '''
         if min_snr > 0:
             on_query += f' AND snr >= {min_snr}'
@@ -503,6 +541,7 @@ def cross_epoch_search_sql(scan_ids, min_snr=0, tolerance_hz=10, min_epochs=2, d
             WHERE scan_id IN ({placeholders})
               AND on_off = 'OFF'
               AND barycentric_freq IS NOT NULL
+              AND (rfi_zoned IS NULL OR rfi_zoned != 1)
         '''
         if min_snr > 0:
             off_query += f' AND snr >= {min_snr}'

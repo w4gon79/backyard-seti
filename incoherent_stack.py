@@ -36,6 +36,11 @@ from barycentric_correct import (
     TARGET_COORDS,
 )
 
+try:
+    import rfi_zones
+except ImportError:  # zones optional; stacking works unmasked without them
+    rfi_zones = None
+
 # ---------------------------------------------------------------------------
 # Module-level data -- extensible from external code (e.g. dashboard/app.py)
 # ---------------------------------------------------------------------------
@@ -398,9 +403,26 @@ def process_epoch(epoch_label, epoch_info, target_ra, target_dec,
     avg_residual_sorted = avg_residual[sort_idx]
     
     interpolated = np.interp(common_grid, bary_freqs_sorted, avg_residual_sorted).astype(np.float32)
+
+    # Per-epoch RFI zones (observed frame) mapped through this epoch's
+    # barycentric correction. Masked bins vote NaN in nanmean downstream.
+    _zones = rfi_zones.epoch_zones(epoch_label) if rfi_zones is not None else []
+    if _zones:
+        _m = np.zeros(len(common_grid), dtype=bool)
+        for _z in _zones:
+            _m |= (common_grid >= _z['f_start'] * correction_factor) & \
+                  (common_grid <= _z['f_stop'] * correction_factor)
+        if _m.any():
+            interpolated[_m] = np.nan
+            _zd = ', '.join('{:.3f}-{:.3f}'.format(z['f_start'], z['f_stop'])
+                            for z in _zones)
+            print(f"    RFI zone mask: {int(_m.sum())} bins set NaN "
+                  f"({_zd} MHz obs frame)")
     
     print(f"    Interpolated onto common grid: {len(common_grid)} bins")
-    print(f"    Stack spectrum: mean={np.mean(interpolated):.2e}, std={np.std(interpolated):.2e}")
+    _fin = interpolated[np.isfinite(interpolated)]
+    if _fin.size:
+        print(f"    Stack spectrum: mean={np.mean(_fin):.2e}, std={np.std(_fin):.2e}")
     
     if progress_callback:
         progress_callback({
@@ -408,8 +430,8 @@ def process_epoch(epoch_label, epoch_info, target_ra, target_dec,
             'epoch': epoch_label,
             'status': 'ok',
             'n_pairs': count,
-            'mean': float(np.mean(interpolated)),
-            'std': float(np.std(interpolated)),
+            'mean': float(np.mean(_fin)) if _fin.size else 0.0,
+            'std': float(np.std(_fin)) if _fin.size else 0.0,
         })
     
     if return_time_series:
@@ -454,11 +476,14 @@ def find_peaks(spectrum, grid, n_sigma=5, min_channels=3):
     
     Returns list of dicts with freq_mhz, power, snr, width_chans.
     """
-    median = np.median(spectrum)
-    mad = np.median(np.abs(spectrum - median))
+    finite = spectrum[np.isfinite(spectrum)]
+    if finite.size == 0:
+        return []
+    median = np.median(finite)
+    mad = np.median(np.abs(finite - median))
     sigma = 1.4826 * mad  # convert MAD to sigma
     
-    if sigma == 0:
+    if not np.isfinite(sigma) or sigma == 0:
         return []
     
     threshold = median + n_sigma * sigma
@@ -552,10 +577,14 @@ def process_single_chunk(target, freq_center, width, epoch_labels,
             progress_callback=_epoch_cb if (_cb or progress_callback) else None,
         )
         if spec is not None:
+            if not np.isfinite(spec).any():
+                print(f"  Epoch {label}: window fully masked by RFI zones, excluded")
+                continue
             epoch_spectra.append(spec)
             used_epochs.append(label)
-            ep_median = float(np.median(spec))
-            ep_mad = float(np.median(np.abs(spec - ep_median)))
+            _finite = spec[np.isfinite(spec)]
+            ep_median = float(np.median(_finite))
+            ep_mad = float(np.median(np.abs(_finite - ep_median)))
             ep_sigma = float(1.4826 * ep_mad)
             epoch_info.append({
                 'label': label,
@@ -569,11 +598,18 @@ def process_single_chunk(target, freq_center, width, epoch_labels,
             'error': f'Need at least 2 epochs for stacking, got {len(epoch_spectra)}',
         }
 
-    stack = np.mean(epoch_spectra, axis=0)
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore', RuntimeWarning)
+        stack = np.nanmean(epoch_spectra, axis=0)
     n = len(epoch_spectra)
 
-    median = float(np.median(stack))
-    mad = float(np.median(np.abs(stack - median)))
+    _sfinite = stack[np.isfinite(stack)]
+    if _sfinite.size == 0:
+        return {'success': False,
+                'error': 'All epochs masked by RFI zones in this window'}
+    median = float(np.median(_sfinite))
+    mad = float(np.median(np.abs(_sfinite - median)))
     sigma = float(1.4826 * mad)
 
     peaks = find_peaks(stack, common_grid, n_sigma=n_sigma)
@@ -784,7 +820,7 @@ def run_stack_job(params, progress_callback=None):
                 axes[i].plot(common_grid, epoch_spectra[i],
                              linewidth=0.3, color='blue', alpha=0.5)
                 axes[i].set_ylabel(f'Epoch {label}\nPower')
-                axes[i].axhline(np.median(epoch_spectra[i]),
+                axes[i].axhline(np.nanmedian(epoch_spectra[i]),
                                 color='green', linestyle='--', alpha=0.5)
 
             axes[-1].plot(common_grid, stack, linewidth=0.3, color='red')
@@ -814,6 +850,8 @@ def run_stack_job(params, progress_callback=None):
     if len(common_grid) <= _MAX_INLINE_BINS:
         grid_freqs_list = common_grid.tolist()
         stack_power_list = stack.tolist()
+        # NaN (RFI-zoned bins) -> None so browser JSON.parse doesn't choke
+        stack_power_list = [None if v != v else v for v in stack_power_list]
     else:
         grid_freqs_list, stack_power_list = [], []
     results = {
