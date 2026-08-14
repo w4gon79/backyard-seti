@@ -2725,7 +2725,7 @@ def api_stack_run():
             job_state['progress_msg'] = 'Complete.'
         elif phase == 'error':
             job_state['status'] = 'error'
-            job_state['progress_msg'] = status.get('message', 'Unknown error')
+            job_state['progress_msg'] = status.get('message') or 'Unknown error'
 
     # Run in background thread
     def run_thread():
@@ -2766,19 +2766,11 @@ def api_stack_run():
                 job_state['status'] = 'complete'
             else:
                 job_state['status'] = 'error'
-                job_state['progress_msg'] = result.get('error', 'Unknown error')
+                job_state['progress_msg'] = result.get('error') or 'Unknown error'
 
-            # Save spectrum .npz for Plotly rendering (non-chunked path)
-            if result.get('grid_freqs') and result.get('stack_power'):
-                try:
-                    import numpy as np
-                    npz_path = os.path.join(STACK_OUTPUT_DIR, f'stack_{job_id}.npz')
-                    np.savez_compressed(npz_path,
-                                       grid_freqs=np.array(result['grid_freqs']),
-                                       stack_power=np.array(result['stack_power']))
-                    print(f"  Spectrum saved: {npz_path}")
-                except Exception as e:
-                    print(f"  Spectrum save failed: {e}")
+            # Spectrum artifacts (_grid.npy/_power.npy + meta) are now
+            # saved by incoherent_stack itself for both narrow and chunked
+            # runs; no dashboard-side npz write needed anymore.
 
             # Update DB row with final results
             try:
@@ -2809,9 +2801,23 @@ def api_stack_run():
 
         except Exception as e:
             job_state['status'] = 'error'
-            job_state['progress_msg'] = str(e)
+            # str(MemoryError()) is '' - keep the UI informative
+            job_state['progress_msg'] = str(e) or type(e).__name__
             import traceback
             traceback.print_exc()
+            # Persist the failure so History reflects it instead of
+            # showing the job as 'running' forever
+            try:
+                from db import get_db
+                conn = get_db()
+                conn.execute(
+                    "UPDATE stack_jobs SET status = 'error', progress = ?, "
+                    "progress_msg = ? WHERE job_id = ?",
+                    (job_state['progress'], job_state['progress_msg'], job_id))
+                conn.commit()
+                conn.close()
+            except Exception:
+                pass
 
     thread = _threading.Thread(target=run_thread, daemon=True)
     job_state['thread'] = thread
@@ -2951,7 +2957,7 @@ def api_stack_resume(job_id):
             job_state['progress_msg'] = 'Complete.'
         elif phase == 'error':
             job_state['status'] = 'error'
-            job_state['progress_msg'] = status.get('message', 'Unknown error')
+            job_state['progress_msg'] = status.get('message') or 'Unknown error'
 
     def run_thread():
         try:
@@ -2974,7 +2980,7 @@ def api_stack_resume(job_id):
                 job_state['status'] = 'complete'
             else:
                 job_state['status'] = 'error'
-                job_state['progress_msg'] = result.get('error', 'Unknown error')
+                job_state['progress_msg'] = result.get('error') or 'Unknown error'
 
             try:
                 from db import get_db
@@ -3016,9 +3022,30 @@ def api_stack_resume(job_id):
 
         except Exception as e:
             job_state['status'] = 'error'
-            job_state['progress_msg'] = str(e)
+            # str(MemoryError()) is '' - keep the UI informative
+            job_state['progress_msg'] = str(e) or type(e).__name__
             import traceback
             traceback.print_exc()
+            # Persist the failure. The new job row is only inserted on
+            # success, so if that never ran, restore the ORIGINAL job to
+            # 'error' so its Resume button survives (it owns the chunk dir).
+            try:
+                from db import get_db
+                conn = get_db()
+                cur = conn.execute(
+                    "UPDATE stack_jobs SET status = 'error', progress = ?, "
+                    "progress_msg = ? WHERE job_id = ?",
+                    (job_state['progress'], job_state['progress_msg'],
+                     new_job_id))
+                if cur.rowcount == 0:
+                    conn.execute(
+                        "UPDATE stack_jobs SET status = 'error', "
+                        "progress_msg = ? WHERE job_id = ?",
+                        ('Resume failed: ' + job_state['progress_msg'], job_id))
+                conn.commit()
+                conn.close()
+            except Exception:
+                pass
 
     thread = _threading.Thread(target=run_thread, daemon=True)
     job_state['thread'] = thread
@@ -3154,7 +3181,8 @@ def api_stack_results(job_id):
                 'peaks': peaks,
                 'epoch_info': epoch_info,
                 'grid_n_bins': None,
-                'has_spectrum': os.path.isfile(os.path.join(STACK_OUTPUT_DIR, f'stack_{job_id}.npz')),
+                'has_spectrum': os.path.isfile(os.path.join(STACK_OUTPUT_DIR, f'stack_{job_id}_grid.npy'))
+                                or os.path.isfile(os.path.join(STACK_OUTPUT_DIR, f'stack_{job_id}.npz')),
             })
     except Exception as e:
         pass
@@ -3219,7 +3247,30 @@ def api_stack_spectrum(job_id):
             'n_rendered': len(out_freqs),
         })
 
-    # Fall back to .npz file on disk
+    # Newer runs: mmap-friendly .npy pair written by incoherent_stack
+    # (peak RAM during a view = only the ~50k downsampled points)
+    grid_npy = os.path.join(STACK_OUTPUT_DIR, f'stack_{job_id}_grid.npy')
+    power_npy = os.path.join(STACK_OUTPUT_DIR, f'stack_{job_id}_power.npy')
+    if os.path.isfile(grid_npy) and os.path.isfile(power_npy):
+        try:
+            max_points = 50000
+            freqs_mm = np.load(grid_npy, mmap_mode='r')
+            power_mm = np.load(power_npy, mmap_mode='r')
+            n_total = len(freqs_mm)
+            step = int(np.ceil(n_total / max_points))
+            out_freqs = freqs_mm[::step]
+            out_power = power_mm[::step]
+            return jsonify({
+                'job_id': job_id,
+                'grid_freqs': out_freqs.tolist(),
+                'stack_power': out_power.tolist(),
+                'n_bins': n_total,
+                'n_rendered': len(out_freqs),
+            })
+        except Exception as e:
+            return jsonify({'error': f'Failed to load spectrum: {e}'}), 500
+
+    # Legacy fallback: .npz file on disk (full decompress-load per view)
     npz_path = os.path.join(STACK_OUTPUT_DIR, f'stack_{job_id}.npz')
     if os.path.isfile(npz_path):
         try:
@@ -3265,7 +3316,7 @@ def api_stack_delete(job_id):
         del _stack_jobs[job_id]
 
     # Delete output files
-    for ext in ['.png', '.json', '.npz']:
+    for ext in ['.png', '.json', '.npz', '_grid.npy', '_power.npy', '_meta.json']:
         p = os.path.join(STACK_OUTPUT_DIR, f'stack_{job_id}{ext}')
         if os.path.isfile(p):
             os.remove(p)
@@ -4078,9 +4129,22 @@ def api_two_layer_run():
 
         except Exception as e:
             job_state['status'] = 'error'
-            job_state['progress_msg'] = str(e)
+            # str(MemoryError()) is '' - keep the UI informative
+            job_state['progress_msg'] = str(e) or type(e).__name__
             import traceback
             traceback.print_exc()
+            # Persist the failure so History reflects it after restarts
+            try:
+                from db import get_db
+                conn = get_db()
+                conn.execute(
+                    "UPDATE two_layer_jobs SET status = 'error', "
+                    "progress = ?, progress_msg = ? WHERE job_id = ?",
+                    (job_state['progress'], job_state['progress_msg'], job_id))
+                conn.commit()
+                conn.close()
+            except Exception:
+                pass
 
     thread = _threading.Thread(target=run_thread, daemon=True)
     job_state['thread'] = thread

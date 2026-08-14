@@ -167,13 +167,15 @@ def load_spectrum_window(h5_path, f_start_mhz, f_stop_mhz):
     
     try:
         wf = Waterfall(h5_path, load_data=True, f_start=f_start_mhz, f_stop=f_stop_mhz)
-        data = np.array(wf.data, dtype=np.float64)  # shape: (n_tints, 1, n_chans)
+        # float32 end-to-end: a float64 copy of the window doubles peak RSS
+        # for zero scientific benefit at these SNRs
+        data = np.asarray(wf.data, dtype=np.float32)  # shape: (n_tints, 1, n_chans)
         
         if data.ndim == 3:
             data = data[:, 0, :]  # squeeze IF
         
         # Average across time integrations -> 1D spectrum
-        spectrum = np.mean(data, axis=0)
+        spectrum = np.mean(data, axis=0, dtype=np.float32)
         
         # Get frequency axis
         try:
@@ -213,7 +215,7 @@ def load_spectrum_window_2d(h5_path, f_start_mhz, f_stop_mhz):
     
     try:
         wf = Waterfall(h5_path, load_data=True, f_start=f_start_mhz, f_stop=f_stop_mhz)
-        data = np.array(wf.data, dtype=np.float64)  # shape: (n_tints, 1, n_chans)
+        data = np.asarray(wf.data, dtype=np.float32)  # shape: (n_tints, 1, n_chans)
         
         if data.ndim == 3:
             data = data[:, 0, :]  # squeeze IF -> (n_tints, n_chans)
@@ -361,7 +363,7 @@ def process_epoch(epoch_label, epoch_info, target_ra, target_dec,
     
     # Average residuals across the 3 ON/OFF pairs within this epoch
     ref_freqs = residuals[0][0]
-    avg_residual = np.zeros(len(ref_freqs))
+    avg_residual = np.zeros(len(ref_freqs), dtype=np.float32)
     count = 0
     for freqs, res in residuals:
         if len(freqs) != len(ref_freqs) or not np.allclose(freqs, ref_freqs, rtol=1e-12):
@@ -378,7 +380,7 @@ def process_epoch(epoch_label, epoch_info, target_ra, target_dec,
     bary_freqs_sorted = bary_freqs[sort_idx]
     avg_residual_sorted = avg_residual[sort_idx]
     
-    interpolated = np.interp(common_grid, bary_freqs_sorted, avg_residual_sorted)
+    interpolated = np.interp(common_grid, bary_freqs_sorted, avg_residual_sorted).astype(np.float32)
     
     print(f"    Interpolated onto common grid: {len(common_grid)} bins")
     print(f"    Stack spectrum: mean={np.mean(interpolated):.2e}, std={np.std(interpolated):.2e}")
@@ -480,7 +482,8 @@ def find_peaks(spectrum, grid, n_sigma=5, min_channels=3):
 def process_single_chunk(target, freq_center, width, epoch_labels,
                           target_ra, target_dec, n_sigma, telescope,
                           progress_callback=None, _cb=None,
-                          chunk_index=None, total_chunks=None):
+                          chunk_index=None, total_chunks=None,
+                          spectrum_dir=None):
     """Core stacking logic for a single frequency window.
 
     Shared by both run_stack_job() and run_stack_job_chunked().
@@ -558,9 +561,22 @@ def process_single_chunk(target, freq_center, width, epoch_labels,
 
     peaks = find_peaks(stack, common_grid, n_sigma=n_sigma)
 
+    # Flush spectra to per-chunk .npy files when requested (chunked runs):
+    # nothing big stays resident across chunks
+    grid_path = power_path = None
+    if spectrum_dir is not None:
+        _sd = Path(spectrum_dir)
+        _sd.mkdir(parents=True, exist_ok=True)
+        grid_path = str(_sd / f'chunk_{chunk_index:03d}_grid.npy')
+        power_path = str(_sd / f'chunk_{chunk_index:03d}_power.npy')
+        np.save(grid_path, common_grid)
+        np.save(power_path, stack.astype(np.float32, copy=False))
+
     return {
         'success': True,
         'peaks': peaks,
+        'grid_path': grid_path,
+        'power_path': power_path,
         'stack': stack,
         'common_grid': common_grid,
         'median': median,
@@ -570,6 +586,72 @@ def process_single_chunk(target, freq_center, width, epoch_labels,
         'epoch_info': epoch_info,
         'epoch_spectra': epoch_spectra,
     }
+
+
+# ---------------------------------------------------------------------------
+# Spectrum artifact helpers (mmap-friendly .npy pair + meta)
+# ---------------------------------------------------------------------------
+
+def _save_spectrum_meta(json_path, n_bins):
+    meta_path = json_path.replace('.json', '_meta.json')
+    with open(meta_path, 'w') as f:
+        json.dump({
+            'n_bins': int(n_bins),
+            'dtype_grid': 'float64',
+            'dtype_power': 'float32',
+        }, f)
+
+
+def _save_spectrum_artifacts(json_path, grid, power):
+    """Write grid/power .npy + meta.json next to a job's results JSON."""
+    try:
+        np.save(json_path.replace('.json', '_grid.npy'),
+                np.asarray(grid, dtype=np.float64))
+        np.save(json_path.replace('.json', '_power.npy'),
+                np.asarray(power, dtype=np.float32))
+        _save_spectrum_meta(json_path, len(grid))
+        print(f"Spectrum artifacts saved: {json_path.replace('.json', '_grid.npy')}")
+        return True
+    except Exception as e:
+        print(f"Spectrum artifact save failed: {e}")
+        return False
+
+
+def _merge_chunk_npies(pairs, json_path):
+    """Concatenate per-chunk grid/power .npy files into full-band artifacts.
+
+    Streams through memmaps so peak RAM stays ~one chunk regardless of
+    total band size (207M bins for the full 580 MHz band). Returns the
+    merged bin count, or None on failure.
+    """
+    import numpy.lib.format as _fmt
+    grid_out = json_path.replace('.json', '_grid.npy')
+    power_out = json_path.replace('.json', '_power.npy')
+    try:
+        shapes = []
+        n_total = 0
+        for gp, pp in pairs:
+            g = np.load(gp, mmap_mode='r')
+            shapes.append(g.shape[0])
+            n_total += g.shape[0]
+        grid_mm = _fmt.open_memmap(grid_out, mode='w+', dtype=np.float64,
+                                   shape=(n_total,))
+        power_mm = _fmt.open_memmap(power_out, mode='w+', dtype=np.float32,
+                                    shape=(n_total,))
+        pos = 0
+        for (gp, pp), n in zip(pairs, shapes):
+            grid_mm[pos:pos + n] = np.load(gp, mmap_mode='r')
+            power_mm[pos:pos + n] = np.load(pp, mmap_mode='r')
+            pos += n
+        grid_mm.flush()
+        power_mm.flush()
+        del grid_mm, power_mm
+        _save_spectrum_meta(json_path, n_total)
+        print(f"Merged spectrum: {n_total} bins -> {grid_out}")
+        return n_total
+    except Exception as e:
+        print(f"Spectrum merge failed: {e}")
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -708,7 +790,15 @@ def run_stack_job(params, progress_callback=None):
         except Exception as e:
             print(f"Plot failed: {e}")
 
-    # Assemble results
+    # Assemble results.
+    # Inline grid/power lists only for narrow windows; wide ones are carried
+    # by the on-disk .npy artifacts (see run_stack_job_chunked).
+    _MAX_INLINE_BINS = 1_000_000
+    if len(common_grid) <= _MAX_INLINE_BINS:
+        grid_freqs_list = common_grid.tolist()
+        stack_power_list = stack.tolist()
+    else:
+        grid_freqs_list, stack_power_list = [], []
     results = {
         'success': True,
         'target': target,
@@ -723,8 +813,8 @@ def run_stack_job(params, progress_callback=None):
         'stack_sigma': sigma,
         'epoch_info': epoch_info,
         'grid_n_bins': len(common_grid),
-        'grid_freqs': common_grid.tolist(),
-        'stack_power': stack.tolist(),
+        'grid_freqs': grid_freqs_list,
+        'stack_power': stack_power_list,
     }
 
     # Save JSON (without large arrays for readability)
@@ -735,16 +825,11 @@ def run_stack_job(params, progress_callback=None):
             json.dump(results_compact, f, indent=2)
         print(f"Results saved: {output_json}")
 
-    # Save spectrum data as .npz for Plotly rendering across restarts
+    # Save spectrum as raw .npy pair + meta for Plotly rendering across
+    # restarts (mmap-friendly; the old .npz forced a full decompress-load
+    # per spectrum view)
     if output_json:
-        npz_path = output_json.replace('.json', '.npz')
-        try:
-            np.savez_compressed(npz_path,
-                               grid_freqs=common_grid,
-                               stack_power=stack)
-            print(f"Spectrum saved: {npz_path}")
-        except Exception as e:
-            print(f"Spectrum save failed: {e}")
+        _save_spectrum_artifacts(output_json, common_grid, stack)
 
     _cb({'phase': 'complete', 'results': {k: v for k, v in results.items()
                                           if k != 'peaks'},
@@ -844,23 +929,29 @@ def run_stack_job_chunked(params, progress_callback=None):
 
         # --- Resume support: skip if chunk file exists ---
         if chunk_file.exists():
-            try:
-                with open(chunk_file, 'r') as f:
-                    saved = json.load(f)
-                all_peaks.extend(saved.get('peaks', []))
-                chunk_results.append((i, saved))
-                print(f"\n  Chunk {i+1}/{n_chunks}: SKIPPED (already saved, "
-                      f"{len(saved.get('peaks', []))} peaks)")
-                _cb({
-                    'phase': 'chunk_skipped',
-                    'chunk_index': i,
-                    'total_chunks': n_chunks,
-                    'n_peaks': len(saved.get('peaks', [])),
-                })
-                continue
-            except (json.JSONDecodeError, KeyError) as e:
-                print(f"  Chunk {i+1}: corrupt chunk file, reprocessing ({e})")
-                # Fall through to reprocess
+            _gp = output_dir / f'chunk_{i:03d}_grid.npy'
+            _pp = output_dir / f'chunk_{i:03d}_power.npy'
+            if not (_gp.exists() and _pp.exists()):
+                print(f"  Chunk {i+1}: JSON saved but spectra .npy missing, "
+                      f"reprocessing for spectrum artifacts")
+            else:
+                try:
+                    with open(chunk_file, 'r') as f:
+                        saved = json.load(f)
+                    all_peaks.extend(saved.get('peaks', []))
+                    chunk_results.append((i, saved, str(_gp), str(_pp)))
+                    print(f"\n  Chunk {i+1}/{n_chunks}: SKIPPED (already saved, "
+                          f"{len(saved.get('peaks', []))} peaks)")
+                    _cb({
+                        'phase': 'chunk_skipped',
+                        'chunk_index': i,
+                        'total_chunks': n_chunks,
+                        'n_peaks': len(saved.get('peaks', [])),
+                    })
+                    continue
+                except (json.JSONDecodeError, KeyError) as e:
+                    print(f"  Chunk {i+1}: corrupt chunk file, reprocessing ({e})")
+                    # Fall through to reprocess
 
         # --- Process this chunk ---
         print(f"\n  Chunk {i+1}/{n_chunks}: {chunk_center:.4f} MHz "
@@ -885,6 +976,7 @@ def run_stack_job_chunked(params, progress_callback=None):
             _cb=_cb,
             chunk_index=i,
             total_chunks=n_chunks,
+            spectrum_dir=str(output_dir),
         )
 
         if not chunk_result['success']:
@@ -926,8 +1018,14 @@ def run_stack_job_chunked(params, progress_callback=None):
               f"({len(chunk_result['peaks'])} peaks)")
 
         all_peaks.extend(chunk_result['peaks'])
-        chunk_results.append((i, chunk_data, chunk_result['common_grid'],
-                              chunk_result['stack']))
+        chunk_results.append((i, chunk_data,
+                              chunk_result.get('grid_path'),
+                              chunk_result.get('power_path')))
+        # Spectra are on disk now; drop the array refs so the next chunk's
+        # blimpy load starts from a clean slate
+        chunk_result.pop('stack', None)
+        chunk_result.pop('common_grid', None)
+        chunk_result.pop('epoch_spectra', None)
 
         _cb({
             'phase': 'chunk_done',
@@ -959,7 +1057,19 @@ def run_stack_job_chunked(params, progress_callback=None):
     used_epochs = epoch_labels  # fallback
     n_epochs = len(used_epochs)
 
-    # Combined plot: concatenate chunk spectra into full-band spectrum
+    # --- Merge chunk spectra on disk BEFORE plotting ---
+    # Streams per-chunk .npy files into full-band artifacts through memmaps:
+    # peak RAM ~ one chunk instead of the whole 207M-bin band.
+    _merge_pairs = []
+    for cr in chunk_results:
+        if len(cr) >= 4 and cr[2] and cr[3] \
+                and os.path.isfile(cr[2]) and os.path.isfile(cr[3]):
+            _merge_pairs.append((cr[2], cr[3]))
+    merged_bins = None
+    if output_json and _merge_pairs:
+        merged_bins = _merge_chunk_npies(_merge_pairs, output_json)
+
+    # Combined plot from the merged on-disk spectrum (decimated for draw)
     if output_png:
         _cb({'phase': 'plotting', 'output_png': output_png})
         try:
@@ -967,21 +1077,24 @@ def run_stack_job_chunked(params, progress_callback=None):
             matplotlib.use('Agg')
             import matplotlib.pyplot as plt
 
-            # Collect non-empty chunk grids/spectra for concatenation
-            chunk_grids = []
-            chunk_stacks = []
-            for cr in chunk_results:
-                if len(cr) >= 4:
-                    grid, stack = cr[2], cr[3]
-                    chunk_grids.append(grid)
-                    chunk_stacks.append(stack)
+            grid_mm = power_mm = None
+            if merged_bins:
+                grid_mm = np.load(output_json.replace('.json', '_grid.npy'),
+                                  mmap_mode='r')
+                power_mm = np.load(output_json.replace('.json', '_power.npy'),
+                                   mmap_mode='r')
+            else:
+                _cands = [cr for cr in chunk_results
+                          if len(cr) >= 4 and cr[2] and os.path.isfile(cr[2])]
+                if _cands:
+                    grid_mm = np.load(_cands[0][2], mmap_mode='r')
+                    power_mm = np.load(_cands[0][3], mmap_mode='r')
 
-            if chunk_grids:
-                full_grid = np.concatenate(chunk_grids)
-                full_stack = np.concatenate(chunk_stacks)
-
+            if grid_mm is not None:
+                stride = max(1, len(grid_mm) // 2_000_000)
                 fig, ax = plt.subplots(1, 1, figsize=(16, 4))
-                ax.plot(full_grid, full_stack, linewidth=0.2, color='red')
+                ax.plot(grid_mm[::stride], power_mm[::stride],
+                        linewidth=0.2, color='red')
                 ax.set_ylabel(f'Stacked (N={n_epochs})\nPower')
                 ax.set_xlabel('Barycentric Frequency (MHz)')
 
@@ -1012,33 +1125,11 @@ def run_stack_job_chunked(params, progress_callback=None):
             combined_epoch_info = ei
             break
 
-    # Save spectrum .npz for Plotly rendering across restarts
-    # Concatenate all chunk grids/stacks into full-band spectrum
-    _full_grid = None
-    _full_stack = None
-    if chunk_results:
-        cg, cs = [], []
-        for cr in chunk_results:
-            if len(cr) >= 4:
-                cg.append(cr[2])
-                cs.append(cr[3])
-        if cg:
-            _full_grid = np.concatenate(cg)
-            _full_stack = np.concatenate(cs)
-
-    if output_json and _full_grid is not None:
-        npz_path = output_json.replace('.json', '.npz')
-        try:
-            np.savez_compressed(npz_path,
-                               grid_freqs=_full_grid,
-                               stack_power=_full_stack)
-            print(f"Spectrum saved: {npz_path}")
-        except Exception as e:
-            print(f"Spectrum save failed: {e}")
-
-    # Assemble combined results
-    grid_n_bins = len(_full_grid) if _full_grid is not None else (
+    # Assemble combined results. Wide-band spectra live in the merged .npy
+    # artifacts on disk; /api/stack/spectrum reads them via mmap.
+    grid_n_bins = merged_bins if merged_bins else (
         int(width / 2.7939677e-6))  # fallback estimate
+
     results = {
         'success': True,
         'target': target,
@@ -1053,8 +1144,9 @@ def run_stack_job_chunked(params, progress_callback=None):
         'stack_sigma': combined_sigma,
         'epoch_info': combined_epoch_info,
         'grid_n_bins': grid_n_bins,
-        'grid_freqs': _full_grid.tolist() if _full_grid is not None else [],
-        'stack_power': _full_stack.tolist() if _full_stack is not None else [],
+        'grid_freqs': [],
+        'stack_power': [],
+        'has_spectrum_npy': bool(merged_bins),
         'chunked': True,
         'n_chunks': n_chunks,
         'chunk_size_mhz': chunk_size_mhz,
