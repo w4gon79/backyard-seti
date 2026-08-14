@@ -61,23 +61,37 @@ def save_checkpoint(out_dir, file_index, file_total, file_name,
 def extract_sub_band(filepath, f_start_mhz, f_stop_mhz, out_path):
     """Extract a sub-band from a fine-res file, write clean HDF5.
 
-    blimpy's sub-band loading doesn't update the header, so we write
-    a fresh HDF5 with corrected fch1 and nchans.
+    Direct h5py block reads via incoherent_stack.load_spectrum_window_2d
+    (verified bit-exact vs blimpy). Avoids blimpy's per-call file open and
+    header parsing, and its silent clamping of out-of-range windows to the
+    full 580 MHz band.
     """
-    from blimpy import Waterfall
+    try:
+        from incoherent_stack import load_spectrum_window_2d
+    except ImportError:
+        # Running as a subprocess from src/: put repo root on the path
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+        from incoherent_stack import load_spectrum_window_2d
+    import hdf5plugin  # noqa: F401 - registers bitshuffle filter for h5py
 
-    # Load sub-band
-    wf = Waterfall(filepath, load_data=True, f_start=f_start_mhz, f_stop=f_stop_mhz)
-    data = np.array(wf.data, dtype=np.float32)
+    freqs, data = load_spectrum_window_2d(filepath, f_start_mhz, f_stop_mhz)
+    if freqs is None:
+        raise ValueError(
+            f'Window {f_start_mhz:.9f}-{f_stop_mhz:.9f} MHz outside '
+            f'file coverage: {filepath}')
 
-    # Get original header
-    wf_orig = Waterfall(filepath, load_data=False)
-    header = wf_orig.header
-    foff = float(header['foff'])
-    tsamp = float(header['tsamp'])
+    # Loader returns (n_tints, n_chans); sub-band files keep the
+    # filterbank (n_tints, 1, n_chans) convention turbo_seti expects.
+    data = data[:, np.newaxis, :]
 
-    # Correct sub-band header values
-    sub_fch1 = f_start_mhz
+    # Copy source header attrs; fch1/nchans overridden below. sub_fch1
+    # comes from the loader's actual grid, so header and data always agree.
+    with h5py.File(filepath, 'r') as f_in:
+        header = dict(f_in['data'].attrs)
+        foff = float(header['foff'])
+        tsamp = float(header['tsamp'])
+
+    sub_fch1 = float(freqs[0])
     sub_nchans = data.shape[-1]
 
     # Write clean HDF5
@@ -187,7 +201,6 @@ def process_file(filepath, out_dir, sub_band_chans=8192, overlap_chans=512,
                  max_drift=5.0, snr=5.0, verbose=True,
                  start_sub_band=0, file_index=0, file_total=1):
     """Process a single fine-res file through the pipeline."""
-    from blimpy import Waterfall
 
     filename = os.path.basename(filepath)
     stem = os.path.splitext(filename)[0]
@@ -198,14 +211,15 @@ def process_file(filepath, out_dir, sub_band_chans=8192, overlap_chans=512,
         print(f"  Size: {os.path.getsize(filepath) / 1e9:.2f} GB")
         print(f"{'=' * 70}")
 
-    # Read header
-    wf = Waterfall(filepath, load_data=False)
-    header = wf.header
-    fch1 = float(header['fch1'])
-    foff = float(header['foff'])
-    nchans = int(header['nchans'])
-    tsamp = float(header['tsamp'])
-    n_ints = wf.n_ints_in_file
+    # Read header (direct h5py; hdf5plugin registers bitshuffle)
+    import hdf5plugin  # noqa: F401
+    with h5py.File(filepath, 'r') as f:
+        _attrs = f['data'].attrs
+        fch1 = float(_attrs['fch1'])
+        foff = float(_attrs['foff'])
+        nchans = int(_attrs['nchans'])
+        tsamp = float(_attrs['tsamp'])
+        n_ints = f['data'].shape[0]
 
     fmin = fch1
     fmax = fch1 + foff * (nchans - 1)
