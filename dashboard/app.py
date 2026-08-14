@@ -1489,6 +1489,63 @@ def api_download_status():
     })
 
 
+# ������ Epoch Audit (RFI zone scan) ����������������������������������
+audit_state = {'active': False, 'epoch': None, 'stage': '', 'progress': 0,
+               'total': 0, 'result': None, 'error': None}
+
+
+@app.route('/api/audit/run', methods=['POST'])
+def api_audit_run():
+    """Run epoch_audit.py on one epoch in a background thread."""
+    params = request.json or {}
+    epoch = str(params.get('epoch', '')).strip()
+    if not epoch.isdigit():
+        return jsonify({'error': 'Epoch must be numeric, e.g. 57910'}), 400
+    if audit_state['active']:
+        return jsonify({'error': f"Audit already running for {audit_state['epoch']}"}), 409
+
+    def _cb(st):
+        ph = st.get('phase')
+        if ph == 'scanning':
+            audit_state['progress'] = st.get('window', 0)
+            audit_state['total'] = st.get('total', 0)
+            audit_state['stage'] = (f"pair {st.get('pair', '?')}: window "
+                                    f"{st.get('window', 0)}/{st.get('total', 0)}")
+        elif ph == 'confirming':
+            audit_state['stage'] = 'confirming flagged regions with 2nd pair'
+        elif ph == 'done':
+            audit_state['stage'] = 'done'
+
+    def _run():
+        try:
+            _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            if _root not in sys.path:
+                sys.path.insert(0, _root)
+            import epoch_audit as _ea
+            report = _ea.audit_epoch(epoch, progress_callback=_cb)
+            if report is None:
+                audit_state['error'] = ('no report - epoch not found on disk '
+                                        'or files unreadable')
+            else:
+                audit_state['result'] = report
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            audit_state['error'] = str(e) or type(e).__name__
+        finally:
+            audit_state['active'] = False
+
+    audit_state.update({'active': True, 'epoch': epoch, 'stage': 'starting',
+                        'progress': 0, 'total': 0, 'result': None, 'error': None})
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({'status': 'queued', 'epoch': epoch})
+
+
+@app.route('/api/audit/status')
+def api_audit_status():
+    return jsonify(audit_state)
+
+
 @app.route('/api/download/clear', methods=['POST'])
 def api_download_clear():
     """Clear all completed/errored/cancelled downloads from the queue."""

@@ -27,7 +27,7 @@ import argparse
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from incoherent_stack import EPOCHS, find_h5, load_spectrum_window  # noqa: E402
+from incoherent_stack import find_h5, load_spectrum_window, _discover_epochs  # noqa: E402
 import rfi_zones  # noqa: E402
 
 WINDOW_MHZ = 4.0
@@ -56,25 +56,52 @@ def _pair_residual(mjd_int, on_seq, off_seq, f0, f1):
 
 
 def audit_epoch(label, window_mhz=WINDOW_MHZ, threshold=RATIO_THRESHOLD,
-                confirm_pairs=CONFIRM_PAIRS, dry_run=False, verbose=True):
-    """Audit one epoch. Returns dict report (also written to results/epoch_audit/)."""
-    if label not in EPOCHS:
-        print(f"Unknown epoch {label} (have: {sorted(EPOCHS)})")
+                confirm_pairs=CONFIRM_PAIRS, dry_run=False, verbose=True,
+                progress_callback=None):
+    """Audit one epoch. Returns dict report (also written to results/epoch_audit/).
+
+    progress_callback: optional fn(dict) with {'phase': 'scanning',
+    'window', 'total', 'pair'} / {'phase': 'confirming'} / {'phase': 'done',
+    'report'} for live UI updates.
+    """
+    # Fresh scan every run so newly downloaded epochs are found without
+    # restarting anything
+    epochs = _discover_epochs()
+    if label not in epochs:
+        print(f"Unknown epoch {label} (have: {sorted(epochs)})")
         return None
-    info = EPOCHS[label]
+    info = epochs[label]
     mjd_int, seqs = info['mjd_int'], info['seqs']
     t0 = time.time()
 
-    edges = np.arange(BAND_START, BAND_STOP, window_mhz)
+    # Clamp band edges to this epoch's actual file coverage (e.g. 57791's
+    # files stop at 3324.035 MHz while the sweep default assumes 3444).
+    band_stop = BAND_STOP
+    import h5py
+    for _p in seqs:
+        _hp = find_h5(f"Parkes_{mjd_int}_{_p[0]}_PROXCEN_S_fine.h5")
+        if _hp:
+            with h5py.File(_hp, 'r') as _f:
+                _a = _f['data'].attrs
+                _fmax = float(_a['fch1']) + abs(float(_a['foff'])) * (int(_a['nchans']) - 1)
+            band_stop = min(BAND_STOP, _fmax)
+            break
+
+    edges = np.arange(BAND_START, band_stop, window_mhz)
     n_win = len(edges)
 
     # Pass 1: scan band with the FIRST valid pair
     scan_pair = None
     means = np.full(n_win, np.nan)
     floors = np.full(n_win, np.nan)
-    for pair in seqs:
+    for pair_idx, pair in enumerate(seqs):
         ok = True
         for i, f0 in enumerate(edges):
+            if i % 25 == 0:
+                print(f"  [{label}] window {i}/{n_win} ({f0:.1f} MHz)...", flush=True)
+            if progress_callback:
+                progress_callback({'phase': 'scanning', 'window': i + 1,
+                                   'total': n_win, 'pair': pair_idx + 1})
             r = _pair_residual(mjd_int, pair[0], pair[1], f0, f0 + window_mhz)
             if r is None:
                 ok = False
@@ -120,6 +147,8 @@ def audit_epoch(label, window_mhz=WINDOW_MHZ, threshold=RATIO_THRESHOLD,
 
     if len(flagged) == 0:
         _write_report(report)
+        if progress_callback:
+            progress_callback({'phase': 'done', 'report': report})
         return report
 
     # Merge contiguous flagged windows (allow MERGE_GAP_WIN clean gap)
@@ -138,6 +167,8 @@ def audit_epoch(label, window_mhz=WINDOW_MHZ, threshold=RATIO_THRESHOLD,
                if (edges[e] + window_mhz) - edges[s] >= MIN_ZONE_MHZ]
 
     # Pass 2: confirm each region on the other pairs
+    if progress_callback:
+        progress_callback({'phase': 'confirming'})
     other_pairs = [p for p in seqs if p != scan_pair]
     for f0, f1, r_max in regions:
         votes = 1  # scan pair already voted
@@ -166,6 +197,8 @@ def audit_epoch(label, window_mhz=WINDOW_MHZ, threshold=RATIO_THRESHOLD,
                   f"NOT zoned (needs {confirm_pairs})")
 
     _write_report(report)
+    if progress_callback:
+        progress_callback({'phase': 'done', 'report': report})
     return report
 
 
@@ -187,7 +220,7 @@ def main():
     ap.add_argument('--dry-run', action='store_true')
     args = ap.parse_args()
 
-    labels = [args.epoch] if args.epoch else sorted(EPOCHS)
+    labels = [args.epoch] if args.epoch else sorted(_discover_epochs())
     for label in labels:
         audit_epoch(label, window_mhz=args.window,
                     threshold=args.threshold,

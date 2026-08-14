@@ -74,6 +74,7 @@ document.addEventListener('DOMContentLoaded', () => {
     logInterval = setInterval(pollScanStatus, 3000);
     pollScanStatus();  // Fire immediately so button states sync on page load
     setInterval(pollDownloadStatus, 10000);
+setInterval(auditPollStatus, 5000);
 
     // Waterfall modal close handlers
     document.getElementById('waterfall-close').onclick = closeWaterfallModal;
@@ -1445,6 +1446,7 @@ function showDownloadPanel() {
 
 var lastDownloadCount = -1;
 var lastDownloadActive = false;
+var auditRunning = false;   // keeps Downloads panel open while an audit runs
 
 async function pollDownloadStatus() {
     try {
@@ -1460,7 +1462,7 @@ async function pollDownloadStatus() {
         var countChanged = currentCount !== lastDownloadCount;
         var transitionedToInactive = wasActive && !nowActive;
         
-        if (data.queue.length === 0) { panel.style.display = 'none'; 
+        if (data.queue.length === 0 && !auditRunning) { panel.style.display = 'none'; 
             if (countChanged && lastDownloadCount > 0) {
                 lastDownloadCount = currentCount;
                 lastDownloadActive = nowActive;
@@ -1473,7 +1475,7 @@ async function pollDownloadStatus() {
         panel.style.display = 'block';
         var activeDl = data.queue.filter(function(q) { return q.status === 'downloading' || q.status === 'queued'; });
         var completedDl = data.queue.filter(function(q) { return q.status === 'complete'; });
-        var html = '<div class="panel-header" style="font-size:0.85em;">\u2b07 Downloads</div><div class="download-list">';
+        var html = '<div class="panel-header" style="font-size:0.85em;">\u2b07 Downloads <button class="btn-small" style="float:right;" onclick="clearDownloads()">Clear</button></div><div class="download-list">';
         for (var i = 0; i < data.queue.length; i++) {
             var q = data.queue[i];
             var sc = q.status === 'downloading' ? '#4fc3f7' : q.status === 'complete' ? '#66bb6a' : q.status === 'error' ? '#ef5350' : '#546e7a';
@@ -1495,7 +1497,22 @@ async function pollDownloadStatus() {
             }
             html += '</div>';
         }
-        panel.innerHTML = html + '</div>';
+        // Preserve epoch input across the 10s rebuild
+        var _ae = document.getElementById('audit-epoch-input');
+        var _prevEpoch = _ae ? _ae.value : '';
+        var auditHtml = '<div style="margin-top:8px;border-top:1px solid #2a3b4d;padding-top:8px;">' +
+            '<div style="font-size:0.85em;color:#90a4ae;margin-bottom:4px;">\uD83D\uDD0D Epoch Audit <span style="font-size:0.9em;">(RFI zone scan, ~5 min)</span></div>' +
+            '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">' +
+            '<input type="text" id="audit-epoch-input" placeholder="Epoch e.g. 57910" style="width:130px;padding:4px 8px;background:#1a2634;border:1px solid #2a3b4d;color:#e0e0e0;border-radius:4px;">' +
+            '<button class="btn-small" id="btn-audit-run" onclick="startEpochAudit()">Audit Epoch</button>' +
+            '<span id="audit-status-line" style="font-size:0.85em;color:#90a4ae;"></span>' +
+            '</div></div>';
+        panel.innerHTML = html + '</div>' + auditHtml;
+        if (_prevEpoch) {
+            var _ae2 = document.getElementById('audit-epoch-input');
+            if (_ae2) _ae2.value = _prevEpoch;
+        }
+        auditRenderStatus();   // repaint live audit state after rebuild
         // Fix 9: Only reload local data when a download just completed or count changed
         if (transitionedToInactive || (countChanged && !nowActive && currentCount < lastDownloadCount)) {
             loadLocalData();
@@ -1507,6 +1524,69 @@ async function pollDownloadStatus() {
 
 async function cancelDownload(filename) {
     try { await fetch('/api/download/cancel', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({filename: filename}) }); } catch(e) {}
+}
+
+async function clearDownloads() {
+    try {
+        await fetch('/api/download/clear', { method: 'POST' });
+        pollDownloadStatus();
+    } catch(e) {}
+}
+
+// ������ Epoch Audit ����������������������������������
+async function startEpochAudit() {
+    var inp = document.getElementById('audit-epoch-input');
+    var epoch = inp ? inp.value.trim() : '';
+    if (!/^\d{5}$/.test(epoch)) { alert('Enter a 5-digit epoch number, e.g. 57910'); return; }
+    try {
+        var resp = await fetch('/api/audit/run', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ epoch: epoch }),
+        });
+        var data = await resp.json();
+        if (data.error) { alert(data.error); return; }
+        auditPollStatus();
+    } catch(e) { alert('Audit start failed: ' + e.message); }
+}
+
+var _auditLastHtml = '';
+function auditRenderStatus() {
+    var el = document.getElementById('audit-status-line');
+    if (!el) return;
+    el.innerHTML = _auditLastHtml;
+}
+
+async function auditPollStatus() {
+    try {
+        var resp = await fetch('/api/audit/status');
+        var d = await resp.json();
+        auditRunning = !!d.active;
+        var h = '';
+        if (d.active) {
+            var pct = d.total > 0 ? Math.round(100 * d.progress / d.total) : 0;
+            h = '<span style="color:#4fc3f7;">' + escapeHtml(String(d.epoch)) + ': ' +
+                escapeHtml(d.stage || 'starting') + ' (' + pct + '%)</span>';
+            var panel = document.getElementById('download-panel');
+            if (panel) panel.style.display = 'block';
+        } else if (d.error) {
+            h = '<span style="color:#ef5350;">error: ' + escapeHtml(d.error) + '</span>';
+        } else if (d.result) {
+            var zones = d.result.zones_written || [];
+            if (zones.length > 0) {
+                var rng = zones.map(function(z) { return z.f_start.toFixed(1) + '-' + z.f_stop.toFixed(1); }).join(', ');
+                h = '<span style="color:#ffb74d;">ZONED ' + escapeHtml(rng) + ' MHz (' +
+                    (d.result.flagged_windows || []).length + ' windows flagged)</span>';
+            } else {
+                h = '<span style="color:#66bb6a;">\u2713 CLEAN: no RFI zones found</span>';
+            }
+        }
+        if (h !== _auditLastHtml) { _auditLastHtml = h; auditRenderStatus(); }
+        // Keep panel visible if audit running even with empty download queue
+        if (auditRunning) {
+            var panel = document.getElementById('download-panel');
+            if (panel) panel.style.display = 'block';
+        }
+    } catch(e) {}
 }
 
 async function deleteFile(path, name) {
