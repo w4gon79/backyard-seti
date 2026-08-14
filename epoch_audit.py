@@ -166,13 +166,14 @@ def audit_epoch(label, window_mhz=WINDOW_MHZ, threshold=RATIO_THRESHOLD,
                for s, e in regions
                if (edges[e] + window_mhz) - edges[s] >= MIN_ZONE_MHZ]
 
-    # Pass 2: confirm each region on the other pairs
+    # Pass 2: confirm each region on ALL other pairs (not just the first:
+    # 57910 had pair2 clean + pair3 dirty, and first-only sampling missed it)
     if progress_callback:
         progress_callback({'phase': 'confirming'})
     other_pairs = [p for p in seqs if p != scan_pair]
     for f0, f1, r_max in regions:
         votes = 1  # scan pair already voted
-        for pair in other_pairs[:max(0, confirm_pairs - 1)]:
+        for pair in other_pairs:
             r = _pair_residual(mjd_int, pair[0], pair[1], f0, f1)
             if r is None:
                 continue
