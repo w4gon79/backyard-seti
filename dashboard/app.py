@@ -2496,12 +2496,11 @@ def api_targets_delete(name):
 @app.route('/api/barycentric/targets')
 def api_barycentric_targets():
     """Return known target coordinates for the dropdown.
-    Phase 3A: registry targets merged in first; registry wins on collision,
-    legacy TARGET_COORDS entries fill the remainder."""
-    from barycentric_correct import TARGET_COORDS, TELESCOPE_LOCATIONS
+    Registry-only: the SQLite target registry is the single source of
+    truth for target coordinates (legacy dict retired 2026-08-15)."""
+    from barycentric_correct import TELESCOPE_LOCATIONS
     
     targets = []
-    _seen = set()
     try:
         from target_registry import list_targets
         for t in list_targets():
@@ -2509,13 +2508,8 @@ def api_barycentric_targets():
                 continue
             targets.append({'name': t['name'], 'ra_hours': t['ra_hours'],
                             'dec_deg': t['dec_deg']})
-            _seen.add(t['name'].upper())
     except Exception as e:
-        print(f'[registry] list failed, dict fallback: {e}')
-    for name, (ra, dec) in sorted(TARGET_COORDS.items()):
-        if name.upper() in _seen:
-            continue
-        targets.append({'name': name, 'ra_hours': ra, 'dec_deg': dec})
+        print(f'[registry] list failed: {e}')
     
     telescopes = []
     for name, info in sorted(TELESCOPE_LOCATIONS.items()):

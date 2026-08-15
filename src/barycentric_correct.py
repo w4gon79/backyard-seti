@@ -79,21 +79,10 @@ TELESCOPE_ID_MAP = {
 
 # ─── Target Coordinate Database ───────────────────────────────────────
 
-TARGET_COORDS = {
-    'PROXCEN': (14.49527778, -62.67948889),   # Proxima Centauri
-    'PROXIMA_CEN': (14.49527778, -62.67948889),
-    'TAU_CETI': (1.73111111, -15.93747222),
-    'KIC_8462852': (20.06903750, 44.45683333), # Tabby's Star
-    'TABBY': (20.06903750, 44.45683333),
-    'HIP113357': (22.78750000, -16.26666667),
-    'HD164595': (18.01208333, 39.14138889),
-    'TRAPPIST1': (23.06283333, -5.04138889),
-    'WOLF359': (10.93450000, 7.01450000),
-    'BARNARDS_STAR': (17.95194444, 4.69450000),
-    'GLIESE581': (15.32541667, -7.72000000),
-    'HD95735': (11.03250000, 33.28600000),
-    'GJ411': (11.03250000, 33.28600000),
-}
+# Legacy TARGET_COORDS dict retired 2026-08-15: the SQLite target
+# registry (target_registry.py) is the single source of truth for target
+# coordinates. resolve_target_coords() below resolves manual coords >
+# registry; no static fallback remains.
 
 
 # ─── Core Barycentric Correction ──────────────────────────────────────
@@ -238,8 +227,9 @@ def resolve_target_coords(target_name, ra=None, dec=None):
     """
     Resolve target coordinates from name if RA/Dec not provided.
     
-    Returns (ra_hours, dec_deg, source) where source is 'manual',
-    'registry' (Phase 3A SQLite targets table), or 'database' (legacy dict).
+    Returns (ra_hours, dec_deg, source) where source is 'manual' or
+    'registry' (SQLite targets table), or (None, None, None) if the
+    target is unknown.
     """
     if ra is not None and dec is not None:
         return float(ra), float(dec), 'manual'
@@ -253,11 +243,8 @@ def resolve_target_coords(target_name, ra=None, dec=None):
     except Exception:
         pass
     
-    # Legacy static dict fallback
-    for key, (db_ra, db_dec) in TARGET_COORDS.items():
-        if key.upper() == target_name.upper().replace(' ', '_'):
-            return db_ra, db_dec, 'database'
-    
+    # Legacy static dict fallback removed 2026-08-15: registry is the
+    # single source of truth; unknown targets resolve to None.
     return None, None, None
 
 

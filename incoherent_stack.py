@@ -33,7 +33,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src
 from barycentric_correct import (
     compute_barycentric_velocity,
     extract_mjd_from_filename,
-    TARGET_COORDS,
+    resolve_target_coords,
 )
 
 try:
@@ -805,13 +805,12 @@ def run_stack_job(params, progress_callback=None):
     _cb({'phase': 'start', 'target': target, 'freq_center': freq_center,
          'width': width, 'epochs': epoch_labels})
 
-    # Resolve target coordinates
-    target_key = target.upper().replace(' ', '_')
-    if target_key not in TARGET_COORDS:
-        msg = f"Unknown target: {target}"
+    # Resolve target coordinates (registry-first; legacy dict retired)
+    target_ra, target_dec, _src = resolve_target_coords(target)
+    if target_ra is None:
+        msg = f"Unknown target: {target} (not in target registry)"
         _cb({'phase': 'error', 'message': msg})
         return {'success': False, 'error': msg}
-    target_ra, target_dec = TARGET_COORDS[target_key]
 
     # Use shared helper for the core stacking logic
     _cb({'phase': 'stacking', 'n_epochs': len(epoch_labels)})
@@ -997,15 +996,12 @@ def run_stack_job_chunked(params, progress_callback=None):
          'width': width, 'epochs': epoch_labels,
          'chunked': True, 'chunk_size_mhz': chunk_size_mhz})
 
-    # Resolve target coordinates
-    target_key = target.upper().replace(' ', '_')
-    if target_key not in TARGET_COORDS:
-        msg = f"Unknown target: {target}"
+    # Resolve target coordinates (registry-first; legacy dict retired)
+    target_ra, target_dec, _src = resolve_target_coords(target)
+    if target_ra is None:
+        msg = f"Unknown target: {target} (not in target registry)"
         _cb({'phase': 'error', 'message': msg})
         return {'success': False, 'error': msg}
-    target_ra, target_dec = TARGET_COORDS[target_key]
-
-    # Compute chunk boundaries
     full_band_start = freq_center - width / 2
     full_band_end = freq_center + width / 2
     n_chunks = max(1, math.ceil(width / chunk_size_mhz))
@@ -1292,7 +1288,6 @@ def main():
     epoch_labels = args.epochs if args.epochs else list(EPOCHS.keys())
 
     # Build output paths (CLI mode -- write to CWD)
-    target_key = args.target.upper().replace(' ', '_')
     stem = f'stack_{args.target}_{args.freq_center:.0f}MHz_{args.width:.0f}MHz'
 
     output_png = f'{stem}.png' if args.plot else None
@@ -1310,7 +1305,7 @@ def main():
     }
 
     # Print header info (CLI nicety)
-    target_ra, target_dec = TARGET_COORDS[target_key]
+    target_ra, target_dec, _src = resolve_target_coords(args.target)
     print(f"Target: {args.target} (RA={target_ra}h, Dec={target_dec}deg)")
     print(f"Epochs: {epoch_labels}")
     common_grid = build_common_grid(args.freq_center, args.width)
