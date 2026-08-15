@@ -262,8 +262,14 @@ function updateSkyMapInfo() {
     info.innerHTML = html;
 }
 
-// Also support BL API search click plotting a marker
-function plotTargetOnMap(name, ra, dec) {
+// Also support BL API search click plotting a marker.
+// Click behavior toggles: clicking a target already on the map removes
+// it. forceAdd (search auto-plot) always adds.
+function plotTargetOnMap(name, ra, dec, forceAdd) {
+    if (!forceAdd && celestialTargets[name] !== undefined) {
+        removeTargetMarker(name);
+        return;
+    }
     addTargetMarker(name, ra, dec);
 }
 
@@ -316,7 +322,7 @@ async function searchBL() {
                 var raHours = typeof raVal === 'number' ? raVal / 15.0 : parseRA(raVal);
                 var decDeg = typeof decVal === 'number' ? decVal : parseDec(decVal);
                 if (raHours !== null && decDeg !== null) {
-                    plotTargetOnMap(target.toUpperCase(), raHours, decDeg);
+                    plotTargetOnMap(target.toUpperCase(), raHours, decDeg, true);
                 }
             }
             renderBLResults();
