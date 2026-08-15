@@ -57,6 +57,7 @@ document.addEventListener('DOMContentLoaded', () => {
     loadScansList();  // Load scan history, then load results for most recent
 
     document.getElementById('btn-search-bl').onclick = searchBL;
+document.getElementById('btn-blcatalog').onclick = blCatalogBrowse;
     document.getElementById('btn-search-local').onclick = loadLocalData;
     document.getElementById('btn-start-scan').onclick = startScan;
     document.getElementById('btn-resume-scan').onclick = resumeScan;
@@ -325,6 +326,132 @@ async function searchBL() {
     } catch(e) {
         resultsDiv.innerHTML = '<p style="color:#ef5350;">Error: ' + e.message + '</p>';
     }
+}
+
+// --- BL Catalog: open browse over the cached sweep ----------------------
+
+var blCatalogTimer = null;
+var blSweepWasActive = false;
+
+async function blCatalogBrowse() {
+    var resultsDiv = document.getElementById('bl-search-results');
+    var q = document.getElementById('target-input').value.trim();
+    var url = '/api/blcatalog?fine_only=1&min_epochs=' + (window._blCatMinEp || 0) +
+              (window._blCatOnOff ? '&require_onoff=1' : '') +
+              (q ? '&q=' + encodeURIComponent(q) : '');
+    resultsDiv.innerHTML = '<p style="color:#8ab4f8;">Loading catalog...</p>';
+    try {
+        var resp = await fetch(url);
+        var d = await resp.json();
+        if (d.error) {
+            resultsDiv.innerHTML = '<p style="color:#ef5350;">' + d.error + '</p>';
+            return;
+        }
+        renderBLCatalog(d);
+    } catch (e) {
+        resultsDiv.innerHTML = '<p style="color:#ef5350;">' + e.message + '</p>';
+        return;
+    }
+    if (!blCatalogTimer) blCatalogTimer = setInterval(blCatalogPoll, 5000);
+    blCatalogPoll();
+}
+
+async function blCatalogPoll() {
+    try {
+        var r = await fetch('/api/blcatalog/sweep/status');
+        var s = await r.json();
+        var el = document.getElementById('blcat-sweepline');
+        if (!el) return;
+        if (s.active) {
+            blSweepWasActive = true;
+            var pct = s.total > 0 ? Math.round(100 * s.done / s.total) : 0;
+            el.innerHTML = '<span style="color:#4fc3f7;">Sweeping BL: ' + s.done + '/' +
+                s.total + ' (' + pct + '%)</span>, ' + s.catalog_rows + ' cataloged' +
+                (s.errors ? ', <span style="color:#ffb74d;">' + s.errors + ' errors</span>' : '');
+        } else if (blSweepWasActive) {
+            el.innerHTML = 'Sweep done: ' + s.catalog_rows + ' targets cataloged, ' +
+                s.catalog_fine_rows + ' with fine-res' +
+                (s.last_error ? ' <span style="color:#ffb74d;">(last: ' +
+                 escapeHtml(String(s.last_error).slice(0, 70)) + ')</span>' : '');
+            if (blCatalogTimer) { clearInterval(blCatalogTimer); blCatalogTimer = null; }
+            blSweepWasActive = false;
+            blCatalogBrowse();
+        } else {
+            el.innerHTML = 'Catalog: ' + s.catalog_rows + ' targets, ' +
+                s.catalog_fine_rows + ' with fine-res.' +
+                (s.catalog_rows === 0 ? ' Click Resweep to build it (one-time, runs a few hours in the background; resumable).' : '');
+            if (blCatalogTimer) { clearInterval(blCatalogTimer); blCatalogTimer = null; }
+        }
+    } catch (e) { /* transient */ }
+}
+
+function renderBLCatalog(d) {
+    var resultsDiv = document.getElementById('bl-search-results');
+    var rows = d.targets || [];
+    var html = '<div class="bl-summary">';
+    html += '<span style="color:#66bb6a;font-weight:600;">' + rows.length +
+            ' fine-res targets</span>' +
+            ' <span style="color:#90a4ae;">(of ' + d.total_rows + ' cataloged)</span>';
+    html += '</div>';
+    html += '<div class="bl-filters">';
+    html += '<label>Min epochs:</label><select onchange="window._blCatMinEp=parseInt(this.value);blCatalogBrowse()">';
+    [0, 1, 2, 3, 5, 10].forEach(function (n) {
+        html += '<option value="' + n + '"' + ((window._blCatMinEp || 0) === n ? ' selected' : '') + '>' + n + '</option>';
+    });
+    html += '</select>';
+    html += '<label style="margin-left:8px;"><input type="checkbox" ' +
+            (window._blCatOnOff ? 'checked' : '') +
+            ' onchange="window._blCatOnOff=this.checked;blCatalogBrowse()"> ON+OFF cadence</label>';
+    html += '<button class="btn-small" style="margin-left:8px;" onclick="blCatalogSweep()">Resweep</button>';
+    html += '</div>';
+    html += '<div id="blcat-sweepline" style="font-size:0.8em;color:#90a4ae;margin:4px 0;"></div>';
+    html += '<table class="bl-table"><thead><tr><th>Target</th><th>Fine</th><th>Epochs</th><th>ON/OFF</th><th>Total files</th><th>Fine GB</th><th></th></tr></thead><tbody>';
+    for (var i = 0; i < rows.length; i++) {
+        var t = rows[i];
+        html += '<tr>' +
+            '<td style="color:#4fc3f7;">' + escapeHtml(t.target) + '</td>' +
+            '<td>' + t.n_fine + '</td>' +
+            '<td>' + t.fine_epochs + '</td>' +
+            '<td>' + t.fine_on + '/' + t.fine_off + '</td>' +
+            '<td style="color:#90a4ae;">' + t.n_files + '</td>' +
+            '<td>' + ((t.fine_bytes || 0) / 1e9).toFixed(1) + '</td>' +
+            '<td><button class="btn-small" onclick="blCatalogAdd(\'' + t.target.replace(/'/g, '') + '\')">Add to Registry</button></td>' +
+            '</tr>';
+    }
+    html += '</tbody></table>';
+    if (rows.length === 0) {
+        html += '<p style="color:#546e7a;">No targets match. ';
+        if (d.total_rows === 0) html += 'Catalog is empty: click Resweep to build it.';
+        html += '</p>';
+    }
+    resultsDiv.innerHTML = html;
+}
+
+async function blCatalogSweep() {
+    try {
+        var resp = await fetch('/api/blcatalog/sweep', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({action: 'start'})
+        });
+        var d = await resp.json();
+        if (d.error) { alert(d.error); return; }
+        blSweepWasActive = true;
+        if (!blCatalogTimer) blCatalogTimer = setInterval(blCatalogPoll, 5000);
+        blCatalogPoll();
+    } catch (e) { alert('Sweep failed: ' + e.message); }
+}
+
+async function blCatalogAdd(name) {
+    try {
+        var resp = await fetch('/api/registry', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({name: name})
+        });
+        var d = await resp.json();
+        if (d.error) { alert(name + ': ' + d.error); return; }
+        alert(name + ' added to registry (coords via ' +
+              (d.target.coord_source || '?') + ').');
+    } catch (e) { alert('Add failed: ' + e.message); }
 }
 
 function getFilteredBL() {

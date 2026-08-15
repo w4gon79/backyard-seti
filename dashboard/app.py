@@ -350,6 +350,73 @@ def api_blsearch():
         return jsonify({'error': str(e)}), 500
 
 
+# ---------------------------------------------------------------------------
+# API: BL Catalog (cached open browse over every BL target)
+# ---------------------------------------------------------------------------
+
+@app.route('/api/blcatalog')
+def api_blcatalog():
+    """Browse the cached BL catalog (populated by the background sweep)."""
+    from bl_catalog import ensure_table
+    from db import get_db
+    ensure_table()
+    q = request.args.get('q', '').strip()
+    min_epochs = request.args.get('min_epochs', 0, type=int)
+    require_onoff = request.args.get('require_onoff', '0') == '1'
+    fine_only = request.args.get('fine_only', '0') == '1'
+    conn = get_db()
+    try:
+        total_rows = conn.execute(
+            'SELECT COUNT(*) FROM bl_catalog').fetchone()[0]
+        sql = ('SELECT * FROM bl_catalog '
+               'WHERE n_fine >= ? AND fine_epochs >= ?')
+        args = [1 if fine_only else 0, min_epochs]
+        if require_onoff:
+            sql += ' AND fine_on > 0 AND fine_off > 0'
+        if q:
+            sql += ' AND UPPER(target) LIKE UPPER(?)'
+            args.append(f'%{q}%')
+        sql += ' ORDER BY n_fine DESC, fine_epochs DESC, target LIMIT 500'
+        rows = [dict(r) for r in conn.execute(sql, args).fetchall()]
+    finally:
+        conn.close()
+    return jsonify({'targets': rows, 'total_rows': total_rows})
+
+
+@app.route('/api/blcatalog/sweep', methods=['POST'])
+def api_blcatalog_sweep():
+    """Start/cancel the background BL catalog sweep."""
+    from bl_catalog import ensure_table, start_sweep, sweep_state
+    ensure_table()
+    params = request.json or {}
+    action = params.get('action', 'start')
+    if action == 'cancel':
+        sweep_state['cancel'] = True
+        return jsonify({'success': True, 'cancelling': True})
+    if action != 'start':
+        return jsonify({'error': 'unknown action'}), 400
+    started, info = start_sweep(force=bool(params.get('force')))
+    if not started:
+        return jsonify({'error': str(info), 'active': True}), 409
+    return jsonify({'started': True, 'queued': info})
+
+
+@app.route('/api/blcatalog/sweep/status')
+def api_blcatalog_sweep_status():
+    from bl_catalog import ensure_table, sweep_state
+    from db import get_db
+    ensure_table()
+    conn = get_db()
+    try:
+        n = conn.execute('SELECT COUNT(*) FROM bl_catalog').fetchone()[0]
+        n_fine = conn.execute(
+            'SELECT COUNT(*) FROM bl_catalog WHERE n_fine > 0').fetchone()[0]
+    finally:
+        conn.close()
+    return jsonify({**sweep_state, 'catalog_rows': n,
+                    'catalog_fine_rows': n_fine})
+
+
 # ─── API: Scan History ────────────────────────────────────────────────
 
 def _load_scan_meta(scan_dir):
