@@ -48,3 +48,6 @@ desktop.ini
 *.log
 
 .env
+
+# Local notes (untracked)
+Notes.txt
