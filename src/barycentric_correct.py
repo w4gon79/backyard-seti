@@ -220,6 +220,20 @@ def get_coords_from_h5(h5_path):
     return None, None, None
 
 
+def _h5_search_dirs(target_name=None):
+    """Data dirs searched for h5 files: per-target archive (3B) first,
+    then staging/legacy. Relative dirs are seti_root-relative; D: dirs
+    are absolute."""
+    dirs = ['data/fine', 'data/mid', 'data/h5']
+    t = (str(target_name).strip().upper().replace(' ', '_')
+         if target_name else '')
+    if t:
+        dirs.insert(0, os.path.join('data', t))
+        dirs.append(os.path.join(r'D:\seti_data', t, 'fine'))
+    dirs += ['data/PROXCEN', r'D:\seti_data\fine']
+    return dirs
+
+
 def resolve_target_coords(target_name, ra=None, dec=None):
     """
     Resolve target coordinates from name if RA/Dec not provided.
@@ -305,8 +319,11 @@ def correct_hits_file(hits_path, ra_hours=None, dec_deg=None, telescope='parkes'
         if h5_path is None or not os.path.isfile(h5_path):
             # Search common data directories
             seti_root = Path(hits_path).parents[3]  # results/scan/file_stem/hits.json -> seti root
-            for d in ['data/fine', 'data/mid', 'data/h5', 'data/PROXCEN']:
-                candidate = os.path.join(seti_root, d, filename)
+            for d in _h5_search_dirs(target_name):
+                if os.path.isabs(d):
+                    candidate = os.path.join(d, filename)
+                else:
+                    candidate = os.path.join(seti_root, d, filename)
                 if os.path.isfile(candidate):
                     h5_path = candidate
                     break
@@ -430,8 +447,11 @@ def correct_scan(scan_dir, ra_hours=None, dec_deg=None, telescope='parkes',
             
             # Try HDF5 header
             seti_root = Path(scan_dir).parent.parent
-            for d in ['data/fine', 'data/mid', 'data/h5', 'data/PROXCEN']:
-                h5_candidate = os.path.join(seti_root, d, filename)
+            for d in _h5_search_dirs(target_name):
+                if os.path.isabs(d):
+                    h5_candidate = os.path.join(d, filename)
+                else:
+                    h5_candidate = os.path.join(seti_root, d, filename)
                 if os.path.isfile(h5_candidate):
                     h_ra, h_dec, h_tel = get_coords_from_h5(h5_candidate)
                     if ra_hours is None and h_ra is not None:

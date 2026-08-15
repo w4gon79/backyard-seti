@@ -63,6 +63,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('btn-stop-scan').onclick = stopScan;
     document.getElementById('btn-refresh').onclick = () => { loadResults(); loadStats(); loadScansList(); };
     document.getElementById('btn-delete-scan').onclick = deleteCurrentScan;
+document.getElementById('btn-archive-scan').onclick = archiveCurrentScan;
     document.getElementById('btn-select-all').onclick = selectAllFiles;
     document.getElementById('btn-select-none').onclick = selectNoneFiles;
     document.getElementById('btn-full-band').onclick = autoFillBandRange;
@@ -2437,4 +2438,56 @@ function renderHitsPagination() {
     if (filterDiv && allHitsTotal > allHits.length) {
         // Could add pagination controls here in the future
     }
+}
+
+// --- Epoch Archive (3B): move staged h5 files to D: archive -------------
+
+var _archivePollTimer = null;
+
+function archiveScanRender(d) {
+    var btn = document.getElementById('btn-archive-scan');
+    if (!btn) return;
+    var lbl = 'Archive Epoch to D:';
+    if (d.active) {
+        lbl = 'Archiving ' + d.files_done + '/' + d.files_total + '...';
+    } else if (d.stage === 'done' && d.last) {
+        lbl = 'Archived OK';
+    } else if (d.stage === 'error') {
+        lbl = 'Archive FAILED';
+    }
+    btn.textContent = lbl;
+    btn.disabled = !!d.active;
+    btn.title = d.stage === 'error' ? ('Archive error: ' + (d.error || 'unknown')) :
+        "Move this scan's h5 data files from G: SSD staging to the D: archive. Verifies sizes before freeing SSD space.";
+}
+
+async function archiveScanPoll() {
+    try {
+        var resp = await fetch('/api/archive/status');
+        var d = await resp.json();
+        archiveScanRender(d);
+        if (_archivePollTimer && !d.active) {
+            clearInterval(_archivePollTimer);
+            _archivePollTimer = null;
+        }
+    } catch (e) { /* transient */ }
+}
+
+async function archiveCurrentScan() {
+    var sel = document.getElementById('scan-selector');
+    var scanId = sel ? sel.value : '';
+    if (!scanId) { alert('Select a scan first.'); return; }
+    if (!confirm('Archive this epoch\'s h5 files to D:\\seti_data\\TARGET\\fine?\n\nFiles are copied and size-verified; the G: staging copies are deleted only after the archive copies are confirmed.')) return;
+    try {
+        var resp = await fetch('/api/archive/epoch', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ scan_id: scanId }),
+        });
+        var data = await resp.json();
+        if (data.error) { alert(data.error); return; }
+        if (_archivePollTimer) clearInterval(_archivePollTimer);
+        _archivePollTimer = setInterval(archiveScanPoll, 2000);
+        archiveScanPoll();
+    } catch (e) { alert('Archive start failed: ' + e.message); }
 }

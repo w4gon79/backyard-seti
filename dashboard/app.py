@@ -57,6 +57,8 @@ MID_DIR = os.path.join(DATA_DIR, 'mid')
 FILT_DIR = os.path.join(DATA_DIR, 'filterbank')
 H5_DIR = os.path.join(DATA_DIR, 'h5')
 PROXCEN_DIR = os.path.join(DATA_DIR, 'PROXCEN')
+# Per-target archive root (3B): ARCHIVE_ROOT/{TARGET}/fine on D:
+ARCHIVE_ROOT = r'D:\seti_data'
 
 # Secondary data storage path (for large .h5 files moved off the main drive)
 # Configured via .env: SETI_DATA_SECONDARY=D:\seti_data\fine
@@ -84,6 +86,12 @@ def _resolve_data_file(filepath):
         os.path.join(SETI_ROOT, 'data', filepath),
         os.path.join(DATA_DIR, filepath),
     ]
+    # 3B per-target archive: D:\seti_data\{TARGET}\fine\<basename>
+    _tgt = extract_target_name(filepath)
+    if _tgt:
+        candidates.append(os.path.join(
+            ARCHIVE_ROOT, _tgt, 'fine',
+            os.path.basename(filepath.replace('\\', '/'))))
     for sec_dir in DATA_DIRS_SECONDARY:
         candidates.append(os.path.join(sec_dir, filepath))
         # Also try without the 'fine/' prefix since secondary dir may already be the fine dir
@@ -276,6 +284,30 @@ def api_targets():
                             'path': f'fine/{f}',  # _resolve_data_file checks secondary dirs too
                             'date': mjd_to_date(parts[1]) if len(parts) >= 2 else '',
                         })
+
+    # Per-target archive dirs (3B): D:\seti_data\{TARGET}\fine
+    if os.path.isdir(ARCHIVE_ROOT):
+        for tdir in sorted(os.listdir(ARCHIVE_ROOT)):
+            tfine = os.path.join(ARCHIVE_ROOT, tdir, 'fine')
+            if not os.path.isdir(tfine):
+                continue
+            for f in os.listdir(tfine):
+                if not f.endswith('.h5'):
+                    continue
+                parts = f.split('_')
+                if len(parts) < 4:
+                    continue
+                target = parts[3]
+                if target not in targets:
+                    targets[target] = {'fine': [], 'mid': [], 'filterbank': [], 'h5': []}
+                existing_names = [item['name'] for item in targets[target]['fine']]
+                if f not in existing_names:
+                    targets[target]['fine'].append({
+                        'name': f,
+                        'size_gb': round(os.path.getsize(os.path.join(tfine, f)) / 1e9, 2),
+                        'path': f'fine/{f}',  # _resolve_data_file finds archive paths
+                        'date': mjd_to_date(parts[1]) if len(parts) >= 2 else '',
+                    })
 
     # Also scan old PROXCEN dir for backwards compat
     if os.path.isdir(PROXCEN_DIR):
@@ -1361,6 +1393,104 @@ def api_delete():
 
 
 # ─── API: File Download ───────────────────────────────────────────────
+
+# ---------------------------------------------------------------------------
+# API: Epoch Archive (3B) - move staged h5 files to the D: per-target archive
+# ---------------------------------------------------------------------------
+
+archive_state = {'active': False, 'scan_id': '', 'stage': '',
+                 'files_done': 0, 'files_total': 0, 'bytes_copied': 0,
+                 'error': None, 'last': None}
+
+
+@app.route('/api/archive/epoch', methods=['POST'])
+def api_archive_epoch():
+    """Move a completed scan's h5 files to the per-target archive on D:
+    (D:\\seti_data\\{TARGET}\\fine), freeing G: SSD staging space.
+
+    Copies each file to '<dst>.archiving', verifies byte size, renames
+    atomically on D:, and only then removes the staging copy. A file
+    already present in the archive at the same size just frees staging.
+    """
+    params = request.json or {}
+    scan_id = (params.get('scan_id') or '').strip()
+    if not scan_id:
+        return jsonify({'error': 'scan_id required'}), 400
+    if archive_state['active']:
+        return jsonify({'error': 'archive already running'}), 409
+    if not re.match(r'^[A-Za-z0-9_+\-]+$', scan_id):
+        return jsonify({'error': 'Invalid scan_id'}), 400
+
+    meta_path = os.path.join(RESULTS_DIR, scan_id, 'scan_meta.json')
+    if not os.path.isfile(meta_path):
+        return jsonify({'error': f'scan {scan_id} not found'}), 404
+    try:
+        with open(meta_path, encoding='utf-8-sig') as f:
+            meta = json.load(f)
+    except Exception as e:
+        return jsonify({'error': f'cannot read scan_meta: {e}'}), 500
+
+    target = (meta.get('target') or '').strip().upper()
+    files = (meta.get('parameters') or {}).get('files') or []
+    if not target or not files:
+        return jsonify({'error': 'scan meta missing target/files'}), 400
+
+    jobs = []
+    for rel in files:
+        fname = str(rel).replace('\\', '/').split('/')[-1]
+        src = _resolve_data_file(os.path.join('fine', fname)) or \
+            _resolve_data_file(fname)
+        if not src:
+            return jsonify({'error': f'file not found on any data root: {fname}'}), 404
+        dst = os.path.join(ARCHIVE_ROOT, target, 'fine', fname)
+        jobs.append((src, dst))
+
+    thread = threading.Thread(target=_run_archive_epoch,
+                              args=(scan_id, jobs), daemon=True)
+    thread.start()
+    return jsonify({'success': True, 'files': len(jobs)})
+
+
+def _run_archive_epoch(scan_id, jobs):
+    archive_state.update(active=True, scan_id=scan_id, stage='copying',
+                         files_done=0, files_total=len(jobs),
+                         bytes_copied=0, error=None)
+    try:
+        for src, dst in jobs:
+            if os.path.realpath(src) == os.path.realpath(dst):
+                archive_state['files_done'] += 1  # already archived
+                continue
+            if (os.path.isfile(dst)
+                    and os.path.getsize(dst) == os.path.getsize(src)):
+                try:
+                    os.remove(src)  # archived by a previous run
+                except OSError:
+                    pass
+                archive_state['files_done'] += 1
+                continue
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            if os.path.splitdrive(os.path.abspath(src))[0] == \
+                    os.path.splitdrive(os.path.abspath(dst))[0]:
+                os.rename(src, dst)  # same volume (D:->D:): instant, atomic
+            else:
+                tmp = dst + '.archiving'
+                shutil.copyfile(src, tmp)
+                if os.path.getsize(tmp) != os.path.getsize(src):
+                    os.remove(tmp)
+                    raise RuntimeError(f'size mismatch after copy: {src}')
+                os.replace(tmp, dst)   # atomic rename on D:
+                os.remove(src)         # free SSD staging only after verified copy
+            archive_state['files_done'] += 1
+            archive_state['bytes_copied'] += os.path.getsize(dst)
+        archive_state.update(active=False, stage='done', last=scan_id)
+    except Exception as e:
+        archive_state.update(active=False, stage='error', error=str(e))
+
+
+@app.route('/api/archive/status')
+def api_archive_status():
+    return jsonify(archive_state)
+
 
 @app.route('/api/download', methods=['POST'])
 def api_download():

@@ -45,11 +45,37 @@ except ImportError:  # zones optional; stacking works unmasked without them
 # Module-level data -- extensible from external code (e.g. dashboard/app.py)
 # ---------------------------------------------------------------------------
 
-# Data file locations (checked in order)
-FINE_DIRS = [
-    r'D:\seti_data\fine',
-    r'G:\seti\data\fine',
-]
+# Data file locations (checked in order).
+# 3B layout: G:\seti\data\fine = SSD staging (downloads + active scans,
+# drains after each epoch); D:\seti_data\{TARGET}\fine = per-target
+# archive; D:\seti_data\fine = legacy flat fallback.
+DATA_STAGING = r'G:\seti\data\fine'
+ARCHIVE_ROOT = r'D:\seti_data'
+FINE_DIRS = [DATA_STAGING, os.path.join(ARCHIVE_ROOT, 'fine')]  # legacy compat
+
+
+def _fine_dirs_for(target='PROXCEN'):
+    """Ordered search dirs for one target: SSD staging, per-target
+    archive, per-target on G:, legacy flat."""
+    dirs = [DATA_STAGING]
+    t = str(target).strip().upper() if target else ''
+    if t:
+        dirs.append(os.path.join(ARCHIVE_ROOT, t, 'fine'))
+        dirs.append(os.path.join(r'G:\seti\data', t, 'fine'))
+    dirs.append(os.path.join(ARCHIVE_ROOT, 'fine'))
+    return dirs
+
+
+def _all_fine_dirs():
+    """Every fine dir that exists: staging, legacy flat, and all
+    per-target archive dirs (for filename-only lookups like find_h5)."""
+    dirs = [DATA_STAGING, os.path.join(ARCHIVE_ROOT, 'fine')]
+    if os.path.isdir(ARCHIVE_ROOT):
+        for d in sorted(os.listdir(ARCHIVE_ROOT)):
+            sub = os.path.join(ARCHIVE_ROOT, d, 'fine')
+            if os.path.isdir(sub) and sub not in dirs:
+                dirs.append(sub)
+    return dirs
 
 # ---------------------------------------------------------------------------
 # Epoch auto-discovery from data directories
@@ -89,7 +115,7 @@ def _discover_epochs(target='PROXCEN'):
     epochs = {}
     pat = _re.compile(r'Parkes_(\d+)_(\d+)_' + target + r'_[SR]_fine\.h5$')
 
-    for d in FINE_DIRS:
+    for d in _fine_dirs_for(target):
         if not os.path.isdir(d):
             continue
         for f in os.listdir(d):
@@ -155,7 +181,7 @@ def get_available_epochs(target='PROXCEN'):
 
 def find_h5(filename):
     """Find an HDF5 file across all known data directories."""
-    for d in FINE_DIRS:
+    for d in _all_fine_dirs():
         path = os.path.join(d, filename)
         if os.path.isfile(path):
             return path
