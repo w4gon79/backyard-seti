@@ -654,15 +654,20 @@ def cross_epoch_match(scan_dirs, freq_tolerance_hz=10, min_epochs=2, min_snr=0):
     # Find candidate frequencies: present in ON across >= min_epochs, absent in OFF
     candidates = []
     total_freqs_checked = 0
+    freqs_ge2 = 0            # unique ON freqs seen in 2+ epochs
+    freqs_ge_min = 0         # unique ON freqs meeting the min_epochs filter
 
     for bucket, on_hits_list in all_on_hits.items():
         # Count distinct epochs with an ON hit at this frequency
         epoch_ids = set(h['epoch_id'] for h in on_hits_list)
         n_epochs = len(epoch_ids)
         total_freqs_checked += 1
+        if n_epochs >= 2:
+            freqs_ge2 += 1
 
         if n_epochs < min_epochs:
             continue
+        freqs_ge_min += 1
 
         # Check OFF frames at this frequency (and adjacent buckets for safety)
         off_count = 0
@@ -727,6 +732,8 @@ def cross_epoch_match(scan_dirs, freq_tolerance_hz=10, min_epochs=2, min_snr=0):
             'total_epochs': len(epoch_info),
             'epoch_info': {str(k): v for k, v in epoch_info.items()},
             'total_on_frequencies': total_freqs_checked,
+            'freqs_ge2_epochs': freqs_ge2,
+            'freqs_meeting_min_epochs': freqs_ge_min,
             'total_candidates': len(candidates),
             'freq_tolerance_hz': freq_tolerance_hz,
             'min_epochs': min_epochs,

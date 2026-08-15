@@ -2175,6 +2175,10 @@ function renderCrossEpochResults(data) {
     var summaryHtml = '';
     summaryHtml += '<div class="bs-item"><span class="bs-label">Scans:</span><span class="bs-val">' + summary.total_scans + '</span></div>';
     summaryHtml += '<div class="bs-item"><span class="bs-label">ON freqs checked:</span><span class="bs-val">' + (summary.total_on_frequencies || 0).toLocaleString() + '</span></div>';
+        if (summary.freqs_meeting_min_epochs !== undefined) {
+            summaryHtml += '<div class="bs-item"><span class="bs-label">Freqs in &ge;' + (summary.min_epochs || 2) + ' epochs:</span><span class="bs-val">' + (summary.freqs_meeting_min_epochs || 0).toLocaleString() + '</span></div>';
+            summaryHtml += '<div class="bs-item"><span class="bs-label">Passing OFF veto:</span><span class="bs-val">' + (summary.total_candidates || 0).toLocaleString() + '</span></div>';
+        }
     summaryHtml += '<div class="bs-item"><span class="bs-label">Candidates:</span><span class="bs-val ' + (candidates.length > 0 ? 'highlight' : '') + '">' + candidates.length + '</span></div>';
     summaryHtml += '<div class="bs-item"><span class="bs-label">Tolerance:</span><span class="bs-val">' + (summary.freq_tolerance_hz || 10) + ' Hz</span></div>';
     summaryHtml += '<div class="bs-item"><span class="bs-label">Min epochs:</span><span class="bs-val">' + (summary.min_epochs || 2) + '</span></div>';
