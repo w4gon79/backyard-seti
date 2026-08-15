@@ -883,6 +883,8 @@ async function loadScansList() {
                     scan_id: s.scan_id,
                     target: s.target,
                     timestamp: s.timestamp,
+                    mjd_start: s.mjd_start,
+                    bary_mjd: s.bary_mjd,
                     status: s.status,
                     parameters: {
                         sub_band_chans: s.sub_band_chans,
