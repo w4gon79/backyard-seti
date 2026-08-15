@@ -130,3 +130,25 @@ def get_files(target, telescope=None, filetype=None):
     with urllib.request.urlopen(url) as resp:
         data = json.loads(resp.read().decode())
     return data if isinstance(data, list) else data.get("data", [])
+```
+
+## Field & Behavior Notes (probed 2026-08-15)
+
+- **File size field is `size`** (bytes), not `filesize`. Some targets return
+  it null for all files.
+- **`?target=` matching is literal and case-insensitive against
+  separator-free tokens.** `KIC8462852` returns 321 files; `KIC_8462852`,
+  `KIC 8462852` return zero. Cross-ID catalog forms unlock hidden data:
+  Barnard's Star = `GJ699`, Tau Ceti = `GJ71`, HD 95735 = `GJ411`,
+  Tabby's Star = `KIC8462852`, Proxima = `PROXCEN`.
+- **Base-name queries return all positional variants** (`0003-066` returns
+  the `_S`, `_R`, and bare files; 82 total). Query base names, not variants.
+- **Bare-form filenames exist** (`Parkes_57770_78921_ALPHACEN_fine.h5`, no
+  `_S`/`_R` marker); parsers must treat the position marker as optional.
+- **No open endpoint exists for h5 products.** Empty `target=` returns a
+  10,000-capped dump of GBT raw voltage `.raw` files only; `file-type` is
+  ignored on that path. Open browsing requires the per-target sweep
+  (see `src/bl_catalog.py`).
+- **Response cap:** 500 files per target query is the documented cap
+  (PROXCEN returns 8,380 in practice, so caps vary; treat 10,000 as the
+  hard list cap observed on the unfiltered dump).

@@ -245,6 +245,14 @@ probabilities.
 
 ## Phase 3: Multi-Target Survey
 
+**Status (2026-08-15): 3A-3E COMPLETE, 3F ON HOLD.** The SQLite target
+registry is the single source of truth for target identity, coordinates,
+and selection everywhere (legacy TARGET_COORDS dict deleted; all silent
+PROXCEN/manual coordinate fallbacks removed). Data lives in a two-tier
+layout: G: SSD staging + D: per-target archive. A cached BL Catalog
+(one-time background sweep of all ~11.7k BL targets) drives survey
+target selection.
+
 **Goal:** Generalize the pipeline beyond Proxima Centauri to survey any
 BL target with fine-res cadence data. This requires removing PROXCEN
 hardcoding throughout the codebase and making target selection a
@@ -295,7 +303,7 @@ generalized:
 - Download default target is PROXCEN
 - Must become: use whatever target is selected in the UI
 
-### 3A. Target Registry
+### 3A. Target Registry -- COMPLETE (2026-08-15, commit 257bb4c)
 
 **Goal:** Centralized target management with automatic coordinate lookup.
 
@@ -315,7 +323,7 @@ addition. The SQLite `targets` table + SIMBAD lookup replaces this.
 
 **Deliverable:** Target registry + dashboard UI for target management.
 
-### 3B. Per-Target Data Organization
+### 3B. Per-Target Data Organization -- COMPLETE (2026-08-15, commit 97bafa1)
 
 **Goal:** Data directories and scan results organized by target, not
 flattened into PROXCEN-specific paths.
@@ -340,7 +348,7 @@ two_layer_pipeline.py to search per-target directories.
 
 **Deliverable:** Clean per-target data layout + migration script.
 
-### 3C. Dynamic Epoch Discovery -- PARTIALLY DONE (2026-08-13)
+### 3C. Dynamic Epoch Discovery -- COMPLETE (2026-08-15, commit e65238e)
 
 **Goal:** Replace hardcoded `EPOCHS` dict with dynamic discovery from the
 scan database.
@@ -365,7 +373,7 @@ validation.
 static `EPOCHS` dict. Used by incoherent_stack, two_layer_pipeline,
 and barycentric_correct.
 
-### 3D. Generalized File Naming
+### 3D. Generalized File Naming -- COMPLETE (2026-08-15)
 
 **Goal:** Support any BL telescope/target naming convention, not just
 Parkes PROXCEN.
@@ -385,7 +393,7 @@ Examples across targets:
 
 **Deliverable:** Target-agnostic file discovery + naming utilities.
 
-### 3E. Dashboard Multi-Target UI
+### 3E. Dashboard Multi-Target UI -- COMPLETE as 3E-lite (2026-08-15, commit 4205b70)
 
 **Goal:** Dashboard supports selecting any target from the registry and
 running the full pipeline against it.
@@ -401,7 +409,7 @@ running the full pipeline against it.
 
 **Deliverable:** Multi-target dashboard with target selector throughout.
 
-### 3F. Automated Pipeline Per Target
+### 3F. Automated Pipeline Per Target -- ON HOLD (design pending, Joel 2026-08-15)
 
 **Goal:** One-click (or scheduled) full pipeline run for any target.
 

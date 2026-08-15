@@ -95,3 +95,54 @@ belong in the database.
 | Hit query (SNR>=10) | 5-10s | 2ms | 2500x |
 | Cross-epoch (SNR=10) | 9s | 0.25s | 36x |
 | Paginated hits | N/A | instant | new |
+
+## New Tables (2026-08-15, Phase 3A + BL Catalog)
+
+### `targets` (target registry, single coordinate authority)
+```sql
+CREATE TABLE targets (
+    name            TEXT PRIMARY KEY,   -- canonical UPPER_UNDERSCORE
+    display_name    TEXT,
+    aliases         TEXT DEFAULT '[]',   -- JSON list
+    ra_hours        REAL,                -- manual or SIMBAD-resolved
+    dec_deg         REAL,
+    coord_source    TEXT,                -- 'seed'|'simbad'|'manual'
+    bl_fine_files   INTEGER,             -- BL fine-res availability
+    bl_fine_epochs  INTEGER,
+    bl_query_name   TEXT,                -- winning BL query form (e.g. GJ699)
+    bl_total_files  INTEGER,
+    bl_checked_at   TEXT,
+    priority        INTEGER DEFAULT 0,
+    notes           TEXT,
+    created_at      TEXT DEFAULT (datetime('now'))
+);
+```
+
+`resolve_target_coords()` in barycentric_correct.py resolves manual coords >
+this table; unknown targets return None (no static fallback; the legacy
+TARGET_COORDS dict was deleted 2026-08-15).
+
+### `bl_catalog` (cached open-browse sweep of every BL target)
+```sql
+CREATE TABLE bl_catalog (
+    target       TEXT PRIMARY KEY,   -- base BL target name (_S/_R collapsed)
+    n_files      INTEGER,
+    n_fine       INTEGER,
+    n_mid        INTEGER,
+    n_time       INTEGER,
+    fine_epochs  INTEGER,            -- unique MJDs among fine files
+    fine_on      INTEGER,            -- _S count (Parkes grammar)
+    fine_off     INTEGER,            -- _R count
+    fine_bytes   INTEGER,            -- sum of BL 'size' fields
+    total_bytes  INTEGER,
+    telescopes   TEXT,               -- CSV
+    ra_hours     REAL,               -- from BL file metadata (ON fine preferred)
+    dec          REAL,
+    swept_at     TEXT
+);
+```
+
+Populated by `src/bl_catalog.py`'s background sweep (4 workers, resumable,
+cancel-effective, modes: resume/all/refresh/fine). ~11.7k base names at
+~35/min. The dashboard's BL Catalog browses this table with epoch/cadence
+filters for survey target selection.

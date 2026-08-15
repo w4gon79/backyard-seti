@@ -30,7 +30,7 @@ This project works with the Breakthrough Listen (BL) open data archive to search
 - **Formats:** HDF5 (.h5) fine-res and mid-res
 - **Telescopes:** Parkes (Australia), GBT (Green Bank, WV)
 - **Sizes:** ~12 GB per fine-res file, ~233 MB per mid-res file
-- **Primary target:** Proxima Centauri (PROXCEN), 20 epochs available (Jan-Oct 2017)
+- **Primary targets:** Any BL target with fine-res cadence data, discovered via the BL Catalog (PROXCEN scanned; survey shortlist building). Proxima Centauri remains the validation testbed with 6 epochs archived.
 
 ## Project Structure
 
@@ -40,6 +40,8 @@ backyard-seti/
 │   ├── db.py               # SQLite schema, hit CRUD, cross-epoch, stack jobs
 │   ├── barycentric_correct.py  # Barycentric velocity correction + cross-epoch matching
 │   ├── fine_res_pipeline.py    # turboSETI batch runner with sub-band chunking
+│   ├── target_registry.py     # Phase 3A: SQLite target registry (SIMBAD, BL availability)
+│   ├── bl_catalog.py          # BL catalog sweep/cache (open browse of every target)
 │   ├── bl_search.py        # BL API search/download
 │   └── download_proxima.py # Batch downloader for PROXCEN cadences
 ├── data/                   # Downloaded BL files + seti_hits.db (gitignored)
@@ -92,18 +94,34 @@ backyard-seti/
    Dashboard page at `/stack` with background job runner, progress tracking,
    peak detection, and waterfall inspection.
 
-### Phase 3: ML Signal Classification (PLANNED)
+### Phase 3: Multi-Target Survey (COMPLETE 2026-08-15, 3F pending)
 
-6. **Training Set Generation** - Harvest RFI examples from OFF frames, generate
-   synthetic signal injections at various SNR/drift/bandwidth.
-7. **CNN Classifier** - Waterfall tile classification (noise, RFI, candidate).
-8. **Unsupervised Anomaly Detection** - UMAP/t-SNE dimensionality reduction +
-   DBSCAN clustering to find signals that don't fit any known category.
+The pipeline is target-agnostic end to end. The SQLite target registry is the
+single source of truth for target identity, coordinates, and selection:
 
-### Phase 4: Automated Target Survey (PLANNED)
+6. **Target Registry (3A)** - `src/target_registry.py`: SQLite `targets` table
+   with SIMBAD-resolved coordinates, BL availability (variant + cross-ID query
+   cascade: KIC_8462852, GJ699, GJ71...), aliases, priority. Dashboard panel
+   for add/list/delete. Legacy TARGET_COORDS dict deleted; registry-only.
+7. **Per-Target Data Organization (3B)** - SSD staging (`data/fine`, fast
+   scans) + per-target archive (`D:\seti_data\{TARGET}\fine`). Discovery
+   cascades staging -> archive -> legacy. "Archive Epoch to D:" button moves
+   scanned epochs with size verification.
+8. **Dynamic Epoch Discovery (3C)** - Epochs auto-discovered from filenames
+   (Parkes + GBT grammars) with cadence validation (3 ON + 3 OFF flags) and
+   per-epoch scan status cross-referenced from the scans table.
+9. **Generalized Naming (3D)** - Scan ids born `TARGET_MJD_DATE_TIME`;
+   epoch labels on every scan surface.
+10. **Dashboard Multi-Target UI (3E-lite)** - Registry-driven dropdowns
+    everywhere (stack, two-layer, barycentric), registry sky view colored by
+    scan status, BL Catalog browser for survey planning.
+11. **Automated Pipeline Per Target (3F)** - ON HOLD, design pending. One-click
+    download -> scan -> reject -> correct -> cross-epoch -> stack -> report.
 
-9. **Multi-target scaling** - BL priority targets, TESS exoplanets, anomalous stars.
-10. **Fully automated pipeline** - Download -> scan -> reject -> correct -> cross-epoch -> stack -> classify -> report.
+### Phase 4: ML Signal Classification (DEPRIORITIZED)
+
+Two-layer pipeline with Layer 2.5 RFI scorecard handles current classification
+needs. CNN classifier and unsupervised anomaly detection remain future work.
 
 See `docs/ROADMAP.md` for the full approved roadmap.
 
@@ -117,10 +135,17 @@ contains four main tables:
 - **scans** - Scan metadata (target, MJD, status, barycentric correction state).
 - **cross_epoch_results** - Cached cross-epoch search results.
 - **stack_jobs** - Incoherent stack job history (params, status, peaks, plot path).
+- **targets** - Phase 3A target registry: names, SIMBAD/manual coordinates,
+  aliases, BL fine-res availability (files, epochs, winning query form), priority.
+  The single source of truth for target coordinates; no static fallbacks remain.
+- **bl_catalog** - Cached BL-catalog sweep results: per-target fine/mid/time file
+  counts, fine epochs, ON/OFF cadence, bytes, coordinates, telescopes.
 
-**Secondary data storage:** Large HDF5 files are stored on a secondary drive
-(`D:\seti_data\fine`, configured via `.env` SETI_DATA_SECONDARY). The dashboard
-and stacking pipeline check both primary and secondary locations automatically.
+**Secondary data storage:** Two-tier layout. `G:\seti\data\fine` is SSD
+staging: downloads land here and scans run at full speed; it drains after each
+epoch via the dashboard's Archive button. `D:\seti_data\{TARGET}\fine` is the
+per-target archive (e.g. 36 PROXCEN fine files, ~405 GB). All discovery paths
+check staging, the per-target archive, and the legacy flat dir automatically.
 
 ## Dashboard
 
@@ -130,7 +155,13 @@ The Flask dashboard at `http://localhost:8070` provides:
   waterfall inspection, ON/OFF rejection, barycentric correction, cross-epoch search
 - **Incoherent Stack** (`/stack`) - Phase 2C power spectrum stacking with
   frequency window selection, epoch multi-select, background job runner, progress
-  tracking, peak detection table, and waterfall follow-up
+  tracking, peak detection table, and waterfall follow-up. Registry-driven target
+  selection; epochs show cadence validation + scan status.
+- **Target Registry + BL Catalog** (main page) - Add targets (SIMBAD-resolved,
+  BL availability checked via variant/cross-ID cascade), browse every BL target's
+  fine-res availability (one-time background sweep, cached in `bl_catalog`),
+  filter by epochs/ON-OFF cadence, click rows onto the sky map, one-click add to
+  registry.
 - **Mission Control** (`/mission`) - Real-time scan monitoring with hit ticker
 
 ## Setup
