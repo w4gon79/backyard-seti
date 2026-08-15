@@ -2005,6 +2005,8 @@ def api_barycentric_cross_epoch():
         try:
             with open(cache_path) as f:
                 result = json.load(f)
+            if 'freqs_meeting_min_epochs' not in result.get('summary', {}):
+                raise ValueError('stale cache format, recomputing')
             result['summary']['from_cache'] = True
             result['summary']['cache_file'] = cache_file
             return jsonify(result)
@@ -2522,7 +2524,8 @@ def api_db_cross_epoch():
                     h['tolerance_hz'] == freq_tolerance_hz and
                     h['min_epochs'] == min_epochs):
                     cached = load_cross_epoch_result(h['id'])
-                    if cached:
+                    if cached and cached.get('result', {}).get('summary', {}).get(
+                            'freqs_meeting_min_epochs') is not None:
                         result = cached['result']
                         result['summary']['from_cache'] = True
                         result['summary']['cache_id'] = h['id']

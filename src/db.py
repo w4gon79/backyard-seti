@@ -534,6 +534,14 @@ def cross_epoch_search_sql(scan_ids, min_snr=0, tolerance_hz=10, min_epochs=2, d
 
         on_rows = conn.execute(on_query, scan_ids).fetchall()
 
+        # Funnel stats: distinct-scan counts per ON bucket (pre-OFF-veto)
+        on_bucket_scans = {}
+        for row in on_rows:
+            on_bucket_scans.setdefault(row['bucket'], set()).add(row['scan_id'])
+        freqs_ge2 = sum(1 for s in on_bucket_scans.values() if len(s) >= 2)
+        freqs_ge_min = sum(1 for s in on_bucket_scans.values()
+                           if len(s) >= min_epochs)
+
         # Get OFF buckets
         off_query = f'''
             SELECT DISTINCT CAST(ROUND(barycentric_freq * {grid_resolution}) AS INTEGER) as bucket
@@ -610,6 +618,8 @@ def cross_epoch_search_sql(scan_ids, min_snr=0, tolerance_hz=10, min_epochs=2, d
                 'total_scans': len(scan_ids),
                 'total_epochs': len(scan_ids),
                 'total_on_frequencies': on_bucket_count,
+                'freqs_ge2_epochs': freqs_ge2,
+                'freqs_meeting_min_epochs': freqs_ge_min,
                 'total_candidates': len(candidates),
                 'freq_tolerance_hz': tolerance_hz,
                 'min_epochs': min_epochs,
