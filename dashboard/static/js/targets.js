@@ -37,8 +37,19 @@ async function loadRegistry() {
             var t = targets[i];
             var blTxt = 'unknown';
             if (t.bl_fine_files != null) {
-                blTxt = t.bl_fine_files + ' files / ' +
-                        (t.bl_fine_epochs || 0) + ' epochs';
+                if (t.bl_fine_files > 0) {
+                    blTxt = '<span style="color:#66bb6a;">' + t.bl_fine_files +
+                            ' fine / ' + (t.bl_fine_epochs || 0) + ' ep</span>';
+                } else if ((t.bl_total_files || 0) > 0) {
+                    blTxt = '<span style="color:#ffb74d;">' + t.bl_total_files +
+                            ' files, no fine-res</span>';
+                } else {
+                    blTxt = '<span style="color:#90a4ae;">no BL data</span>';
+                }
+                if (t.bl_query_name && t.bl_query_name !== t.name) {
+                    blTxt += ' <span style="color:#546e7a;">[' +
+                             escReg(t.bl_query_name) + ']</span>';
+                }
             }
             html += '<tr style="border-top:1px solid #2a3b4d;">' +
                 '<td style="padding:4px 6px;color:#4fc3f7;">' + escReg(t.name) +
@@ -47,7 +58,7 @@ async function loadRegistry() {
                 '<td style="padding:4px 6px;">' + (t.ra_hours != null ? Number(t.ra_hours).toFixed(4) : '-') + '</td>' +
                 '<td style="padding:4px 6px;">' + (t.dec_deg != null ? Number(t.dec_deg).toFixed(4) : '-') + '</td>' +
                 '<td style="padding:4px 6px;color:#90a4ae;">' + escReg(t.coord_source || '-') + '</td>' +
-                '<td style="padding:4px 6px;">' + escReg(blTxt) + '</td>' +
+                '<td style="padding:4px 6px;">' + blTxt + '</td>' +
                 '<td style="padding:4px 6px;white-space:nowrap;">' +
                     '<button class="btn-small" onclick="registryBLCheck(\'' + escReg(t.name) + '\')">Check BL</button> ' +
                     '<button class="btn-small btn-danger-small" onclick="registryDelete(\'' + escReg(t.name) + '\')">Del</button>' +

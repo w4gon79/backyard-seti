@@ -15,6 +15,7 @@ Tables (created idempotently by ensure_table):
 import json
 import os
 import re
+import sqlite3
 import sys
 import urllib.parse
 import urllib.request
@@ -64,12 +65,21 @@ def ensure_table(db_path=None):
                 coord_source    TEXT,
                 bl_fine_files   INTEGER,
                 bl_fine_epochs  INTEGER,
+                bl_query_name   TEXT,
+                bl_total_files  INTEGER,
                 bl_checked_at   TEXT,
                 priority        INTEGER DEFAULT 0,
                 notes           TEXT,
                 created_at      TEXT DEFAULT (datetime('now'))
             )
         ''')
+        # Migration for DBs created before bl_query_name/bl_total_files
+        for _col, _typ in (('bl_query_name', 'TEXT'),
+                           ('bl_total_files', 'INTEGER')):
+            try:
+                conn.execute(f'ALTER TABLE targets ADD COLUMN {_col} {_typ}')
+            except sqlite3.OperationalError:
+                pass  # column already exists
         n = conn.execute('SELECT COUNT(*) FROM targets').fetchone()[0]
         if n == 0:
             for name, disp, aliases, ra, dec in SEED_TARGETS:
@@ -319,19 +329,28 @@ def simbad_search(name, limit=5):
     return out[:limit]
 
 
-def check_bl_availability(name):
-    """Query the BL open-data API for a target. Counts fine-res files and
-    unique epochs (BL MJDs). Mirrors the dashboard's JS parsing."""
+# Catalog prefixes BL is known to index (used to rank SIMBAD cross-ids)
+_BL_CATALOG_RANK = ('GJ', 'HIP', 'HD', 'KIC', 'TRAPPIST', 'NAME', 'BD',
+                    'LHS', 'ROSS', 'WOLF', 'EPIC', 'TIC')
+
+
+def _bl_token(s):
+    """BL catalog tokens are separator-free: strip spaces, underscores,
+    hyphens, dots (KIC_8462852 -> KIC8462852, 'GJ 71' -> GJ71)."""
+    return re.sub(r'[\s_\-.]+', '', str(s)).upper()
+
+
+def _bl_query(name):
+    """One BL API query. Returns (n_files, n_fine, mjd_set), None on error."""
     url = BL_API + '?target=' + urllib.parse.quote(str(name))
     req = urllib.request.Request(url, headers={'User-Agent': 'BackyardSETI/1.0'})
     try:
         with urllib.request.urlopen(req, timeout=45) as r:
             data = json.loads(r.read().decode())
-    except Exception as e:
-        return {'error': f'BL API failed: {e}'}
+    except Exception:
+        return None
     files = data.get('data', [])
-    n_fine = 0
-    mjds = set()
+    n_fine, mjds = 0, set()
     for f in files:
         u = f.get('url') or f.get('filename') or ''
         if '_fine.' in u:
@@ -339,13 +358,100 @@ def check_bl_availability(name):
             parts = u.split('/')[-1].split('_')
             if len(parts) > 1 and parts[1].isdigit():
                 mjds.add(parts[1])
-    return {
-        'n_files': len(files),
-        'n_fine': n_fine,
-        'fine_epochs': sorted(mjds),
-        'n_fine_epochs': len(mjds),
-        'checked_at': datetime.now(timezone.utc).isoformat(timespec='seconds'),
-    }
+    return len(files), n_fine, mjds
+
+
+def simbad_idents(main_id, limit=40):
+    """All SIMBAD identifiers for an object."""
+    esc = str(main_id).replace("'", "''")
+    q = ("SELECT TOP {n} i.id FROM ident i JOIN basic b "
+         "ON i.oidref = b.oid WHERE b.main_id = '{e}'"
+         ).format(n=int(limit), e=esc)
+    return [r[0] for r in _tap_rows(q) if r and r[0]]
+
+
+def _bl_result(n_files, n_fine, mjds, query):
+    return {'n_files': n_files, 'n_fine': n_fine,
+            'fine_epochs': sorted(mjds), 'n_fine_epochs': len(mjds),
+            'bl_query_name': query,
+            'checked_at': datetime.now(timezone.utc).isoformat(
+                timespec='seconds')}
+
+
+def check_bl_availability(name, prior_query=None, variants=None,
+                         simbad_names=None):
+    """Query BL open data, trying name variants until one matches.
+
+    BL's ?target= match is literal (case-insensitive) against
+    separator-free catalog tokens: KIC8462852 hits, KIC_8462852 misses;
+    'GJ 71' hits, GJ71 hits, GJ_71 misses. So the canonical registry
+    name often misses. Candidate order: remembered winning query, the
+    stripped canonical name, stripped aliases/variants, then SIMBAD
+    cross-ids (Barnard's Star -> GJ699). First query returning files
+    wins and is stored as bl_query_name for next time."""
+    cands, seen = [], set()
+
+    def add(raw):
+        if not raw:
+            return
+        for c in (_bl_token(raw), str(raw).strip().upper()):
+            if c and c not in seen:
+                seen.add(c)
+                cands.append(c)
+
+    add(prior_query)
+    add(name)
+    for v in (variants or []):
+        add(v)
+
+    first_error = None
+    best = (0, None, 0, set())
+    for c in cands:
+        res = _bl_query(c)
+        if res is None:
+            if first_error is None:
+                first_error = c
+            continue
+        n_files, n_fine, mjds = res
+        if n_files > 0:
+            return _bl_result(n_files, n_fine, mjds, c)
+        if n_files > best[0]:
+            best = (n_files, c, n_fine, mjds)
+
+    # Nothing yet: try SIMBAD cross-ids in BL's preferred catalog forms.
+    # simbad_names (e.g. display_name "Barnard's Star") helps when the
+    # canonical registry name can't resolve (BARNARDS_STAR has no
+    # apostrophe, SIMBAD indexes the possessive form).
+    resolved = []
+    for nm in [name] + list(simbad_names or []):
+        resolved = simbad_search(nm, limit=1)
+        if resolved:
+            break
+    if resolved:
+        idents = simbad_idents(resolved[0]['main_id'])
+        idents.sort(key=lambda s: (
+            0 if str(s).split(' ')[0].split('-')[0] in _BL_CATALOG_RANK
+            else 1, len(s)))
+        tried = 0
+        for ident in idents:
+            tok = _bl_token(ident)
+            if not tok or tok in seen or tried >= 12:
+                continue
+            seen.add(tok)
+            tried += 1
+            res = _bl_query(tok)
+            if res is None:
+                continue
+            n_files, n_fine, mjds = res
+            if n_files > 0:
+                return _bl_result(n_files, n_fine, mjds, tok)
+            if n_files > best[0]:
+                best = (n_files, tok, n_fine, mjds)
+
+    if best[1] is None and first_error is not None:
+        return {'error': f'BL API failed for all variants '
+                         f'(first error at "{first_error}")'}
+    return _bl_result(best[0], best[2], best[3], best[1])
 
 
 def _store_bl(name, avail, db_path=None):
@@ -355,9 +461,11 @@ def _store_bl(name, avail, db_path=None):
     try:
         conn.execute('''
             UPDATE targets SET bl_fine_files = ?, bl_fine_epochs = ?,
+                              bl_query_name = ?, bl_total_files = ?,
                               bl_checked_at = ?
             WHERE name = ?
         ''', (avail['n_fine'], avail['n_fine_epochs'],
+              avail.get('bl_query_name'), avail['n_files'],
               avail['checked_at'], name))
         conn.commit()
     finally:
@@ -408,7 +516,9 @@ def add_target(name, ra_hours=None, dec_deg=None, display_name=None,
 
     avail = None
     if check_bl:
-        avail = check_bl_availability(name)
+        avail = check_bl_availability(
+            name, variants=aliases,
+            simbad_names=[display_name] if display_name else None)
         _store_bl(name, avail, db_path)
     return get_target(name, db_path)
 
@@ -418,7 +528,11 @@ def refresh_bl(name, db_path=None):
     t = get_target(name, db_path)
     if not t:
         raise ValueError(f'Target "{name}" not in registry')
-    avail = check_bl_availability(t['name'])
+    avail = check_bl_availability(
+        t['name'], prior_query=t.get('bl_query_name'),
+        variants=t.get('aliases'),
+        simbad_names=[t['display_name']]
+        if t.get('display_name') and t['display_name'] != t['name'] else None)
     _store_bl(t['name'], avail, db_path)
     return avail
 
