@@ -465,21 +465,40 @@ def api_scan_results(scan_id):
     })
 
 
+def _epoch_label_from_files(files):
+    """Extract the observation epoch (BL MJD, 5-digit str) from a scan's
+    fine file list. BL names: Telescope_MJD_Seq_TARGET_S/R_res.h5."""
+    for f in files or []:
+        parts = os.path.basename(str(f)).replace('.h5', '').split('_')
+        if len(parts) >= 5 and parts[1].isdigit() and len(parts[1]) == 5:
+            return parts[1]
+    return None
+
+
 @app.route('/api/scans/create', methods=['POST'])
 def api_scans_create():
     """Create a new scan result set. Returns scan_id."""
     params = request.json or {}
     target = params.get('target', 'PROXCEN').upper()
     
-    # Generate scan_id: TARGET_YYYY-MM-DD_HHMM
+    # Generate scan_id: TARGET_EPOCH_YYYY-MM-DD_HHMM (epoch = BL MJD, e.g.
+    # PROXCEN_57791_2026-08-14_2149). Falls back to legacy TARGET_DATE_TIME
+    # when no fine file list is available.
     now = datetime.now()
-    scan_id = f"{target}_{now.strftime('%Y-%m-%d_%H%M')}"
+    date_time = now.strftime('%Y-%m-%d_%H%M')
+    epoch = _epoch_label_from_files(params.get('files', []))
+    if epoch:
+        scan_id = f"{target}_{epoch}_{date_time}"
+    else:
+        scan_id = f"{target}_{date_time}"
     
     # Ensure uniqueness
     scan_dir = os.path.join(RESULTS_DIR, scan_id)
     counter = 1
     while os.path.isdir(scan_dir):
-        scan_id = f"{target}_{now.strftime('%Y-%m-%d_%H%M')}_{counter}"
+        suffix = f"_{counter}"
+        scan_id = (f"{target}_{epoch}_{date_time}{suffix}" if epoch
+                   else f"{target}_{date_time}{suffix}")
         scan_dir = os.path.join(RESULTS_DIR, scan_id)
         counter += 1
     
@@ -488,6 +507,7 @@ def api_scans_create():
     meta = {
         'scan_id': scan_id,
         'target': target,
+        'mjd_start': float(epoch) if epoch else None,
         'timestamp': now.isoformat(timespec='seconds'),
         'status': 'running',
         'parameters': {
@@ -849,12 +869,19 @@ def api_scan_start():
     # Create a scan result set first
     target = params.get('target', 'PROXCEN')
     now = datetime.now()
-    scan_id = f"{target.upper()}_{now.strftime('%Y-%m-%d_%H%M')}"
+    date_time = now.strftime('%Y-%m-%d_%H%M')
+    epoch = _epoch_label_from_files(files_list)
+    if epoch:
+        scan_id = f"{target.upper()}_{epoch}_{date_time}"
+    else:
+        scan_id = f"{target.upper()}_{date_time}"
     scan_dir = os.path.join(RESULTS_DIR, scan_id)
     # Ensure uniqueness
     counter = 1
     while os.path.isdir(scan_dir):
-        scan_id = f"{target.upper()}_{now.strftime('%Y-%m-%d_%H%M')}_{counter}"
+        suffix = f"_{counter}"
+        scan_id = (f"{target.upper()}_{epoch}_{date_time}{suffix}" if epoch
+                   else f"{target.upper()}_{date_time}{suffix}")
         scan_dir = os.path.join(RESULTS_DIR, scan_id)
         counter += 1
     os.makedirs(scan_dir)
@@ -863,6 +890,7 @@ def api_scan_start():
     scan_meta = {
         'scan_id': scan_id,
         'target': target.upper(),
+        'mjd_start': float(epoch) if epoch else None,
         'timestamp': now.isoformat(timespec='seconds'),
         'status': 'running',
         'parameters': {
@@ -2538,6 +2566,10 @@ def api_db_cross_epoch():
             tolerance_hz=float(freq_tolerance_hz),
             min_epochs=int(min_epochs),
         )
+
+        # Record which scans went into this run so history entries can
+        # display their epochs
+        result.setdefault('summary', {})['scan_ids'] = scan_ids
 
         # Save to DB cache
         try:

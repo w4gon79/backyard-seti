@@ -11,6 +11,24 @@ let localDataCache = {};
 let fileHeaderCache = {};
 let scansList = [];       // Array of scan metadata objects
 let currentScanId = null; // Currently selected scan_id
+
+function scanEpochLabel(s) {
+    // Scan ids created after 2026-08-15 embed the epoch: TARGET_MJD_DATE_TIME.
+    // Older ids lack it; recover the BL MJD from mjd_start/bary_mjd if known.
+    if (/^[A-Za-z0-9]+_\d{5}_\d{4}-\d{2}-\d{2}/.test(s.scan_id || '')) return null;
+    var mj = s.mjd_start || s.bary_mjd;
+    if (mj && isFinite(mj) && mj > 0) return String(Math.round(mj));
+    return null;
+}
+
+function scanLabel(s) {
+    var id = s.scan_id || '';
+    var ep = scanEpochLabel(s);
+    if (!ep) return id;
+    var m = /^([A-Za-z0-9]+)_(\d{4}-\d{2}-\d{2}_\d{4})/.exec(id);
+    if (!m) return id;
+    return m[1] + '_' + ep + '_' + m[2];
+}
 let scanStateActive = false; // Tracks whether a scan is currently running
 
 // DB-backed hit pagination state
@@ -939,7 +957,7 @@ function renderScanSelector() {
     var html = '';
     for (var i = 0; i < scansList.length; i++) {
         var s = scansList[i];
-        var label = s.scan_id;
+        var label = scanLabel(s);
         // Shorten label if too long
         if (label.length > 50) label = label.substring(0, 50);
         var selAttr = (currentScanId === s.scan_id) ? ' selected' : '';
@@ -1888,7 +1906,7 @@ function updateBaryScanCheckboxes() {
         var sid = s.scan_id;
         // Skip scans that haven't been corrected
         if (window.correctedScanIds.indexOf(sid) === -1) continue;
-        var label = sid;
+        var label = scanLabel(s);
         if (label.length > 40) label = label.substring(0, 37) + '...';
         var status = statusMap[sid];
         var partialBadge = '';
@@ -2250,8 +2268,19 @@ async function loadCrossEpochHistory() {
         var html = '<option value="">-- Select previous run --</option>';
         for (var i = 0; i < runs.length; i++) {
             var r = runs[i];
+            // Recover epochs compared in this run: embedded in new scan ids,
+            // absent for runs saved before 2026-08-15
+            var eps = [];
+            try {
+                var sids = r.scan_ids || [];
+                if (typeof sids === 'string') { sids = JSON.parse(sids || '[]'); }
+                for (var k = 0; k < sids.length; k++) {
+                    var em = /_(\d{5})_\d{4}-\d{2}-\d{2}/.exec(String(sids[k]));
+                    if (em && eps.indexOf(em[1]) === -1) eps.push(em[1]);
+                }
+            } catch(e) {}
             var ts = r.created_at || r.timestamp || '';
-            var label = ts.substring(0, 19).replace('T', ' ');
+            var label = (eps.length ? 'Ep ' + eps.join(',') + ' | ' : '') + ts.substring(0, 19).replace('T', ' ');
             label += ' | SNR ' + (r.min_snr || 0);
             label += ' | tol ' + (r.tolerance_hz || 10);
             label += ' | ' + (r.candidate_count || 0) + ' cand';

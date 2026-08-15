@@ -430,8 +430,12 @@ def save_cross_epoch_result(result_dict, db_path=None):
     conn = get_db(db_path)
     try:
         summary = result_dict.get('summary', {})
-        scan_ids = json.dumps(summary.get('epoch_info', {}).keys() and 
-                              [k for k in summary.get('epoch_info', {}).keys()] or [])
+        # Prefer the explicit scan_ids list the caller attached (the exact
+        # scans compared); fall back to epoch_info keys for older results.
+        scan_ids_list = summary.get('scan_ids')
+        if not scan_ids_list:
+            scan_ids_list = list(summary.get('epoch_info', {}).keys())
+        scan_ids = json.dumps(scan_ids_list)
         # Better: get scan_ids from the summary or candidates
         # We'll extract from epoch_details in candidates
         candidates = result_dict.get('candidates', [])
