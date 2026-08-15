@@ -2089,14 +2089,24 @@ async function loadBarycentricTargets() {
         var resp = await fetch('/api/barycentric/targets');
         var data = await resp.json();
         var select = document.getElementById('bary-target-select');
-        var html = '<option value="">Custom...</option>';
+        var html = '';
         baryTargets = {};
         for (var i = 0; i < data.targets.length; i++) {
             var t = data.targets[i];
             baryTargets[t.name] = {ra: t.ra_hours, dec: t.dec_deg};
             html += '<option value="' + t.name + '">' + t.name + '</option>';
         }
+        if (!data.targets.length) {
+            html = '<option value="">No targets in registry</option>';
+        }
         select.innerHTML = html;
+        // Registry-only (Custom retired): auto-select the first target
+        // and display its registry coordinates
+        if (data.targets.length > 0) {
+            select.value = data.targets[0].name;
+            document.getElementById('bary-ra').value = data.targets[0].ra_hours;
+            document.getElementById('bary-dec').value = data.targets[0].dec_deg;
+        }
         // Store which scans have barycentric correction completed
         window.correctedScanIds = data.corrected_scans || [];
         // Store detailed status (complete vs partial)
@@ -2232,9 +2242,10 @@ async function runBarycentric() {
 
     var params = {
         scan_id: currentScanId,
-        ra_hours: parseFloat(document.getElementById('bary-ra').value) || null,
-        dec_deg: parseFloat(document.getElementById('bary-dec').value) || null,
+        target: document.getElementById('bary-target-select').value || null,
         telescope: document.getElementById('bary-telescope').value,
+        // Coordinates intentionally NOT sent: the backend resolves them
+        // from the scan's target via the registry (single source of truth).
     };
 
     try {

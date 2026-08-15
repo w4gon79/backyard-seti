@@ -157,16 +157,16 @@
                     <div class="bary-target-group">
                         <label>Target</label>
                         <select id="bary-target-select" onchange="onBaryTargetSelected()">
-                            <option value="">Custom...</option>
+                            <option value="">Loading...</option>
                         </select>
                     </div>
                     <div class="bary-coords-group">
                         <label>RA (hours)</label>
-                        <input type="number" id="bary-ra" step="0.0001" placeholder="14.4953" style="width:100px;">
+                        <input type="number" id="bary-ra" step="0.0001" placeholder="14.4953" readonly title="Auto-filled from the Target Registry" style="width:100px;color:#90a4ae;">
                     </div>
                     <div class="bary-coords-group">
                         <label>Dec (deg)</label>
-                        <input type="number" id="bary-dec" step="0.0001" placeholder="-62.6795" style="width:100px;">
+                        <input type="number" id="bary-dec" step="0.0001" placeholder="-62.6795" readonly title="Auto-filled from the Target Registry" style="width:100px;color:#90a4ae;">
                     </div>
                     <div class="bary-coords-group">
                         <label>Telescope</label>
@@ -344,7 +344,7 @@
     </div>
 </div>
 
-<script src="/static/js/dashboard.js?v=74"></script>
+<script src="/static/js/dashboard.js?v=75"></script>
 <script src="/static/js/targets.js?v=2"></script>
 </body>
 </html>
