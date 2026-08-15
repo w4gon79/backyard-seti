@@ -2493,6 +2493,50 @@ def api_targets_delete(name):
         return jsonify({'error': str(e)}), 500
 
 
+# Cache for barycentric scan status: sid -> (combined mtime, entry).
+# Raw/combined hit JSONs hold 100k+ records per scan; parsing them on
+# every dropdown load measured ~55s. Entries recompute only when a
+# scan's combined_corrected.json mtime changes.
+_bary_status_cache = {}
+
+
+def _bary_scan_status(sid, scan_dir):
+    combined_path = os.path.join(scan_dir, 'barycentric',
+                                 'combined_corrected.json')
+    mtime = os.path.getmtime(combined_path)
+    cached = _bary_status_cache.get(sid)
+    if cached and cached[0] == mtime:
+        return cached[1]
+    status_entry = {'scan_id': sid, 'complete': True,
+                    'bary_hits': 0, 'raw_hits': 0}
+    try:
+        with open(combined_path) as f:
+            bary_data = json.load(f)
+        status_entry['bary_hits'] = bary_data.get(
+            'total_hits', len(bary_data.get('hits', [])))
+        hit_files = glob_module.glob(
+            os.path.join(scan_dir, '**/*_hits.json'), recursive=True)
+        raw_count = 0
+        for hf in hit_files:
+            if 'barycentric' in hf:
+                continue
+            try:
+                with open(hf) as f:
+                    raw_data = json.load(f)
+                raw_count += len(raw_data.get('hits', raw_data)
+                                 if isinstance(raw_data, dict) else raw_data)
+            except Exception:
+                pass
+        status_entry['raw_hits'] = raw_count
+        if raw_count > 0:
+            status_entry['complete'] = (status_entry['bary_hits'] /
+                                        raw_count) >= 0.95
+    except Exception:
+        pass
+    _bary_status_cache[sid] = (mtime, status_entry)
+    return status_entry
+
+
 @app.route('/api/barycentric/targets')
 def api_barycentric_targets():
     """Return known target coordinates for the dropdown.
@@ -2522,6 +2566,7 @@ def api_barycentric_targets():
         })
     
     # Also return which scans have barycentric correction completed
+    # (mtime-cached; see _bary_scan_status)
     corrected_scans = []
     corrected_scans_status = []
     for sm in _discover_scans():
@@ -2529,42 +2574,11 @@ def api_barycentric_targets():
         if not sid:
             continue
         scan_dir = os.path.join(RESULTS_DIR, sid)
-        combined_path = os.path.join(scan_dir, 'barycentric', 'combined_corrected.json')
+        combined_path = os.path.join(scan_dir, 'barycentric',
+                                     'combined_corrected.json')
         if os.path.isfile(combined_path):
             corrected_scans.append(sid)
-            
-            # Check if correction is complete vs partial
-            # Count bary hits and compare to raw hits
-            status_entry = {'scan_id': sid, 'complete': True, 'bary_hits': 0, 'raw_hits': 0}
-            try:
-                with open(combined_path) as f:
-                    bary_data = json.load(f)
-                status_entry['bary_hits'] = bary_data.get('total_hits', len(bary_data.get('hits', [])))
-                
-                # Count raw hits from scan directory
-                hit_files = glob_module.glob(os.path.join(scan_dir, '**/*_hits.json'), recursive=True)
-                raw_count = 0
-                for hf in hit_files:
-                    # Skip barycentric directory hits
-                    if 'barycentric' in hf:
-                        continue
-                    try:
-                        with open(hf) as f:
-                            raw_data = json.load(f)
-                        raw_count += len(raw_data.get('hits', raw_data) if isinstance(raw_data, dict) else raw_data)
-                    except Exception:
-                        pass
-                status_entry['raw_hits'] = raw_count
-                
-                # A scan is "complete" if bary hits >= 95% of raw hits
-                if raw_count > 0:
-                    status_entry['complete'] = (status_entry['bary_hits'] / raw_count) >= 0.95
-                else:
-                    status_entry['complete'] = True
-            except Exception:
-                pass
-            
-            corrected_scans_status.append(status_entry)
+            corrected_scans_status.append(_bary_scan_status(sid, scan_dir))
     
     return jsonify({'targets': targets, 'telescopes': telescopes, 
                      'corrected_scans': corrected_scans,
