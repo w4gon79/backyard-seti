@@ -2498,9 +2498,35 @@ def api_targets_delete(name):
 # every dropdown load measured ~55s. Entries recompute only when a
 # scan's combined_corrected.json mtime changes.
 _bary_status_cache = {}
+_BARY_CACHE_PATH = os.path.join(DATA_DIR, 'bary_status_cache.json')
+
+
+def _load_bary_cache():
+    """Load the disk-persisted scan-status cache (survives restarts;
+    entries whose combined_corrected.json mtime changed re-compute)."""
+    if _bary_status_cache:
+        return
+    try:
+        with open(_BARY_CACHE_PATH) as f:
+            raw = json.load(f)
+        for sid, rec in raw.items():
+            _bary_status_cache[sid] = (rec['mtime'], rec['entry'])
+    except Exception:
+        pass
+
+
+def _save_bary_cache():
+    try:
+        os.makedirs(os.path.dirname(_BARY_CACHE_PATH), exist_ok=True)
+        with open(_BARY_CACHE_PATH, 'w') as f:
+            json.dump({sid: {'mtime': rec[0], 'entry': rec[1]}
+                       for sid, rec in _bary_status_cache.items()}, f)
+    except Exception:
+        pass
 
 
 def _bary_scan_status(sid, scan_dir):
+    _load_bary_cache()
     combined_path = os.path.join(scan_dir, 'barycentric',
                                  'combined_corrected.json')
     mtime = os.path.getmtime(combined_path)
@@ -2534,6 +2560,7 @@ def _bary_scan_status(sid, scan_dir):
     except Exception:
         pass
     _bary_status_cache[sid] = (mtime, status_entry)
+    _save_bary_cache()
     return status_entry
 
 

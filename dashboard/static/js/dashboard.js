@@ -223,6 +223,16 @@ function initSkyMap() {
         console.warn("Celestial.display error:", e);
     }
 
+    // Zoom is disabled in config, but celestial still binds a d3 wheel
+    // handler whose projection.invert throws "Cannot set properties of
+    // undefined" when the map is wheel-scrolled. Strip it.
+    try {
+        var _cvs = document.querySelectorAll('#celestial-map canvas');
+        for (var ci = 0; ci < _cvs.length; ci++) {
+            if (_cvs[ci].__onwheel) delete _cvs[ci].__onwheel;
+        }
+    } catch(e) {}
+
     // No default markers - sky map starts clean
     document.getElementById('sky-map-info').innerHTML =
         '<p style="color:#546e7a;">Select a file from Target Search to mark its target on the sky map.</p>';
