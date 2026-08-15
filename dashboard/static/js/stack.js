@@ -442,21 +442,18 @@ function deriveWaterfallFile() {
         epochs = currentResults.epoch_info.map(function(e) { return e.label; });
     }
     if (epochs.length === 0) return null;
-    var firstEpoch = epochs[0];
-    // Parse epoch label like "MJD_57791" or "57791"
-    var mjdMatch = firstEpoch.match(/(\d+)/);
-    var mjd = mjdMatch ? mjdMatch[1] : '57791';
-    // Construct first ON file path
-    // Pattern: fine/Parkes_<mjd>_<seq>_PROXCEN_S_fine.h5
-    // Seq numbers for each epoch's first ON file
-    var epochSeqs = {
-        '57791': '72989',
-        '57846': '49534',
-        '57930': '41709',
-        '58020': '21048'
-    };
-    var seq = epochSeqs[firstEpoch] || '72989';
-    return 'fine/Parkes_' + mjd + '_' + seq + '_PROXCEN_S_fine.h5';
+    // 3D: per-target first-ON filename from the epochs API (cached in
+    // epochsData by loadEpochs); replaces hardcoded PROXCEN seq map
+    for (var i = 0; i < epochs.length; i++) {
+        var m = String(epochs[i]).match(/(\d+)/);
+        var lbl = m ? m[1] : String(epochs[i]);
+        for (var j = 0; j < epochsData.length; j++) {
+            if (epochsData[j].label === lbl && epochsData[j].first_on_file) {
+                return 'fine/' + epochsData[j].first_on_file;
+            }
+        }
+    }
+    return null;
 }
 
 function loadPlot(jobId) {
@@ -1607,7 +1604,7 @@ function showError(msg) {
 
 // Show waterfall for a two-layer candidate frequency
 // Uses the existing waterfall modal from the main stack page
-window.showTLWaterfall = function(freq, peaksJson, driftRate) {
+window.showTLWaterfall = async function(freq, peaksJson, driftRate) {
     var modal = document.getElementById('waterfall-modal');
     var title = document.getElementById('waterfall-title');
     var metaDiv = document.getElementById('waterfall-meta');
@@ -1638,21 +1635,21 @@ window.showTLWaterfall = function(freq, peaksJson, driftRate) {
     modal.style.display = 'flex';
 
     // Try to find the first ON HDF5 file for this target
-    // Use the waterfall API endpoint, same as regular stack peaks
-    // Determine the file based on known PROXCEN epochs
-    var epochSeqs = {
-        '57791': '72989',
-        '57846': '49534',
-        '57930': '41709',
-        '58020': '21048'
-    };
-    // Use first available epoch's ON file
-    var fileList = [
-        'fine/Parkes_57791_72989_PROXCEN_S_fine.h5',
-        'fine/Parkes_57846_49534_PROXCEN_S_fine.h5',
-        'fine/Parkes_57930_41709_PROXCEN_S_fine.h5',
-        'fine/Parkes_58020_21048_PROXCEN_S_fine.h5'
-    ];
+    // 3D: resolve per-target first-ON files via the epochs API
+    // (replaces the old hardcoded 4-file PROXCEN list)
+    var fileList = [];
+    try {
+        var tgt = (document.getElementById('stack-target').value || 'PROXCEN').trim().toUpperCase();
+        var er = await fetch('/api/stack/epochs?target=' + encodeURIComponent(tgt));
+        var ed = await er.json();
+        (ed.epochs || []).forEach(function(e) {
+            if (e.first_on_file && fileList.length < 8) fileList.push('fine/' + e.first_on_file);
+        });
+    } catch (err) { /* empty list handled below */ }
+    if (fileList.length === 0) {
+        bodyDiv.innerHTML = '<div class="waterfall-error">No ON files discovered for this target.</div>';
+        return;
+    }
 
     // Try each file until one works
     var fileIdx = 0;

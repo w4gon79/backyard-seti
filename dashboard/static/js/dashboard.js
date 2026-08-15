@@ -843,8 +843,19 @@ function refreshFileDetailPanel() {
 
 // ─── Scan Control ─────────────────────────────────────────────────────
 async function startScan() {
+    // 3D: derive target + resolution from the selected filenames
+    // (e.g. fine/Parkes_57910_34684_PROXCEN_S_fine.h5 -> PROXCEN/fine)
+    var scanTarget = 'PROXCEN';
+    var scanRes = 'fine';
+    if (selectedFiles.size > 0) {
+        var fn = Array.from(selectedFiles)[0].split('/').pop();
+        var parts = fn.split('_');
+        if (parts.length >= 4) scanTarget = parts[3];
+        if (fn.indexOf('_mid.') !== -1) scanRes = 'mid';
+        else if (fn.indexOf('_time.') !== -1) scanRes = 'time';
+    }
     var params = {
-        target: 'PROXCEN', resolution: 'fine',
+        target: scanTarget, resolution: scanRes,
         sub_band_chans: parseInt(document.getElementById('ctrl-subband-width').value),
         overlap: parseInt(document.getElementById('ctrl-overlap').value),
         max_drift: parseFloat(document.getElementById('ctrl-max-drift').value),

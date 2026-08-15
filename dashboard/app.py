@@ -2968,16 +2968,20 @@ def api_stack_epochs():
     result = []
     for label, info in sorted(epochs.items()):
         scan = scan_by_mjd.get(info['mjd_int'])
+        seqs = info.get('seqs') or []
+        first_on = (f"Parkes_{label}_{seqs[0][0]}_{target}_S_fine.h5"
+                    if seqs else None)
         result.append({
             'label': label,
             'mjd_int': info['mjd_int'],
-            'n_pairs': len(info['seqs']),
+            'n_pairs': len(seqs),
             'n_on': info.get('n_on', 0),
             'n_off': info.get('n_off', 0),
             'cadence_ok': info.get('cadence_ok'),  # None = unknown (GBT)
             'telescope': info.get('telescope', 'Parkes'),
             'scan_status': scan['status'] if scan else None,
             'scan_id': scan['scan_id'] if scan else None,
+            'first_on_file': first_on,
         })
     return jsonify({'epochs': result})
 
@@ -4084,7 +4088,7 @@ def api_stack_stacked_waterfall(job_id):
         seqs = ep_def['seqs']
 
         # Barycentric correction for this epoch
-        first_on = f"Parkes_{mjd_int}_{seqs[0][0]}_PROXCEN_S_fine.h5"
+        first_on = f"Parkes_{mjd_int}_{seqs[0][0]}_{target}_S_fine.h5"
         mjd = extract_mjd_from_filename(first_on)
         v_bary = compute_barycentric_velocity(mjd, target_ra, target_dec, 'parkes')
         c = 299792458.0
@@ -4092,8 +4096,8 @@ def api_stack_stacked_waterfall(job_id):
 
         # Load ON and OFF using the efficient hdf5_reader
         on_seq, off_seq = seqs[0]
-        on_file = f"Parkes_{mjd_int}_{on_seq}_PROXCEN_S_fine.h5"
-        off_file = f"Parkes_{mjd_int}_{off_seq}_PROXCEN_R_fine.h5"
+        on_file = f"Parkes_{mjd_int}_{on_seq}_{target}_S_fine.h5"
+        off_file = f"Parkes_{mjd_int}_{off_seq}_{target}_R_fine.h5"
         on_path = find_h5(on_file)
         off_path = find_h5(off_file)
         if not on_path or not off_path:
