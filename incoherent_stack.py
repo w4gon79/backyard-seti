@@ -114,20 +114,30 @@ def _discover_epochs(target='PROXCEN'):
     """
     epochs = {}
     pat = _re.compile(r'Parkes_(\d+)_(\d+)_' + target + r'_[SR]_fine\.h5$')
+    # GBT grammar: *_guppi_<MJD>_<SEQ>_<TARGET>_* (gpuspec files). No S/R
+    # cadence markers exist, so GBT epochs are list-only: files counted,
+    # cadence_ok stays None (unknown) until ON/OFF conventions verified.
+    gbt_pat = _re.compile(r'guppi_(\d+)_(\d+)_' + target + r'_')
 
     for d in _fine_dirs_for(target):
         if not os.path.isdir(d):
             continue
         for f in os.listdir(d):
             m = pat.match(f)
-            if not m:
-                continue
-            mjd = m.group(1)
-            seq = m.group(2)
-            is_on = ('_' + target + '_S_') in f
-
+            if m:
+                mjd, seq = m.group(1), m.group(2)
+                is_on = ('_' + target + '_S_') in f
+                tel = 'Parkes'
+            else:
+                m = gbt_pat.search(f)
+                if not m:
+                    continue
+                mjd, seq = m.group(1), m.group(2)
+                is_on = False
+                tel = 'GBT'
             if mjd not in epochs:
-                epochs[mjd] = {'mjd_int': int(mjd), 'files': [], 'seqs': []}
+                epochs[mjd] = {'mjd_int': int(mjd), 'telescope': tel,
+                               'files': [], 'seqs': []}
             epochs[mjd]['files'].append((seq, is_on, f))
 
     # Build ON/OFF pairs from discovered files
@@ -145,6 +155,12 @@ def _discover_epochs(target='PROXCEN'):
             else:
                 i += 1
         info['seqs'] = pairs
+        # 3C cadence accounting: canonical Parkes fine epoch = 3 ON + 3 OFF
+        info['n_on'] = sum(1 for _, is_on, _ in files if is_on)
+        info['n_off'] = len(files) - info['n_on']
+        if info.get('telescope') == 'Parkes':
+            info['cadence_ok'] = (len(pairs) >= 3
+                                  and info['n_on'] >= 3 and info['n_off'] >= 3)
         # Clean up: remove the files list, keep seqs
         del info['files']
 

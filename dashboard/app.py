@@ -2870,22 +2870,48 @@ def stack_page():
 
 @app.route('/api/stack/epochs')
 def api_stack_epochs():
-    """List available epochs for stacking."""
+    """List available epochs for stacking.
+
+    3C: cadence validation (Parkes: 3 ON + 3 OFF) and per-epoch scan
+    status cross-referenced from the scans table via mjd_start.
+    """
     target = request.args.get('target', 'PROXCEN').upper()
     try:
         from incoherent_stack import get_available_epochs
         epochs = get_available_epochs(target)
-        # Build a summary list with file availability info
-        result = []
-        for label, info in sorted(epochs.items()):
-            result.append({
-                'label': label,
-                'mjd_int': info['mjd_int'],
-                'n_pairs': len(info['seqs']),
-            })
-        return jsonify({'epochs': result})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+    scan_by_mjd = {}
+    try:
+        from db import get_db
+        conn = get_db()
+        rows = conn.execute(
+            'SELECT scan_id, status, mjd_start FROM scans '
+            'WHERE UPPER(target) = ? AND mjd_start IS NOT NULL '
+            'ORDER BY timestamp', (target,)).fetchall()
+        conn.close()
+        for scan_id, status, mjd_start in rows:
+            scan_by_mjd[int(mjd_start)] = {'scan_id': scan_id,
+                                           'status': status}
+    except Exception:
+        pass  # DB unavailable: scan status stays null
+
+    result = []
+    for label, info in sorted(epochs.items()):
+        scan = scan_by_mjd.get(info['mjd_int'])
+        result.append({
+            'label': label,
+            'mjd_int': info['mjd_int'],
+            'n_pairs': len(info['seqs']),
+            'n_on': info.get('n_on', 0),
+            'n_off': info.get('n_off', 0),
+            'cadence_ok': info.get('cadence_ok'),  # None = unknown (GBT)
+            'telescope': info.get('telescope', 'Parkes'),
+            'scan_status': scan['status'] if scan else None,
+            'scan_id': scan['scan_id'] if scan else None,
+        })
+    return jsonify({'epochs': result})
 
 
 @app.route('/api/stack/run', methods=['POST'])
