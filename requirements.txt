@@ -1,0 +1,15 @@
+# Core (dashboard, DB, env config, HDF5 I/O)
+flask>=3.0
+numpy
+python-dotenv
+h5py
+hdf5plugin
+
+# Berkeley SETI tools (requires Python 3.11)
+blimpy
+turbo_seti
+astropy
+
+# Incoherent stacking
+matplotlib
+scipy

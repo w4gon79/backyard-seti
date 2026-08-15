@@ -1,5 +1,6 @@
-# Data files (large, downloadable from BL portal)
-data/
+# Root data dir only (large, downloadable from BL portal).
+# Anchored so dashboard/static/data (sky map assets) stays tracked.
+/data/
 *.fil
 *.h5
 *.hdf5

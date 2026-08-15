@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # NOTE: Must run with Python 3.11 (has turbo_seti installed)
-# C:\Users\w4gon\AppData\Local\Programs\Python\Python311\python.exe src\batch_search.py
+# e.g. python src\batch_search.py
 """
 batch_search.py - Run turbo_seti on all PROXCEN cadence sessions.
 Outputs results to results/ and writes a summary to results/batch_summary.txt

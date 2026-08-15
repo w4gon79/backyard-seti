@@ -181,8 +181,8 @@ cd backyard-seti
 # Install Berkeley SETI tools
 pip install blimpy turbo_seti astropy
 
-# For the dashboard
-pip install flask plotly numpy
+# Core dependencies (dashboard, HDF5 I/O, env config)
+pip install flask numpy python-dotenv h5py hdf5plugin
 
 # For incoherent stacking
 pip install matplotlib scipy
@@ -190,10 +190,12 @@ pip install matplotlib scipy
 
 ### Python Path
 
-On this machine, use Python 3.11 explicitly:
-```
-C:\Users\w4gon\AppData\Local\Programs\Python\Python311\python.exe
-```
+This project requires Python 3.11 with the Berkeley SETI tools installed.
+If your system default is a different Python, invoke 3.11 explicitly when
+running pipelines (e.g. `py -3.11` on Windows or the full path to your
+3.11 interpreter).
+
+> Note: Python 3.13/3.14 may be default on PATH but turbo_seti requires 3.11.
 
 ### Environment
 

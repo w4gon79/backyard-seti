@@ -1014,7 +1014,7 @@ def api_scan_start():
     scan_state['scan_dir'] = scan_dir
     
     # Build command - output to the scan directory
-    py = r'C:\Users\w4gon\AppData\Local\Programs\Python\Python311\python.exe'
+    py = sys.executable  # portability: interpreter running the dashboard
     script = os.path.join(SETI_ROOT, 'src', 'fine_res_pipeline.py')
     
     cmd = [py, script, '--out', scan_dir]
@@ -1243,7 +1243,7 @@ def api_scan_resume():
     snr = orig_params.get('snr', 5.0)
 
     # Build command with --resume
-    py = r'C:\Users\w4gon\AppData\Local\Programs\Python\Python311\python.exe'
+    py = sys.executable  # portability: interpreter running the dashboard
     script = os.path.join(SETI_ROOT, 'src', 'fine_res_pipeline.py')
 
     cmd = [py, script, '--out', scan_dir, '--resume']

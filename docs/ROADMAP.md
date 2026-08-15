@@ -470,9 +470,7 @@ potential novel signals.
 
 ### Python Environment
 
-- **Production:** Python 3.11 at 
-  `C:\Users\w4gon\AppData\Local\Programs\Python\Python311\python.exe`
-- **Wrapper:** `seti-python.bat` in G:\seti
+- **Production:** Python 3.11 (any install location)
 - turbo_seti 2.3.2, blimpy 2.1.4, h5py 3.16.0
 - **WARNING:** Python 3.14 is default on PATH but has broken turbo_seti 
   (missing pkg_resources). Always use 3.11 explicitly.
