@@ -3177,7 +3177,14 @@ def api_stack_results(job_id):
     job = _stack_jobs.get(job_id)
     if job and job['status'] == 'complete' and job.get('result'):
         r = job['result']
-        return jsonify({
+        # Chunked runs return empty grid/power lists by design (spectra live
+        # on disk as .npy). Emitting "[]" here makes the frontend treat them
+        # as renderable data (empty arrays are truthy in JS), producing a blank
+        # Plotly chart with only the sigma-threshold line visible. Only include
+        # the arrays when they actually carry data.
+        grid_freqs = r.get('grid_freqs') or []
+        stack_power = r.get('stack_power') or []
+        resp = {
             'job_id': job_id,
             'success': True,
             'target': r.get('target'),
@@ -3191,10 +3198,12 @@ def api_stack_results(job_id):
             'peaks': r.get('peaks', []),
             'epoch_info': r.get('epoch_info', []),
             'grid_n_bins': r.get('grid_n_bins'),
-            'grid_freqs': r.get('grid_freqs'),
-            'stack_power': r.get('stack_power'),
             'has_spectrum': True,
-        })
+        }
+        if grid_freqs and stack_power:
+            resp['grid_freqs'] = grid_freqs
+            resp['stack_power'] = stack_power
+        return jsonify(resp)
 
     # Fall back to SQLite DB (for jobs from previous dashboard runs)
     try:

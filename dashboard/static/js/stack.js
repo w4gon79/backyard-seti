@@ -457,8 +457,11 @@ function deriveWaterfallFile() {
 }
 
 function loadPlot(jobId) {
-    // Try interactive Plotly chart first (needs grid_freqs + stack_power)
-    if (currentResults && currentResults.grid_freqs && currentResults.stack_power) {
+    // Try interactive Plotly chart first (needs grid_freqs + stack_power).
+    // Guard for length too: chunked runs return [] (truthy in JS) with
+    // spectra on disk; empty arrays here would render a blank chart.
+    if (currentResults && currentResults.grid_freqs && currentResults.stack_power &&
+        currentResults.grid_freqs.length > 0 && currentResults.stack_power.length > 0) {
         renderInteractiveSpectrum(currentResults);
         return;
     }
