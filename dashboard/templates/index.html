@@ -184,6 +184,7 @@
                 <div class="bary-cross-group">
                     <label title="Select 2+ scans to find signals that appear in ON frames across multiple epochs but NOT in OFF frames. Requires barycentric correction to be run first.">Cross-Epoch Scans</label>
                     <div id="bary-scan-checkboxes" class="bary-scan-list"></div>
+                    <div class="bary-cross-controls" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;border-top:1px solid #2a3b4d;padding-top:8px;">
                     <label title="How closely two hit frequencies must match across epochs to count as the same signal. After barycentric correction, a real transmitter should appear at the same rest-frame frequency in every epoch. Default 10 Hz accounts for small uncertainties in the correction and turbo_seti frequency binning. Tighter (1-5 Hz) is stricter but may miss slightly misaligned hits. Wider (50-100 Hz) catches more candidates but increases false positives.">Tolerance (Hz)</label>
                     <input type="number" id="bary-tolerance-hz" value="10" min="1" max="1000" step="1" style="width:80px;" title="How closely two hit frequencies must match across epochs to count as the same signal. Default 10 Hz. Tighter = fewer false positives but may miss real signals. Wider = more candidates but more noise.">
                     <label title="Minimum number of epochs a signal must appear in to be flagged as a candidate. With 2 epochs, a match in both ON frames is already statistically significant (false alarm probability is very low). With 3+ epochs, confidence is even higher. Default 2 is the standard for cross-epoch SETI. Raise to 3 if you have many epochs and want stricter filtering.">Min Epochs</label>
@@ -191,6 +192,7 @@
                     <label title="Post-filter: only use hits with SNR at or above this value. Since turboSETI's SNR threshold is a simple cutoff on the detection statistic, post-filtering existing results is mathematically equivalent to re-running turboSETI at the higher threshold. No re-scan needed. Default 0 = use all hits from the original search. Try 10 or 15 to eliminate noise detections.">Min SNR</label>
                     <input type="number" id="bary-min-snr" value="0" min="0" max="100" step="1" style="width:60px;" title="Post-filter hits by SNR. 0 = use all. 10-15 recommended for noise rejection. Equivalent to re-running turboSETI at that SNR threshold without re-scanning.">
                     <button id="btn-cross-epoch" class="btn-warning" onclick="runCrossEpoch()">Run Cross-Epoch Search</button>
+                    </div>
                 </div>
                 <div class="bary-cross-history-row" style="margin-top:8px;">
                     <label style="font-size:0.85em;color:#8ab4f8;">Previous Runs:</label>
@@ -342,7 +344,7 @@
     </div>
 </div>
 
-<script src="/static/js/dashboard.js?v=72"></script>
+<script src="/static/js/dashboard.js?v=73"></script>
 <script src="/static/js/targets.js?v=2"></script>
 </body>
 </html>

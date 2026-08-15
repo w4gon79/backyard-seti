@@ -663,6 +663,22 @@ function parseDec(dec) {
 
 // ─── Local Data with File Selection ──────────────────────────────────
 
+// Collapsible target groups in Local Data (state persisted in localStorage)
+var collapsedTargets = {};
+try { collapsedTargets = JSON.parse(localStorage.getItem('collapsedTargets') || '{}') || {}; } catch (e) {}
+
+function toggleTargetGroup(target) {
+    var el = document.getElementById('target-files-' + target);
+    if (!el) return;
+    var hide = el.style.display !== 'none';
+    el.style.display = hide ? 'none' : '';
+    if (hide) collapsedTargets[target] = true;
+    else delete collapsedTargets[target];
+    try { localStorage.setItem('collapsedTargets', JSON.stringify(collapsedTargets)); } catch (e) {}
+    var arrow = document.getElementById('target-arrow-' + target);
+    if (arrow) arrow.textContent = hide ? '\u25B8' : '\u25BE';
+}
+
 async function loadLocalData() {
     var div = document.getElementById('local-data-list');
     div.innerHTML = '<p style="color:#8ab4f8;">Loading local data...</p>';
@@ -684,7 +700,11 @@ async function loadLocalData() {
             var totalCount = fineCount + midCount + fbCount + h5Count;
             if (totalCount === 0) continue;
 
-            html += '<div class="target-header"><strong style="color:#4fc3f7;">' + target + '</strong><span style="color:#546e7a;"> ' + totalCount + ' files</span></div>';
+            var isCollapsed = !!collapsedTargets[target];
+            html += '<div class="target-header" style="cursor:pointer;user-select:none;" onclick="toggleTargetGroup(\'' + target + '\')" title="Click to collapse/expand">' +
+                '<span id="target-arrow-' + target + '" style="color:#90a4ae;display:inline-block;width:14px;">' + (isCollapsed ? '\u25B8' : '\u25BE') + '</span>' +
+                '<strong style="color:#4fc3f7;">' + target + '</strong><span style="color:#546e7a;"> ' + totalCount + ' files</span></div>';
+            html += '<div class="target-files" id="target-files-' + target + '"' + (isCollapsed ? ' style="display:none;"' : '') + '>';
 
             // Helper to render a format section
             function renderSection(label, labelClass, fileList) {
@@ -709,6 +729,7 @@ async function loadLocalData() {
             renderSection('MID-RES', 'mid-label', files.mid);
             renderSection('FILTERBANK', 'fb-label', files.filterbank);
             renderSection('HDF5', 'h5-label', files.h5);
+            html += '</div>';  // close target-files collapsible wrapper
         }
         div.innerHTML = html || '<p style="color:#546e7a;">No local data found.</p>';
 
@@ -2084,11 +2105,16 @@ function onBaryTargetSelected() {
         document.getElementById('bary-ra').value = baryTargets[target].ra;
         document.getElementById('bary-dec').value = baryTargets[target].dec;
     }
+    // Re-filter the Cross-Epoch scan list for the selected target
+    updateBaryScanCheckboxes();
 }
 
 function updateBaryScanCheckboxes() {
     var container = document.getElementById('bary-scan-checkboxes');
     if (!container) return;
+    // Filter by the Barycentric Target dropdown above this list
+    var sel = document.getElementById('bary-target-select');
+    var activeTarget = (sel && sel.value) ? sel.value.toUpperCase() : '';
     if (scansList.length === 0) {
         container.innerHTML = '<span style="color:#546e7a;font-size:0.85em;">No scans available.</span>';
         return;
@@ -2110,6 +2136,9 @@ function updateBaryScanCheckboxes() {
     for (var i = 0; i < scansList.length; i++) {
         var s = scansList[i];
         var sid = s.scan_id;
+        // Skip scans for other targets (target from row, else scan_id prefix)
+        var scanTarget = (s.target || sid.split('_')[0] || '').toUpperCase();
+        if (activeTarget && scanTarget !== activeTarget) continue;
         // Skip scans that haven't been corrected
         if (window.correctedScanIds.indexOf(sid) === -1) continue;
         var label = scanLabel(s);
@@ -2127,7 +2156,7 @@ function updateBaryScanCheckboxes() {
         html += '</span>';
     }
     if (!html) {
-        container.innerHTML = '<span style="color:#546e7a;font-size:0.85em;">No barycentrically corrected scans yet. Run correction first.</span>';
+        container.innerHTML = '<span style="color:#546e7a;font-size:0.85em;">No corrected scans for ' + escapeHtml(activeTarget || 'any target') + ' yet. Run correction first.</span>';
         return;
     }
     container.innerHTML = html;
