@@ -36,7 +36,9 @@
 
                 <div class="control-group">
                     <label for="stack-target" title="The target name must match exactly what BL uses in filenames (e.g. PROXCEN in Parkes_57791_72989_PROXCEN_S_fine.h5). The coordinate database must also have this target registered.">Target <span class="tooltip-icon">ⓘ</span></label>
-                    <input type="text" id="stack-target" value="PROXCEN" list="registry-targets" placeholder="e.g. PROXCEN" title="Must match BL filename convention exactly. Registry suggestions offered; free text allowed.">
+                    <select id="stack-target" title="Target from the registry. New targets can be added via the dashboard Target Registry panel.">
+                        <option value="PROXCEN" selected>PROXCEN</option>
+                    </select>
                 </div>
 
                 <div class="control-row">
@@ -199,8 +201,9 @@
 
                 <div class="control-group">
                     <label for="tl-target" title="Target star name. Must match BL filename convention (e.g. PROXCEN in Parkes_57791_72989_PROXCEN_S_fine.h5). Only targets with downloaded data and barycentric correction will work.">Target <span class="tooltip-icon">&#9432;</span></label>
-                    <input type="text" id="tl-target" value="PROXCEN" list="registry-targets" placeholder="e.g. PROXCEN">
-                    <datalist id="registry-targets"></datalist>
+                    <select id="tl-target" title="Target from the registry. New targets can be added via the dashboard Target Registry panel.">
+                        <option value="PROXCEN" selected>PROXCEN</option>
+                    </select>
                 </div>
 
                 <div class="control-row">
@@ -291,6 +294,6 @@
     </div>
 </div>
 
-<script src="/static/js/stack.js?v=42"></script>
+<script src="/static/js/stack.js?v=43"></script>
 </body>
 </html>

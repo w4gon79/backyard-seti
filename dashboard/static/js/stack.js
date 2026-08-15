@@ -15,15 +15,22 @@ var currentResults = null;
 // ─── Init ─────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', function() {
     loadEpochs();
-    // 3E-lite: registry-fed target suggestions for both target inputs
+    // 3E-lite: registry-fed target dropdowns for both target selects.
+    // PROXCEN is seeded in the HTML so the page works pre-fetch; the fetch
+    // replaces options with the full registry (PROXCEN kept first).
     fetch('/api/registry').then(function(r) { return r.json(); }).then(function(d) {
-        var dl = document.getElementById('registry-targets');
-        if (!dl) return;
-        var html = '';
-        (d.targets || []).forEach(function(t) {
-            html += '<option value="' + t.name + '">' + (t.display_name || t.name) + '</option>';
+        var names = (d.targets || []).map(function(t) { return t.name; });
+        if (names.indexOf('PROXCEN') === -1) names.unshift('PROXCEN');
+        ['stack-target', 'tl-target'].forEach(function(id) {
+            var el = document.getElementById(id);
+            if (!el || el.tagName !== 'SELECT') return;
+            var cur = el.value || 'PROXCEN';
+            var html = '';
+            names.forEach(function(n) {
+                html += '<option value="' + n + '"' + (n === cur ? ' selected' : '') + '>' + n + '</option>';
+            });
+            el.innerHTML = html;
         });
-        dl.innerHTML = html;
     }).catch(function() {});
     loadHistory().then(function() {
         // After history loads, check for any running job and auto-connect
