@@ -32,6 +32,9 @@
     <div class="row">
         <div class="panel panel-half">
             <div class="panel-header">🌌 Sky Map</div>
+            <div style="margin:4px 0;">
+                <button id="btn-registry-sky" class="btn-small" onclick="toggleRegistrySky()" title="Plot all registry targets on the sky map, colored by scan status (green=scanned, amber=data unscanned, grey=no local data). Click again to remove them.">Registry Sky</button>
+            </div>
             <div id="sky-map-container">
                 <div id="celestial-map"></div>
                 <div id="sky-map-info">
@@ -339,7 +342,7 @@
     </div>
 </div>
 
-<script src="/static/js/dashboard.js?v=71"></script>
+<script src="/static/js/dashboard.js?v=72"></script>
 <script src="/static/js/targets.js?v=2"></script>
 </body>
 </html>

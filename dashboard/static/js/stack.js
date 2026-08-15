@@ -15,6 +15,16 @@ var currentResults = null;
 // ─── Init ─────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', function() {
     loadEpochs();
+    // 3E-lite: registry-fed target suggestions for both target inputs
+    fetch('/api/registry').then(function(r) { return r.json(); }).then(function(d) {
+        var dl = document.getElementById('registry-targets');
+        if (!dl) return;
+        var html = '';
+        (d.targets || []).forEach(function(t) {
+            html += '<option value="' + t.name + '">' + (t.display_name || t.name) + '</option>';
+        });
+        dl.innerHTML = html;
+    }).catch(function() {});
     loadHistory().then(function() {
         // After history loads, check for any running job and auto-connect
         autoConnectToRunningJob();

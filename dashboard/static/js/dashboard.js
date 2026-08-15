@@ -167,6 +167,9 @@ function initSkyMap() {
             for (var name in celestialTargets) {
                 if (!celestialTargets.hasOwnProperty(name)) continue;
                 var t = celestialTargets[name];
+                var colDot = t.color || '#ff4444';
+                var colRing = t.color || '#ff6666';
+                var colLabel = t.color || '#ff8888';
 
                 var pt = null;
                 try { pt = Celestial.mapProjection([t.ra * 15, t.dec]); } catch(e) { continue; }
@@ -177,7 +180,7 @@ function initSkyMap() {
                 if (!visible) continue;
 
                 // Crosshair ring
-                ctx.strokeStyle = "#ff6666";
+                ctx.strokeStyle = colRing;
                 ctx.lineWidth = 1.5;
                 ctx.globalAlpha = 0.7;
                 ctx.beginPath();
@@ -186,7 +189,7 @@ function initSkyMap() {
 
                 // Solid dot
                 ctx.globalAlpha = 1.0;
-                ctx.fillStyle = "#ff4444";
+                ctx.fillStyle = colDot;
                 ctx.strokeStyle = "#ffffff";
                 ctx.lineWidth = 1.5;
                 ctx.beginPath();
@@ -195,7 +198,7 @@ function initSkyMap() {
                 ctx.stroke();
 
                 // Crosshair lines
-                ctx.strokeStyle = "#ff6666";
+                ctx.strokeStyle = colRing;
                 ctx.lineWidth = 1.5;
                 ctx.globalAlpha = 0.7;
                 ctx.beginPath();
@@ -207,7 +210,7 @@ function initSkyMap() {
 
                 // Label
                 ctx.globalAlpha = 1.0;
-                ctx.fillStyle = "#ff8888";
+                ctx.fillStyle = colLabel;
                 ctx.font = "bold 12px sans-serif";
                 ctx.fillText(name, pt[0] + 16, pt[1] + 4);
             }
@@ -257,7 +260,7 @@ function updateSkyMapInfo() {
     var html = '';
     for (var i = 0; i < keys.length; i++) {
         var t = celestialTargets[keys[i]];
-        html += '<p style="margin:2px 0;"><span style="color:#ff6666;">\u25cf</span> <strong>' + keys[i] + '</strong> &nbsp;RA: ' + formatRA(t.ra) + ', Dec: ' + formatDec(t.dec) + '</p>';
+        html += '<p style="margin:2px 0;"><span style="color:#ff6666;">\u25cf</span> <strong>' + keys[i] + '</strong> &nbsp;RA: ' + formatRA(t.ra) + ', Dec: ' + formatDec(t.dec) + (t.status ? ' <span style="color:' + (t.color || '#90a4ae') + ';">[' + t.status + ']</span>' : '') + '</p>';
     }
     info.innerHTML = html;
 }
@@ -271,6 +274,58 @@ function plotTargetOnMap(name, ra, dec, forceAdd) {
         return;
     }
     addTargetMarker(name, ra, dec);
+}
+
+// --- 3E-lite: registry sky view, colored by scan status -------------
+
+var registrySkyNames = [];
+var registrySkyBusy = false;
+
+async function toggleRegistrySky() {
+    var btn = document.getElementById('btn-registry-sky');
+    if (registrySkyBusy) return;
+    if (registrySkyNames.length) {
+        // toggle off: remove only the registry-plotted markers
+        registrySkyNames.forEach(function (n) { removeTargetMarker(n); });
+        registrySkyNames = [];
+        if (btn) btn.textContent = 'Registry Sky';
+        return;
+    }
+    registrySkyBusy = true;
+    if (btn) btn.textContent = 'Loading...';
+    try {
+        var resp = await fetch('/api/registry');
+        var d = await resp.json();
+        var targets = (d.targets || []).filter(function (t) {
+            return t.ra_hours != null;
+        });
+        await Promise.all(targets.map(async function (t) {
+            var status = 'no local data';
+            var color = '#90a4ae';
+            try {
+                var r = await fetch('/api/stack/epochs?target=' +
+                                    encodeURIComponent(t.name));
+                var ed = await r.json();
+                var eps = ed.epochs || [];
+                var scanned = eps.some(function (e) {
+                    return e.scan_status === 'complete'; });
+                if (scanned) { status = 'scanned'; color = '#66bb6a'; }
+                else if (eps.length > 0) {
+                    status = eps.length + ' ep unscanned';
+                    color = '#ffb74d';
+                }
+            } catch (e) { /* status stays no-data */ }
+            celestialTargets[t.name] = { ra: t.ra_hours, dec: t.dec_deg,
+                                         color: color, status: status };
+            registrySkyNames.push(t.name);
+        }));
+        try { Celestial.redraw(); } catch (e) {}
+        updateSkyMapInfo();
+        if (btn) btn.textContent = 'Registry Sky (on)';
+    } catch (e) {
+        alert('Registry sky view failed: ' + e.message);
+    }
+    registrySkyBusy = false;
 }
 
 function formatRA(raHours) {
