@@ -10,6 +10,7 @@ force) and cancellable.
 """
 import json
 import re
+import sqlite3
 import threading
 import urllib.parse
 import urllib.request
@@ -52,9 +53,18 @@ def ensure_table(db_path=None):
                 fine_bytes   INTEGER,
                 total_bytes  INTEGER,
                 telescopes   TEXT,
+                ra_hours     REAL,
+                dec          REAL,
                 swept_at     TEXT
             )
         ''')
+        # Migration for catalogs created before ra/dec capture
+        for _col, _typ in (('ra_hours', 'REAL'), ('dec', 'REAL')):
+            try:
+                conn.execute(
+                    f'ALTER TABLE bl_catalog ADD COLUMN {_col} {_typ}')
+            except sqlite3.OperationalError:
+                pass  # column already exists
         conn.commit()
     finally:
         conn.close()
@@ -77,6 +87,24 @@ def _query_target(name):
     req = urllib.request.Request(url, headers=_UA)
     with urllib.request.urlopen(req, timeout=60) as r:
         return json.loads(r.read().decode()).get('data', [])
+
+
+def _pick_coords(files):
+    """Best coordinates from a target's file objects: prefer ON-pointing
+    fine files, then any fine, then anything. BL gives RA in degrees;
+    stored as RA hours for the sky map / registry convention."""
+    best, prio = (None, None), 9
+    for f in files:
+        ra, dec = f.get('ra'), f.get('decl')
+        if ra is None or dec is None:
+            continue
+        url = f.get('url') or ''
+        fine = ('_fine.' in url) or ('guppi_' in url)
+        on = '_S_' in url
+        p = 0 if (fine and on) else (1 if fine else 2)
+        if p < prio:
+            prio, best = p, (float(ra) / 15.0, float(dec))
+    return best
 
 
 def _aggregate(name, files):
@@ -114,6 +142,7 @@ def _aggregate(name, files):
     agg['fine_epochs'] = len(agg['_mjds'])
     agg['telescopes'] = ','.join(sorted(agg['telescopes']))
     del agg['_mjds']
+    agg['ra_hours'], agg['dec'] = _pick_coords(files)
     return agg
 
 
@@ -124,8 +153,8 @@ def _upsert(agg, db_path=None):
             INSERT INTO bl_catalog
                 (target, n_files, n_fine, n_mid, n_time, fine_epochs,
                  fine_on, fine_off, fine_bytes, total_bytes, telescopes,
-                 swept_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+                 ra_hours, dec, swept_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(target) DO UPDATE SET
                 n_files=excluded.n_files, n_fine=excluded.n_fine,
                 n_mid=excluded.n_mid, n_time=excluded.n_time,
@@ -134,11 +163,12 @@ def _upsert(agg, db_path=None):
                 fine_bytes=excluded.fine_bytes,
                 total_bytes=excluded.total_bytes,
                 telescopes=excluded.telescopes,
+                ra_hours=excluded.ra_hours, dec=excluded.dec,
                 swept_at=excluded.swept_at
         ''', (agg['target'], agg['n_files'], agg['n_fine'], agg['n_mid'],
               agg['n_time'], agg['fine_epochs'], agg['fine_on'],
               agg['fine_off'], agg['fine_bytes'], agg['total_bytes'],
-              agg['telescopes'],
+              agg['telescopes'], agg['ra_hours'], agg['dec'],
               datetime.now(timezone.utc).isoformat(timespec='seconds')))
         conn.commit()
     finally:
@@ -162,7 +192,9 @@ def start_sweep(force=False, mode=None, db_path=None):
     Modes: 'resume' (default; skip already-swept targets), 'all'
     (= force), 'refresh' (re-aggregate already-swept rows first with
     current logic, then sweep the remainder; used after an aggregation
-    bug fix)."""
+    bug fix), 'fine' (re-query only targets that already have fine-res
+    data: the practical 'check for new epochs' action, minutes not
+    hours)."""
     mode = mode or ('all' if force else 'resume')
     with _lock:
         if sweep_state['active']:
@@ -181,9 +213,14 @@ def start_sweep(force=False, mode=None, db_path=None):
         try:
             swept = {r[0].upper() for r in conn.execute(
                 'SELECT target FROM bl_catalog').fetchall()}
+            fine_set = ({r[0].upper() for r in conn.execute(
+                'SELECT target FROM bl_catalog WHERE n_fine > 0').fetchall()}
+                if mode == 'fine' else None)
         finally:
             conn.close()
-        if mode == 'refresh':
+        if mode == 'fine':
+            names = [n for n in names if n.upper() in fine_set]
+        elif mode == 'refresh':
             # re-do swept rows first (fixed aggregation), then the rest
             names = ([n for n in names if n.upper() in swept] +
                      [n for n in names if n.upper() not in swept])

@@ -402,20 +402,24 @@ function renderBLCatalog(d) {
     html += '<label style="margin-left:8px;"><input type="checkbox" ' +
             (window._blCatOnOff ? 'checked' : '') +
             ' onchange="window._blCatOnOff=this.checked;blCatalogBrowse()"> ON+OFF cadence</label>';
-    html += '<button class="btn-small" style="margin-left:8px;" onclick="blCatalogSweep()">Resweep</button>';
+    html += '<button class="btn-small" style="margin-left:8px;" onclick="blCatalogSweep()" title="Resume the sweep: query targets not yet cataloged (hours if incomplete)">Resweep</button>';
+    html += '<button class="btn-small" style="margin-left:4px;" onclick="blCatalogSweep(\'fine\')" title="Re-query only targets that already have fine-res data: fast check for new epochs/files (minutes)">Refresh</button>';
     html += '</div>';
     html += '<div id="blcat-sweepline" style="font-size:0.8em;color:#90a4ae;margin:4px 0;"></div>';
     html += '<table class="bl-table"><thead><tr><th>Target</th><th>Fine</th><th>Epochs</th><th>ON/OFF</th><th>Total files</th><th>Fine GB</th><th></th></tr></thead><tbody>';
     for (var i = 0; i < rows.length; i++) {
         var t = rows[i];
-        html += '<tr>' +
+        var raV = t.ra_hours != null ? t.ra_hours : 'null';
+        var decV = t.dec != null ? t.dec : 'null';
+        html += '<tr style="cursor:pointer;" title="Click to mark on sky map"' +
+            ' onclick="onBLRowClick(\'' + t.target.replace(/'/g, '') + '\',' + raV + ',' + decV + ')">' +
             '<td style="color:#4fc3f7;">' + escapeHtml(t.target) + '</td>' +
             '<td>' + t.n_fine + '</td>' +
             '<td>' + t.fine_epochs + '</td>' +
             '<td>' + t.fine_on + '/' + t.fine_off + '</td>' +
             '<td style="color:#90a4ae;">' + t.n_files + '</td>' +
             '<td>' + ((t.fine_bytes || 0) / 1e9).toFixed(1) + '</td>' +
-            '<td><button class="btn-small" onclick="blCatalogAdd(\'' + t.target.replace(/'/g, '') + '\')">Add to Registry</button></td>' +
+            '<td><button class="btn-small" onclick="event.stopPropagation();blCatalogAdd(\'' + t.target.replace(/'/g, '') + '\')">Add to Registry</button></td>' +
             '</tr>';
     }
     html += '</tbody></table>';
@@ -427,11 +431,11 @@ function renderBLCatalog(d) {
     resultsDiv.innerHTML = html;
 }
 
-async function blCatalogSweep() {
+async function blCatalogSweep(mode) {
     try {
         var resp = await fetch('/api/blcatalog/sweep', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({action: 'start'})
+            body: JSON.stringify({action: 'start', mode: mode || undefined})
         });
         var d = await resp.json();
         if (d.error) { alert(d.error); return; }
