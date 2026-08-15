@@ -3985,15 +3985,15 @@ def api_stack_stacked_waterfall(job_id):
     sys.path.insert(0, SETI_ROOT)
     sys.path.insert(0, os.path.join(SETI_ROOT, 'src'))
     from incoherent_stack import EPOCHS, find_h5
-    from barycentric_correct import compute_barycentric_velocity, extract_mjd_from_filename, TARGET_COORDS
+    from barycentric_correct import (compute_barycentric_velocity,
+                                     extract_mjd_from_filename,
+                                     resolve_target_coords)
     from hdf5_reader import read_channel_slice, freq_to_chan, get_header
 
-    coords = TARGET_COORDS.get(target, TARGET_COORDS.get('PROXCEN', (14.49, -62.68)))
-    if isinstance(coords, (tuple, list)):
-        target_ra, target_dec = coords[0], coords[1]
-    else:
-        target_ra = coords.get('ra', 14.49)
-        target_dec = coords.get('dec', -62.68)
+    target_ra, target_dec, _src = resolve_target_coords(target)
+    if target_ra is None:
+        return jsonify({'error':
+                        f'No coordinates for target "{target}"'}), 400
 
     chan_width_mhz = 2.7939677e-6  # Parkes fine-res channel width
 

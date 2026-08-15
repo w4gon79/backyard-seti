@@ -34,7 +34,7 @@ SETI_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, SETI_ROOT)
 sys.path.insert(0, os.path.join(SETI_ROOT, 'src'))
 
-from barycentric_correct import cross_epoch_match, TARGET_COORDS
+from barycentric_correct import cross_epoch_match, resolve_target_coords
 from incoherent_stack import (
     EPOCHS, find_h5, load_spectrum_window, build_common_grid, find_peaks,
     process_epoch, compute_barycentric_velocity, extract_mjd_from_filename,
@@ -191,9 +191,11 @@ def targeted_stack(candidate_freq, stack_width_mhz, epoch_labels, target='PROXCE
     
     Returns dict with stack result or None on failure.
     """
-    target_info = TARGET_COORDS.get(target, TARGET_COORDS.get('PROXCEN'))
-    # TARGET_COORDS values are (ra_hours, dec_degrees) tuples
-    target_ra, target_dec = target_info
+    target_ra, target_dec, _src = resolve_target_coords(target)
+    if target_ra is None:
+        print(f"ERROR: no coordinates for target '{target}' "
+              f"(not in registry or legacy dict); refusing to stack")
+        return None
     
     freq_center = candidate_freq
     
