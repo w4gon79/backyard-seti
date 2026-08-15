@@ -21,9 +21,10 @@ from db import get_db
 BL_API = 'https://seti.berkeley.edu/opendata/api'
 _UA = {'User-Agent': 'BackyardSETI/1.0'}
 
-# Parkes grammar: Tel_MJD_SEQ_TARGET_[SR]_res.h5
+# Parkes grammar: Tel_MJD_SEQ_TARGET_[_SR]_res.h5 (S/R position marker
+# optional; bare files carry no ON/OFF information)
 _PARKES_PAT = re.compile(
-    r'(Parkes|GBT|APF)_(\d+)_(\d+)_([A-Za-z0-9+\-.]+?)_([SR]?)_'
+    r'(Parkes|GBT|APF)_(\d+)_(\d+)_([A-Za-z0-9+\-.]+?)(?:_([SR]))?_'
     r'(fine|mid|time)\.h5$')
 # GBT guppi grammar: *guppi_MJD_SEQ_TARGET_*.h5 (high-res gpuspec
 # products; no S/R cadence markers in these names)
@@ -84,7 +85,7 @@ def _aggregate(name, files):
                fine_bytes=0, total_bytes=0, telescopes=set(), _mjds=set())
     for f in files:
         fname = (f.get('url') or '').split('/')[-1]
-        sz = f.get('filesize') or 0
+        sz = f.get('size') or f.get('filesize') or 0
         agg['total_bytes'] += sz
         m = _PARKES_PAT.search(fname)
         if m:
@@ -155,8 +156,14 @@ def _worker(name):
         return False
 
 
-def start_sweep(force=False, db_path=None):
-    """Launch the background sweep. Returns (started, info)."""
+def start_sweep(force=False, mode=None, db_path=None):
+    """Launch the background sweep. Returns (started, info).
+
+    Modes: 'resume' (default; skip already-swept targets), 'all'
+    (= force), 'refresh' (re-aggregate already-swept rows first with
+    current logic, then sweep the remainder; used after an aggregation
+    bug fix)."""
+    mode = mode or ('all' if force else 'resume')
     with _lock:
         if sweep_state['active']:
             return False, 'sweep already active'
@@ -169,14 +176,19 @@ def start_sweep(force=False, db_path=None):
     except Exception as e:
         sweep_state.update(active=False, last_error=f'list-targets: {e}')
         return False, str(e)
-    if not force:
+    if mode != 'all':
         conn = get_db(db_path)
         try:
             swept = {r[0].upper() for r in conn.execute(
                 'SELECT target FROM bl_catalog').fetchall()}
         finally:
             conn.close()
-        names = [n for n in names if n.upper() not in swept]
+        if mode == 'refresh':
+            # re-do swept rows first (fixed aggregation), then the rest
+            names = ([n for n in names if n.upper() in swept] +
+                     [n for n in names if n.upper() not in swept])
+        else:
+            names = [n for n in names if n.upper() not in swept]
     with _lock:
         sweep_state['total'] = len(names)
 

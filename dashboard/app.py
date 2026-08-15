@@ -395,7 +395,8 @@ def api_blcatalog_sweep():
         return jsonify({'success': True, 'cancelling': True})
     if action != 'start':
         return jsonify({'error': 'unknown action'}), 400
-    started, info = start_sweep(force=bool(params.get('force')))
+    started, info = start_sweep(force=bool(params.get('force')),
+                                mode=params.get('mode'))
     if not started:
         return jsonify({'error': str(info), 'active': True}), 409
     return jsonify({'started': True, 'queued': info})
