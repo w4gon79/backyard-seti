@@ -224,12 +224,22 @@ def resolve_target_coords(target_name, ra=None, dec=None):
     """
     Resolve target coordinates from name if RA/Dec not provided.
     
-    Returns (ra_hours, dec_deg, source) where source is 'manual' or 'database'.
+    Returns (ra_hours, dec_deg, source) where source is 'manual',
+    'registry' (Phase 3A SQLite targets table), or 'database' (legacy dict).
     """
     if ra is not None and dec is not None:
         return float(ra), float(dec), 'manual'
     
-    # Try database lookup
+    # Phase 3A: target registry (SQLite) first; registry wins over dict
+    try:
+        from target_registry import get_target
+        t = get_target(target_name)
+        if t and t.get('ra_hours') is not None:
+            return t['ra_hours'], t['dec_deg'], 'registry'
+    except Exception:
+        pass
+    
+    # Legacy static dict fallback
     for key, (db_ra, db_dec) in TARGET_COORDS.items():
         if key.upper() == target_name.upper().replace(' ', '_'):
             return db_ra, db_dec, 'database'

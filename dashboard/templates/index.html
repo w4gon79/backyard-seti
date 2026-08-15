@@ -56,6 +56,16 @@
                 </div>
                 <div id="bl-search-results" class="search-results"></div>
                 <div id="local-data-list" class="data-list"></div>
+                <div style="margin-top:8px;padding-top:8px;border-top:1px solid #2a3b4d;">
+                    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+                        <span style="font-size:0.85em;color:#90a4ae;">Target Registry</span>
+                        <input type="text" id="registry-name-input" placeholder="e.g. EPSILON ERIDANI" style="flex:1;min-width:140px;padding:4px 8px;background:#1a2634;border:1px solid #2a3b4d;color:#e0e0e0;border-radius:4px;">
+                        <button class="btn-small" onclick="registrySimbadPreview()">SIMBAD</button>
+                        <button class="btn-small btn-primary" onclick="registryAdd()">Add</button>
+                    </div>
+                    <div id="registry-simbad-preview" style="font-size:0.8em;color:#90a4ae;margin-top:4px;"></div>
+                    <div id="registry-target-list" style="margin-top:6px;max-height:220px;overflow-y:auto;"></div>
+                </div>
                 <div id="file-selection-controls" class="file-selection-controls" style="display:none;">
                     <button id="btn-select-all" class="btn-small">Select All</button>
                     <button id="btn-select-none" class="btn-small">Select None</button>
@@ -327,6 +337,7 @@
     </div>
 </div>
 
-<script src="/static/js/dashboard.js?v=67"></script>
+<script src="/static/js/dashboard.js?v=68"></script>
+<script src="/static/js/targets.js?v=1"></script>
 </body>
 </html>

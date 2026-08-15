@@ -2217,13 +2217,106 @@ def api_barycentric_delete(scan_id):
         return jsonify({'error': f'Failed to delete barycentric data: {e}'}), 500
 
 
+# ============================================================================
+# API: Target Registry (Phase 3A)
+# ============================================================================
+@app.route('/api/registry')
+def api_targets_list():
+    """List all registry targets."""
+    try:
+        from target_registry import list_targets
+        return jsonify({'targets': list_targets()})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/registry', methods=['POST'])
+def api_targets_add():
+    """Add a target. Manual coords win, else SIMBAD resolve, then BL check."""
+    params = request.json or {}
+    name = (params.get('name') or '').strip()
+    if not name:
+        return jsonify({'error': 'name required'}), 400
+    try:
+        from target_registry import add_target
+        t = add_target(
+            name, ra_hours=params.get('ra_hours'), dec_deg=params.get('dec_deg'),
+            display_name=params.get('display_name'),
+            aliases=params.get('aliases') or [],
+            notes=params.get('notes'),
+            priority=params.get('priority', 0) or 0,
+            check_bl=bool(params.get('check_bl', True)))
+        return jsonify({'success': True, 'target': t})
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/registry/simbad')
+def api_targets_simbad():
+    """SIMBAD identifier search preview (no DB writes)."""
+    name = request.args.get('name', '').strip()
+    if not name:
+        return jsonify({'error': 'name required'}), 400
+    from target_registry import simbad_search
+    return jsonify({'results': simbad_search(name)})
+
+
+@app.route('/api/registry/<name>/blcheck', methods=['POST'])
+def api_targets_blcheck(name):
+    """Re-run BL fine-res availability check for a target."""
+    if not re.match(r'^[A-Za-z0-9_+\-]+$', name):
+        return jsonify({'error': 'Invalid name'}), 400
+    try:
+        from target_registry import refresh_bl
+        return jsonify({'success': True, 'availability': refresh_bl(name)})
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 404
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/registry/<name>', methods=['DELETE'])
+def api_targets_delete(name):
+    if not re.match(r'^[A-Za-z0-9_+\-]+$', name):
+        return jsonify({'error': 'Invalid name'}), 400
+    try:
+        from db import get_db
+        conn = get_db()
+        cur = conn.execute('DELETE FROM targets WHERE UPPER(name) = UPPER(?)', (name,))
+        n = cur.rowcount
+        conn.commit()
+        conn.close()
+        if n == 0:
+            return jsonify({'error': 'not found'}), 404
+        return jsonify({'success': True, 'deleted': name})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/barycentric/targets')
 def api_barycentric_targets():
-    """Return known target coordinates for the dropdown."""
+    """Return known target coordinates for the dropdown.
+    Phase 3A: registry targets merged in first; registry wins on collision,
+    legacy TARGET_COORDS entries fill the remainder."""
     from barycentric_correct import TARGET_COORDS, TELESCOPE_LOCATIONS
     
     targets = []
+    _seen = set()
+    try:
+        from target_registry import list_targets
+        for t in list_targets():
+            if t.get('ra_hours') is None:
+                continue
+            targets.append({'name': t['name'], 'ra_hours': t['ra_hours'],
+                            'dec_deg': t['dec_deg']})
+            _seen.add(t['name'].upper())
+    except Exception as e:
+        print(f'[registry] list failed, dict fallback: {e}')
     for name, (ra, dec) in sorted(TARGET_COORDS.items()):
+        if name.upper() in _seen:
+            continue
         targets.append({'name': name, 'ra_hours': ra, 'dec_deg': dec})
     
     telescopes = []
@@ -4409,6 +4502,9 @@ def api_two_layer_results(job_id):
 try:
     from db import init_db
     init_db()
+    # Phase 3A: ensure the target registry table exists (seeded on first run)
+    from target_registry import ensure_table as _ensure_targets
+    _ensure_targets()
 except Exception as _db_err:
     print(f"  WARNING: DB init error: {_db_err}")
 
