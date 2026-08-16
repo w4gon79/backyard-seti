@@ -52,3 +52,16 @@ desktop.ini
 
 # Local notes (untracked)
 Notes.txt
+
+# Root-level diagnostic scratch (never commit)
+/tmp_*.py
+/tmp_*.js
+/tmp_*.csv
+/check_*.py
+/test_*.py
+/verify_*.py
+/fix_*.py
+/rewrite_*.py
+/chunked_test_*.txt
+/stack_PROXCEN_*.png
+/stack_PROXCEN_*.json
