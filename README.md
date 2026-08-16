@@ -146,11 +146,20 @@ resolves to the same place as GJ447.
    **Start Scan**. Expect roughly 21 hours for a 6-file cadence at default
    settings. Interrupted scans resume from where they stopped, and Mission
    Control shows live progress. Hits land in the database automatically.
-3. **Reject RFI.** In the Results panel, select the scan, leave Freq
+3. **Audit the epoch (RFI zone map).** With the target name still in the
+   Target Search box, type the epoch's MJD (the 5-digit number in the
+   filenames, e.g. `58058`) into the Epoch Audit box and click
+   **Audit Epoch**. The audit slides 4 MHz windows across the whole band,
+   measures each ON-OFF residual against the epoch's own noise floor, and
+   auto-writes persistent RFI zones (only where 2+ ON/OFF pairs agree) to
+   `data/rfi_zones.json`. The stack and later analyses exclude those zones
+   automatically. Takes a few minutes per epoch; run it any time after the
+   download, before or after the scan. "CLEAN" means no zones found.
+4. **Reject RFI.** In the Results panel, select the scan, leave Freq
    Tolerance 0.003 MHz and Drift Tolerance 100, click **Run ON/OFF
    Rejection**. Signals present in both ON and OFF frames are terrestrial
    and get flagged.
-4. **Repeat** steps 1-3 for every epoch you want, then **Archive Epoch to
+5. **Repeat** steps 1-4 for every epoch you want, then **Archive Epoch to
    D:** each finished cadence to free SSD staging space (the data stays
    reachable from the archive).
 
@@ -163,8 +172,10 @@ resolves to the same place as GJ447.
    cross-epoch rejection.
 2. **Scan.** Same as Parkes: select the session's files in Local Data and
    **Start Scan**. Whole-band GBT files run ~4-5 hours each at defaults.
-3. **RFI:** GBT has no OFF files, so skip the rejection step. Cross-epoch
-   matching (next) is the RFI filter for GBT.
+3. **RFI:** GBT has no OFF files, so skip the rejection step and the Epoch
+   Audit (both work from ON/OFF residuals; with no OFF scans there is
+   nothing to subtract). Cross-epoch matching (next) is the RFI filter for
+   GBT, plus companion scans if you downloaded them.
 
 ### Shared finishing steps (both tracks)
 
@@ -443,6 +454,9 @@ python src/fine_res_pipeline.py data/fine/Parkes_58020_21048_PROXCEN_S_fine.h5
 
 # Barycentric-correct a scan directory
 python src/barycentric_correct.py scan results/PROXCEN_2026-08-08_2333 --target PROXCEN
+
+# Map persistent RFI zones for one Parkes epoch (auto-excluded from stacks)
+python epoch_audit.py --target NGC1426 --epoch 58058
 
 # Cross-epoch search across multiple corrected scans
 python src/barycentric_correct.py cross-epoch \
