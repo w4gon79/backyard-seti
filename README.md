@@ -162,6 +162,7 @@ resolves to the same place as GJ447.
    `data/rfi_zones.json`. The stack and later analyses exclude those zones
    automatically. Takes a few minutes per epoch; run it any time after the
    download, before or after the scan. "CLEAN" means no zones found.
+   **Parkes only** - this tool needs blank-sky OFF pairs.
 4. **Reject RFI.** In the Results panel, select the scan, leave Freq
    Tolerance 0.003 MHz and Drift Tolerance 100, click **Run ON/OFF
    Rejection**. Signals present in both ON and OFF frames are terrestrial
@@ -172,17 +173,25 @@ resolves to the same place as GJ447.
 
 ### Track B: GBT (ABACAD sessions)
 
-1. **Download sessions.** Search the target (e.g. GJ447), click **Browse
-   GBT Sessions** in the banner, pick a band (L recommended: ~15 GB per
-   session), optionally check **+ companions**, and click **Download** on
-   each session row. Two sessions minimum; more epochs means stronger
-   cross-epoch rejection.
-2. **Scan.** Same as Parkes: select the session's files in Local Data and
-   **Start Scan**. Whole-band GBT files run ~4-5 hours each at defaults.
-3. **RFI:** GBT has no OFF files, so skip the rejection step and the Epoch
-   Audit (both work from ON/OFF residuals; with no OFF scans there is
-   nothing to subtract). Cross-epoch matching (next) is the RFI filter for
-   GBT, plus companion scans if you downloaded them.
+1. **Download sessions with companions.** Search the target (e.g. GJ447),
+   click **Browse GBT Sessions** in the banner, pick a band (L recommended:
+   ~15 GB per session), **check + companions**, and click **Download** on
+   each session row. The companions are the whole point: they are the OFF
+   scans that make the rest of the pipeline work. Two sessions minimum;
+   more epochs means stronger cross-epoch rejection.
+2. **Scan.** Same as Parkes: expand the target's group in Local Data (the
+   companion files sit in their own groups), select your scans AND the
+   companion scans, and **Start Scan**. Whole-band GBT files run ~4-5
+   hours each at defaults. During import, hits from your scans are
+   classified ON and companion hits OFF (the importer matches each file's
+   target token against the scan's target - the ABACAD A/B/C/D logic).
+3. **Reject RFI.** Same button as Parkes: select the scan, leave the
+   defaults, **Run ON/OFF Rejection**. Signals present in both your scans
+   and companion scans are local to the telescope and get flagged.
+   Companion OFFs are different stars a few degrees away rather than blank
+   sky, so a genuine signal from YOUR target appears in your scans only.
+   The one Parkes-only step: **Epoch Audit** (it derives its noise floor
+   from blank-sky ON/OFF residuals; skip it for GBT).
 
 ### Shared finishing steps (both tracks)
 
@@ -332,7 +341,10 @@ The Flask dashboard at `http://localhost:8070` provides:
   prefix-match trap"). Parkes files download per file with ON/OFF visible in the
   name; GBT targets get a session browser instead (one row per observation
   date, L/S/C/X band selector, ABACAD companion toggle, one-click epoch
-  download). See "Downloading Observation Epochs" above for the walkthrough.
+  download). With companions downloaded, GBT epochs run the full Parkes
+  workflow: Local Data grouping, ON/OFF badges (A-scans ON, companions
+  OFF), Start Scan, and ON/OFF Rejection. See "Downloading Observation
+  Epochs" above for the walkthrough.
 - **Incoherent Stack** (`/stack`) - Phase 2C power spectrum stacking with
   frequency window selection, epoch multi-select, background job runner, progress
   tracking, peak detection table, and waterfall follow-up. Registry-driven target
