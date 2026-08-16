@@ -149,20 +149,22 @@ resolves to the same place as GJ447.
 1. **Download one epoch.** Search the target, filter to Fine, download the
    S and R files sharing one MJD (3 ON + 3 OFF, ~75 GB). See "Downloading
    Observation Epochs" for the cadence mechanics.
-2. **Scan.** The cadence appears in Local Data. Select its files and click
+2. **Audit the epoch (RFI zone map) - before scanning.** With the target
+   name still in the Target Search box, type the epoch's MJD (the 5-digit
+   number in the filenames, e.g. `58058`) into the Epoch Audit box and
+   click **Audit Epoch**. The audit slides 4 MHz windows across the whole
+   band, measures each ON-OFF residual against the epoch's own noise
+   floor, and auto-writes persistent RFI zones (only where 2+ ON/OFF
+   pairs agree) to `data/rfi_zones.json`. Takes a few minutes and needs
+   only the downloaded files. Audit BEFORE the scan so the zones exist
+   when hits are imported: hits inside zones get their `rfi_zoned` flag
+   at insert time and every later stage (rejection, stack, cross-epoch)
+   ignores them automatically - no backfill pass needed. "CLEAN" means
+   no zones found. **Parkes only** - this tool needs blank-sky OFF pairs.
+3. **Scan.** The cadence appears in Local Data. Select its files and click
    **Start Scan**. Expect roughly 21 hours for a 6-file cadence at default
    settings. Interrupted scans resume from where they stopped, and Mission
    Control shows live progress. Hits land in the database automatically.
-3. **Audit the epoch (RFI zone map).** With the target name still in the
-   Target Search box, type the epoch's MJD (the 5-digit number in the
-   filenames, e.g. `58058`) into the Epoch Audit box and click
-   **Audit Epoch**. The audit slides 4 MHz windows across the whole band,
-   measures each ON-OFF residual against the epoch's own noise floor, and
-   auto-writes persistent RFI zones (only where 2+ ON/OFF pairs agree) to
-   `data/rfi_zones.json`. The stack and later analyses exclude those zones
-   automatically. Takes a few minutes per epoch; run it any time after the
-   download, before or after the scan. "CLEAN" means no zones found.
-   **Parkes only** - this tool needs blank-sky OFF pairs.
 4. **Reject RFI.** In the Results panel, select the scan, leave Freq
    Tolerance 0.003 MHz and Drift Tolerance 100, click **Run ON/OFF
    Rejection**. Signals present in both ON and OFF frames are terrestrial
