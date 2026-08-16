@@ -102,6 +102,20 @@ def extract_sub_band(filepath, f_start_mhz, f_stop_mhz, out_path):
     sub_fch1 = float(freqs[0])
     sub_nchans = data.shape[-1]
 
+    # turbo_seti's data handler splits the band into 64 coarse channels
+    # when the file carries no coarse-channel metadata (its 'SWAG' path,
+    # taken by every extracted sub-band). If sub_nchans is not divisible
+    # by 64, its slice math and header disagree by a channel and
+    # load_data() raises 'spectra.shape != (tsteps_valid, fftlen)'
+    # (first seen on GBT gpuspec data: 258156 chans -> 4033.69/cc).
+    # Trim from the top edge to an exact multiple of 64; the lost band is
+    # <64 channels (~0.18 Hz), far below the sub-band overlap.
+    TSETI_CC = 64
+    trim = sub_nchans % TSETI_CC
+    if trim:
+        sub_nchans -= trim
+        data = data[..., :sub_nchans]
+
     # Write clean HDF5
     with h5py.File(out_path, 'w') as f:
         n_tints = data.shape[0]
