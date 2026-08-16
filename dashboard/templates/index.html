@@ -52,14 +52,19 @@
                     <button id="btn-search-local" class="btn-secondary">Show Local</button>
                     <button id="btn-blcatalog" class="btn-secondary" title="Browse a cached catalog of every BL target's fine/mid availability (built by a one-time background sweep of the BL API)">BL Catalog</button>
                 </div>
+                <div id="bl-search-results" class="search-results"></div>
+                <div id="local-data-list" class="data-list"></div>
+                <div id="file-selection-controls" class="file-selection-controls" style="display:none;margin-top:6px;">
+                    <button id="btn-select-all" class="btn-small">Select All</button>
+                    <button id="btn-select-none" class="btn-small">Select None</button>
+                    <span id="file-selection-count" class="selection-count-badge">0 files selected</span>
+                </div>
                 <div style="margin-top:8px;padding-top:8px;border-top:1px solid #2a3b4d;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
                     <span style="font-size:0.85em;color:#90a4ae;">Epoch Audit</span>
                     <input type="text" id="audit-epoch-input" placeholder="Epoch e.g. 57910" style="width:130px;padding:4px 8px;background:#1a2634;border:1px solid #2a3b4d;color:#e0e0e0;border-radius:4px;">
                     <button class="btn-small" id="btn-audit-run" onclick="startEpochAudit()">Audit Epoch</button>
                     <span id="audit-status-line" style="font-size:0.85em;color:#90a4ae;"></span>
                 </div>
-                <div id="bl-search-results" class="search-results"></div>
-                <div id="local-data-list" class="data-list"></div>
                 <div style="margin-top:8px;padding-top:8px;border-top:1px solid #2a3b4d;">
                     <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
                         <span style="font-size:0.85em;color:#90a4ae;">Target Registry</span>
@@ -69,11 +74,6 @@
                     </div>
                     <div id="registry-simbad-preview" style="font-size:0.8em;color:#90a4ae;margin-top:4px;"></div>
                     <div id="registry-target-list" style="margin-top:6px;max-height:220px;overflow-y:auto;"></div>
-                </div>
-                <div id="file-selection-controls" class="file-selection-controls" style="display:none;">
-                    <button id="btn-select-all" class="btn-small">Select All</button>
-                    <button id="btn-select-none" class="btn-small">Select None</button>
-                    <span id="file-selection-count" class="selection-count-badge">0 files selected</span>
                 </div>
                 <div id="file-detail-panel" class="file-detail-panel" style="display:none;">
                     <div class="panel-header" style="font-size:0.85em;">📋 File Details</div>
