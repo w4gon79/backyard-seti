@@ -215,7 +215,6 @@ def extract_clean_training_data(target='PROXCEN', crop_size=128, snr_min=8,
         metadata_raw=metadata_array,
         meta_stats_json=np.array(json.dumps(meta_stats)),  # store as string
     )
-    import json
     print(f"\nSaved to {cache_path} ({os.path.getsize(cache_path)/1e6:.1f} MB)")
     
     return cache_path

@@ -7,12 +7,8 @@
 *.raw
 *.fits
 
-# Results (generated, not source)
-results/*.png
-results/*.pdf
-results/*.csv
-results/*.dat
-results/**/barycentric/
+# Results (generated at runtime, never source)
+/results/
 
 # Cloned upstream repos (referenced, not ours)
 blimpy/

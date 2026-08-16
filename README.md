@@ -421,6 +421,23 @@ search, and view incoherent stacks. The stack UI lives at
 `http://localhost:8070/stack` and live scan monitoring at
 `http://localhost:8070/mission`.
 
+### Updating an existing install
+
+Your data is never touched by updates: downloads, the SQLite database
+(`data/seti_hits.db`), `.env`, and everything the pipeline generates under
+`results/` are all gitignored. Updating is just:
+
+```bash
+# 1. Stop the dashboard (Ctrl+C in its window if it's running)
+# 2. Pull and restart
+git pull origin main
+py -3.11 -m pip install -r requirements.txt   # only when dependencies change
+py -3.11 dashboard/app.py
+```
+
+If you edited tracked source files locally, git may refuse the pull to
+protect your edits: run `git stash` first and `git stash pop` after.
+
 ## CLI Reference (optional)
 
 **None of these commands are required.** The dashboard from Step 4 covers the
