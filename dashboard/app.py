@@ -196,26 +196,53 @@ def mjd_to_date(mjd_str):
         return ''
 
 
+# GBT local-data grammar: (spliced_)blcNN_guppi_MJD_SEQ_TARGET_SCAN.PROD.TIER.h5
+_GBT_LOCAL_PAT = re.compile(
+    r'(?:spliced_)?blc\d+_guppi_(\d+)_(\d+)_([A-Za-z0-9+\-.]+?)_(\d+)'
+    r'\.(rawspec|gpuspec)\.(\d+)\.h5$')
+
+
+def _local_file_target_mjd(fname):
+    """(target, mjd, grammar) for any local BL filename, or None.
+    Parkes: Parkes_57910_34684_PROXCEN_S_fine.h5 -> (PROXCEN, 57910)
+    GBT: spliced_blc.._guppi_57532_03953_GJ447_0011.gpuspec.0000.h5
+         -> (GJ447, 57532)
+    """
+    parts = fname.split('_')
+    if parts[0] in ('Parkes', 'GBT', 'APF', 'FAST', 'MeerKAT', 'Effelsberg') \
+            and len(parts) >= 5:
+        return parts[3], parts[1], 'parkes'
+    m = _GBT_LOCAL_PAT.search(fname)
+    if m:
+        return m.group(3), m.group(1), 'gbt'
+    return None
+
+
 @app.route('/api/targets')
 def api_targets():
     """List local data files grouped by target."""
     targets = {}
-    
-    # Scan fine-res
+
+    def _entry(fname, base_dir, rel_prefix, size_div):
+        info = _local_file_target_mjd(fname)
+        if not info:
+            return
+        target, mjd, grammar = info
+        if target not in targets:
+            targets[target] = {'fine': [], 'mid': [], 'filterbank': [], 'h5': []}
+        targets[target]['fine'].append({
+            'name': fname,
+            'size_gb': round(os.path.getsize(os.path.join(base_dir, fname)) / size_div, 2),
+            'path': f'{rel_prefix}/{fname}',
+            'date': mjd_to_date(mjd),
+            'grammar': grammar,
+        })
+
+    # Scan fine-res (Parkes grammar + GBT guppi fine products)
     if os.path.isdir(FINE_DIR):
         for f in os.listdir(FINE_DIR):
             if f.endswith('.h5'):
-                parts = f.split('_')
-                if len(parts) >= 4:
-                    target = parts[3]
-                    if target not in targets:
-                        targets[target] = {'fine': [], 'mid': [], 'filterbank': [], 'h5': []}
-                    targets[target]['fine'].append({
-                        'name': f,
-                        'size_gb': round(os.path.getsize(os.path.join(FINE_DIR, f)) / 1e9, 2),
-                        'path': f'fine/{f}',
-                        'date': mjd_to_date(parts[1]) if len(parts) >= 2 else '',
-                    })
+                _entry(f, FINE_DIR, 'fine', 1e9)
     
     # Scan mid-res
     if os.path.isdir(MID_DIR):
@@ -583,11 +610,21 @@ def api_scan_results(scan_id):
 
 def _epoch_label_from_files(files):
     """Extract the observation epoch (BL MJD, 5-digit str) from a scan's
-    fine file list. BL names: Telescope_MJD_Seq_TARGET_S/R_res.h5."""
+    fine file list. Two grammars:
+    Parkes: Telescope_MJD_Seq_TARGET_S/R_res.h5  -> parts[1]
+    GBT:    (spliced_)blcNN_guppi_MJD_SEQ_TARGET_SCAN.PROD.TIER.h5
+            -> the token right after 'guppi'
+    """
     for f in files or []:
-        parts = os.path.basename(str(f)).replace('.h5', '').split('_')
+        fname = os.path.basename(str(f))
+        parts = fname.replace('.h5', '').split('_')
         if len(parts) >= 5 and parts[1].isdigit() and len(parts[1]) == 5:
             return parts[1]
+        # GBT: find the guppi marker, MJD follows it
+        if 'guppi_' in fname:
+            toks = fname.split('guppi_', 1)[1].split('_')
+            if toks and toks[0].isdigit() and len(toks[0]) == 5:
+                return toks[0]
     return None
 
 
@@ -1739,6 +1776,10 @@ def api_download():
         target_dir = MID_DIR
     elif filename.endswith('.fil'):
         target_dir = FILT_DIR
+    elif 'guppi_' in filename and '.0000.' in filename:
+        # GBT fine-res (tier 0000): route beside Parkes fine data so the
+        # Local Data scan and session-browser downloads share one home
+        target_dir = FINE_DIR
     elif filename.endswith('.h5'):
         # HDF5 without resolution marker: route to fine if large, mid if small
         # BL fine-res files are ~15GB, mid-res are ~233MB

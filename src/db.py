@@ -8,11 +8,17 @@ Database: G:\\seti\\data\\seti_hits.db (WAL mode for concurrent reads)
 """
 
 import os
+import re
 import json
 import sqlite3
 import time
 import numpy as np
 from datetime import datetime
+
+# GBT grammar: (spliced_)blcNN_guppi_MJD_SEQ_TARGET_SCAN.PRODUCT.TIER.h5
+_GBT_FNAME_PAT = re.compile(
+    r'(?:spliced_)?blc\d+_guppi_(\d+)_(\d+)_([A-Za-z0-9+\-.]+?)_(\d+)'
+    r'\.(rawspec|gpuspec)\.(\d+)\.h5$')
 
 # Database path
 SETI_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -720,6 +726,10 @@ def import_scan_from_json(scan_dir, db_path=None):
         hit_files = [f for f in hit_files if '_bary_' not in os.path.basename(f)]
 
         all_hits = []
+        # Scan target drives GBT ABACAD classification: guppi files whose
+        # target token matches the scan's target are the A-scans (ON);
+        # companion tokens (HIP56xxx etc.) are the OFF positions.
+        scan_target_upper = str(meta.get('target', '')).upper()
         for hf in hit_files:
             with open(hf) as f:
                 data = json.load(f)
@@ -729,7 +739,16 @@ def import_scan_from_json(scan_dir, db_path=None):
                 fname = os.path.basename(hf).replace('_partial_hits.json', '.h5').replace('_hits.json', '.h5')
                 if not fname.endswith('.h5'):
                     fname += '.h5'
-            is_on = '_S_' in fname
+            if '_S_' in fname:
+                is_on = True            # Parkes ON marker
+            elif '_R_' in fname:
+                is_on = False           # Parkes OFF marker
+            elif 'guppi_' in fname:
+                _m = _GBT_FNAME_PAT.search(os.path.basename(fname))
+                _tok = _m.group(3).upper() if _m else ''
+                is_on = bool(_tok) and _tok == scan_target_upper
+            else:
+                is_on = False
             for h in data.get('hits', []):
                 h['on_off'] = 'ON' if is_on else 'OFF'
                 h['source_file'] = fname

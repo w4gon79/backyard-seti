@@ -807,7 +807,11 @@ async function loadLocalData() {
                 html += '<div class="format-section"><div class="format-label ' + labelClass + '">' + label + ' (' + fileList.length + ')</div>';
                 for (var i = 0; i < fileList.length; i++) {
                     var f = fileList[i];
-                    var isOn = f.name.indexOf('_S_') !== -1;
+                    // ON/OFF badge: Parkes _S_ marker, or for GBT files the
+                    // filename target token matching the group target
+                    var isOn = f.name.indexOf('_S_') !== -1 ||
+                               (f.grammar === 'gbt' &&
+                                f.name.indexOf('_' + target + '_') !== -1);
                     var isSelected = selectedFiles.has(f.path);
                     var sizeStr = f.size_gb < 1 ? (f.size_gb * 1000).toFixed(0) + ' MB' : f.size_gb + ' GB';
                     var dateStr = f.date ? ' <span style="color:#546e7a;font-size:0.85em;">' + f.date + '</span>' : '';
@@ -1025,13 +1029,20 @@ function refreshFileDetailPanel() {
 // ─── Scan Control ─────────────────────────────────────────────────────
 async function startScan() {
     // 3D: derive target + resolution from the selected filenames
-    // (e.g. fine/Parkes_57910_34684_PROXCEN_S_fine.h5 -> PROXCEN/fine)
+    // Parkes: fine/Parkes_57910_34684_PROXCEN_S_fine.h5 -> parts[3]
+    // GBT: fine/spliced_blc.._guppi_57532_03953_GJ447_0011.gpuspec.0000.h5
+    //      -> token two past 'guppi'
     var scanTarget = 'PROXCEN';
     var scanRes = 'fine';
     if (selectedFiles.size > 0) {
         var fn = Array.from(selectedFiles)[0].split('/').pop();
         var parts = fn.split('_');
-        if (parts.length >= 4) scanTarget = parts[3];
+        var gi = parts.indexOf('guppi');
+        if (gi !== -1 && parts.length >= gi + 3) {
+            scanTarget = parts[gi + 2];
+        } else if (parts.length >= 4) {
+            scanTarget = parts[3];
+        }
         if (fn.indexOf('_mid.') !== -1) scanRes = 'mid';
         else if (fn.indexOf('_time.') !== -1) scanRes = 'time';
     }
