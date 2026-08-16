@@ -27,9 +27,13 @@ _UA = {'User-Agent': 'BackyardSETI/1.0'}
 _PARKES_PAT = re.compile(
     r'(Parkes|GBT|APF)_(\d+)_(\d+)_([A-Za-z0-9+\-.]+?)(?:_([SR]))?_'
     r'(fine|mid|time)\.h5$')
-# GBT guppi grammar: *guppi_MJD_SEQ_TARGET_*.h5 (high-res gpuspec
-# products; no S/R cadence markers in these names)
-_GBT_PAT = re.compile(r'guppi_(\d+)_(\d+)_([A-Za-z0-9+\-.]+?)_.*\.h5$')
+# GBT guppi grammar: (spliced_)blcNN_guppi_MJD_SEQ_TARGET_SCAN.PROD.TIER.h5
+# where PROD is rawspec (Berkeley high-res) or gpuspec (instruments), and
+# TIER 0000 is the fine-res product. No S/R cadence markers in these names:
+# RFI rejection uses ABACAD companion targets instead (see README).
+_GBT_PAT = re.compile(
+    r'(?:spliced_)?blc\d+_guppi_(\d+)_(\d+)_([A-Za-z0-9+\-.]+?)_(\d+)'
+    r'\.(rawspec|gpuspec)\.(\d+)\.h5$')
 
 sweep_state = {'active': False, 'cancel': False, 'total': 0, 'done': 0,
                'errors': 0, 'started_at': None, 'finished_at': None,
@@ -82,11 +86,32 @@ def _base_names():
     return sorted(bases)
 
 
+def _exact_target(fname):
+    """Exact target token parsed from a filename, else None.
+
+    The BL API prefix-matches ?target= against every name: querying HIP2
+    returns HIP2 plus HIP225, HIP26, HIP29806, ... (611 extra targets in
+    one observed response). Every query result MUST be filtered by the
+    target token in the filename itself or counts are wildly inflated.
+    """
+    m = _PARKES_PAT.search(fname)
+    if m:
+        return m.group(4)
+    m = _GBT_PAT.search(fname)
+    if m:
+        return m.group(3)
+    return None
+
+
 def _query_target(name):
     url = BL_API + '/query-files?target=' + urllib.parse.quote(name)
     req = urllib.request.Request(url, headers=_UA)
     with urllib.request.urlopen(req, timeout=60) as r:
-        return json.loads(r.read().decode()).get('data', [])
+        files = json.loads(r.read().decode()).get('data', [])
+    want = name.upper()
+    return [f for f in files
+            if (tok := _exact_target((f.get('url') or '').split('/')[-1]))
+            is not None and tok.upper() == want]
 
 
 def _pick_coords(files):
@@ -133,12 +158,17 @@ def _aggregate(name, files):
                 agg['n_time'] += 1
             continue
         m = _GBT_PAT.search(fname)
-        if m:  # GBT high-res h5: count as fine, cadence unknown
-            mjd = m.group(1)
+        if m:  # GBT guppi: tier 0000 is fine-res for BOTH products
+            # (2017+ per-node rawspec.0000 ~3.8 GB, and 2016-era spliced
+            # gpuspec.0000 ~15.5 GB whole-band files; both are fine-res)
+            mjd, seq, tgt, scan, prod, tier = m.groups()
             agg['telescopes'].add('GBT')
-            agg['n_fine'] += 1
-            agg['fine_bytes'] += sz
-            agg['_mjds'].add(mjd)
+            if tier == '0000':
+                agg['n_fine'] += 1
+                agg['fine_bytes'] += sz
+                agg['_mjds'].add(mjd)
+            else:
+                agg['n_mid'] += 1
     agg['fine_epochs'] = len(agg['_mjds'])
     agg['telescopes'] = ','.join(sorted(agg['telescopes']))
     del agg['_mjds']
@@ -194,7 +224,13 @@ def start_sweep(force=False, mode=None, db_path=None):
     current logic, then sweep the remainder; used after an aggregation
     bug fix), 'fine' (re-query only targets that already have fine-res
     data: the practical 'check for new epochs' action, minutes not
-    hours)."""
+    hours).
+
+    Aggregation is exact-match (see _exact_target): GBT counts include
+    only files whose filename target token equals the queried target;
+    fine-res = tier 0000 of either product family (rawspec or gpuspec).
+    Sweep mode 'refresh' is the required mode after any change to the
+    aggregation logic."""
     mode = mode or ('all' if force else 'resume')
     with _lock:
         if sweep_state['active']:

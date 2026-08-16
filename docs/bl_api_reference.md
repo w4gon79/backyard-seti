@@ -65,27 +65,61 @@ To find a target: query `/api/list-targets` and grep for partial matches.
 
 ## Filename Convention
 
-BL filenames follow this pattern:
+**Two different grammars exist.** Parkes files encode cadence position
+explicitly; GBT files encode a product pipeline instead and carry no
+ON/OFF markers at all.
+
+### Parkes grammar
+
 ```
 {Telescope}_{MJD}_{Sequence}_{TARGET}_{POSITION}_{RESOLUTION}.h5
+Parkes_57791_72989_PROXCEN_S_fine.h5
 ```
 
 | Field | Meaning | Example |
 |-------|---------|---------|
-| Telescope | Observing instrument | `Parkes`, `GBT` |
+| Telescope | Observing instrument | `Parkes`, `GBT`, `APF` |
 | MJD | Modified Julian Date of session | `57941` |
 | Sequence | Sequence number within session | `36956` |
 | TARGET | BL internal target name | `PROXCEN` |
-| POSITION | On/off position | `S` = on target, `R` = reference (off) |
+| POSITION | On/off position, **optional** | `S` = on, `R` = off, absent = bare form |
 | RESOLUTION | Frequency resolution | `fine`, `mid`, `time` |
+
+Cadence: ABABAB with a fixed blank-sky offset (0.5 deg dec at Parkes).
+Consecutive-seq S/R pairs from one MJD form a cadence set. A missing
+position marker must be resolved from sequence order or session context.
+
+### GBT grammar
+
+```
+(spliced_)?blc{NN}_guppi_{MJD}_{SEQ}_{TARGET}_{SCAN}.{PRODUCT}.{TIER}.h5
+blc00_guppi_59433_42615_HIP29806_0041.rawspec.0000.h5
+spliced_blc0001020304050607_guppi_57620_41924_Hip20917_0006.gpuspec.0002.h5
+```
+
+| Field | Meaning | Notes |
+|-------|---------|-------|
+| blc{NN} | Compute node / BL compute board | `spliced_` prefix = multi-node combined file |
+| guppi | GBT pulsar backend instrument marker | constant |
+| MJD | Session date | group sessions by this |
+| SEQ | Sequence number within session | sort by this to see cadence order |
+| TARGET | BL target token | **exact-match this** (see prefix trap) |
+| SCAN | Scan number for that target | `0041` etc. |
+| PRODUCT | `rawspec` = Berkeley high-res, `gpuspec` = other instruments | rawspec is the standard product |
+| TIER | Resolution tier | `0000` = fine-res; higher tiers are coarser |
+
+Cadence: **ABACAD companion targets, no OFF files.** GBT interleaves the
+primary target (A) with other nearby targets (B, C, D). Companions are
+discovered by finding other targets' scans at adjacent SEQ numbers in the
+same session MJD (see `src/download_gbt.py --companions`). Each scan spans
+~26 nodes x 187.5 MHz covering 1.1-11.9 GHz; cherry-pick sub-bands via the
+API `center_freq` field.
 
 ### Cadence Sets
 
-BL observes targets in **ABABAB** or **ABABA** cadences:
-- **_S** = Source (on target)
-- **_R** = Reference (off target)
-
-Files with consecutive sequence numbers from the same MJD, alternating S/R, form a cadence set. These are essential for RFI rejection (comparing on vs off to identify terrestrial interference).
+- **Parkes:** ABABAB, `_S`/`_R` markers, blank-sky offset OFFs.
+- **GBT:** ABACAD (post-2016) or ABABAB with 2-dec offset (pre-2016),
+  OFFs are companion target scans, nothing in the filename marks them.
 
 ## Download URLs
 
@@ -132,7 +166,7 @@ def get_files(target, telescope=None, filetype=None):
     return data if isinstance(data, list) else data.get("data", [])
 ```
 
-## Field & Behavior Notes (probed 2026-08-15)
+## Field & Behavior Notes (probed 2026-08-15/16)
 
 - **File size field is `size`** (bytes), not `filesize`. Some targets return
   it null for all files.
@@ -141,6 +175,14 @@ def get_files(target, telescope=None, filetype=None):
   `KIC 8462852` return zero. Cross-ID catalog forms unlock hidden data:
   Barnard's Star = `GJ699`, Tau Ceti = `GJ71`, HD 95735 = `GJ411`,
   Tabby's Star = `KIC8462852`, Proxima = `PROXCEN`.
+- **`?target=` PREFIX-MATCHES (2026-08-16 trap).** Querying `HIP2` returns
+  9,525 files of which exactly **10** are HIP2; the rest belong to HIP225,
+  HIP26, HIP29806 and 608 other targets. Querying `GJ1` returns zero GJ1
+  fine files (1,367 files, all other GJ* targets). Short names collide;
+  long unique names (PROXCEN, NGC1426) are safe. **Always filter query
+  results by the exact target token parsed from the filename.** The tools
+  in this repo (`bl_search.py`, `download_gbt.py`, `bl_catalog.py`) do this
+  automatically.
 - **Base-name queries return all positional variants** (`0003-066` returns
   the `_S`, `_R`, and bare files; 82 total). Query base names, not variants.
 - **Bare-form filenames exist** (`Parkes_57770_78921_ALPHACEN_fine.h5`, no

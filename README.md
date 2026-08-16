@@ -29,8 +29,84 @@ This project works with the Breakthrough Listen (BL) open data archive to search
 - **Portal:** [Breakthrough Listen Open Data Archive](https://breakthroughinitiatives.org/opendatasearch)
 - **Formats:** HDF5 (.h5) fine-res and mid-res
 - **Telescopes:** Parkes (Australia), GBT (Green Bank, WV)
-- **Sizes:** ~12 GB per fine-res file, ~233 MB per mid-res file
+- **Sizes:** ~12 GB per Parkes fine-res file, ~3.8 GB per GBT sub-band file
 - **Primary targets:** Any BL target with fine-res cadence data, discovered via the BL Catalog (PROXCEN scanned; survey shortlist building). Proxima Centauri remains the validation testbed with 6 epochs archived.
+
+## Downloading Observation Epochs (read this first)
+
+BL data comes from two telescopes with **completely different filename
+grammars, cadence conventions, and download strategies**. None of this is
+intuitive from the archive web page; this section is the decoder ring.
+
+**One API, two grammars.** Every file is reached through the same query
+(`api/query-files?target=NAME`), but what you get back and what an
+"observation" even means differs by telescope:
+
+### Parkes: explicit ON/OFF cadences
+
+```
+Parkes_57791_72989_PROXCEN_S_fine.h5
+└─Telescope └MJD └SEQ └TARGET └┬┘ └fine = resolution
+                          S = ON, R = OFF
+```
+
+- Parkes observes **ABABAB**: your target (S) alternates with a fixed blank-sky
+  offset position (R). Files with consecutive sequence numbers from the same
+  MJD, alternating S/R, form one **cadence set** (typically 3 ON + 3 OFF).
+- One cadence set = one **epoch**. ~12.4 GB per file, ~75 GB per epoch.
+- RFI rejection: a signal present in both S and R files is terrestrial.
+- The `_S`/`_R` marker is **optional** in the filename (bare forms like
+  `Parkes_57770_78921_ALPHACEN_fine.h5` exist); a missing marker means the
+  position must be inferred from sequence order or the observing log.
+- Download with `src/bl_search.py --target NAME --cadence --download DIR`.
+
+### GBT: no ON/OFF files at all, ABACAD companion cadences instead
+
+```
+blc00_guppi_59433_42615_HIP29806_0041.rawspec.0000.h5
+└compute node └─┬┘ └MJD └SEQ └TARGET  └scan └┬─┘ └tier: 0000 = fine-res
+              product type                  (rawspec = Berkeley hi-res)
+```
+
+GBT never writes blank-sky OFF files. Instead the observing session
+interleaves your target (A) with **other nearby targets** (B, C, D) in an
+ABACAD pattern. Those companion scans are the RFI reference: a signal in
+your target AND in a companion is local to the telescope. There is no
+marker in the filename; companions are found by looking at which other
+targets have sequence numbers adjacent to yours in the same session MJD.
+
+Each GBT scan is split across ~26 compute nodes, one 187.5 MHz sub-band file
+each (~3.8 GB), together covering 1.1-11.9 GHz (~100 GB per scan). You can
+**cherry-pick sub-bands**: L-band (1.1-2.0 GHz) is just 4 files (~15 GB) per
+scan, selected by the API's `center_freq` field (1220, 1408, 1595, 1783 MHz).
+For serious RFI work include the companion scans' same sub-bands too.
+
+Download with `src/download_gbt.py`:
+
+```bash
+python src/download_gbt.py --target HIP69                  # list sessions
+python src/download_gbt.py --target HIP69 --session 58050  # one session's layout
+python src/download_gbt.py --target HIP69 --band L --companions --download data/gbt
+```
+
+Caveat on `--companions`: the API has no "query by session" endpoint, so
+companion discovery is best-effort, limited to targets sharing your target's
+name prefix (the prefix-match response conveniently includes them). For
+HIP-style observing blocks that usually finds the neighbors; for isolated
+targets it finds nothing, and cross-epoch matching remains the primary RFI
+filter.
+
+### The prefix-match trap (applies to EVERYTHING)
+
+The BL API **prefix-matches** `?target=` against every name: querying `HIP2`
+returns HIP2 plus HIP225, HIP26, HIP29806, and 608 others (9,525 files, of
+which exactly 10 are HIP2). Querying `GJ1` returns zero GJ1 files and 1,367
+files belonging to GJ15B, GJ1002, GJ1245ac... Always filter results by the
+target token **parsed from the filename itself**. Every tool in this repo
+(`bl_search.py`, `download_gbt.py`, the catalog sweep) does this
+automatically; if you write your own query code, you must too. Short names
+are the dangerous ones: HIP2, GJ1, HIP26 all collide. Long unique names
+(PROXCEN, NGC1426) are unaffected.
 
 ## Project Structure
 
@@ -256,6 +332,10 @@ python src/db.py hits --scan-id PROXCEN_2026-08-08_2333 --min-snr 10 --on-off ON
 
 # Download BL data for Proxima cadences
 python src/download_proxima.py
+
+# Browse a GBT target's sessions and download an L-band epoch (see
+# "Downloading Observation Epochs" above for the GBT/Parkes differences)
+python src/download_gbt.py --target HIP69 --band L --companions --download data/gbt
 
 # Run the fine-res pipeline on a single file (SNR 5, 262k sub-bands)
 python src/fine_res_pipeline.py data/fine/Parkes_58020_21048_PROXCEN_S_fine.h5

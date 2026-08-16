@@ -12,6 +12,7 @@ Usage:
 
 import argparse
 import os
+import re
 import sys
 import urllib.request
 import json
@@ -19,6 +20,19 @@ from collections import defaultdict
 
 API = "http://seti.berkeley.edu/opendata/api"
 DOWNLOAD_BASE = "http://blpd8.ssl.berkeley.edu/dl/"
+
+# Parkes grammar: Tel_MJD_SEQ_TARGET_[SR]_RES.h5 (position marker optional;
+# bare forms exist: Parkes_57770_78921_ALPHACEN_fine.h5)
+PARKES_PAT = re.compile(
+    r"(Parkes|GBT|APF)_(\d+)_(\d+)_([A-Za-z0-9+\-.]+?)(?:_([SR]))?_"
+    r"(fine|mid|time)\.h5$")
+# GBT grammar: (spliced_)blcNN_guppi_MJD_SEQ_TARGET_SCAN.PRODUCT.TIER.h5
+# PRODUCT: rawspec = Berkeley high-res products, gpuspec = other instruments.
+# TIER 0000 is the fine-res product. No S/R markers: RFI reference is ABACAD
+# companion targets in the same session (see download_gbt.py).
+GBT_PAT = re.compile(
+    r"(?:spliced_)?blc\d+_guppi_(\d+)_(\d+)_([A-Za-z0-9+\-.]+?)_(\d+)"
+    r"\.(rawspec|gpuspec)\.(\d+)\.h5$")
 
 
 def api_get(path):
@@ -55,17 +69,27 @@ def query_files(target, telescope=None, filetype=None):
 
 
 def parse_filename(url):
-    """Extract metadata from a BL filename."""
+    """Extract metadata from a BL filename. Two grammars exist:
+    Parkes: Parkes_57791_72989_PROXCEN_S_fine.h5 (S=on, R=off)
+    GBT:    blc00_guppi_59433_42615_HIP29806_0041.rawspec.0000.h5
+    """
     fname = url.split("/")[-1]
-    parts = fname.replace(".h5", "").split("_")
     info = {"filename": fname, "url": url}
-    if len(parts) >= 5:
-        info["telescope"] = parts[0]
-        info["mjd"] = parts[1]
-        info["sequence"] = parts[2]
-        info["target"] = parts[3]
-        info["position"] = parts[4] if len(parts) > 4 else "?"  # S=on, R=off
-        info["resolution"] = parts[5] if len(parts) > 5 else "?"
+    m = PARKES_PAT.search(fname)
+    if m:
+        tel, mjd, seq, tgt, pos, res = m.groups()
+        info.update(telescope=tel, mjd=mjd, sequence=seq, target=tgt,
+                    position=pos, resolution=res, grammar="parkes")
+        return info
+    m = GBT_PAT.search(fname)
+    if m:
+        mjd, seq, tgt, scan, prod, tier = m.groups()
+        res = ("fine" if (prod, tier) == ("rawspec", "0000")
+               else "hires" if prod == "rawspec" else prod)
+        info.update(telescope="GBT", mjd=mjd, sequence=seq, target=tgt,
+                    position=None, scan=scan, product=prod, tier=tier,
+                    resolution=res, grammar="gbt")
+        return info
     return info
 
 
@@ -103,6 +127,10 @@ def main():
                         help="Filter by file type")
     parser.add_argument("--cadence", "-c", action="store_true", help="Group results into on/off cadence sessions")
     parser.add_argument("--limit", "-n", type=int, default=20, help="Max files to display (default 20)")
+    parser.add_argument("--raw", action="store_true",
+                        help="Skip exact-target filtering. The API prefix-matches "
+                             "target names (HIP2 also returns HIP26, HIP225, ...); "
+                             "default hides those, this shows everything")
     parser.add_argument("--download", "-d", metavar="DIR", help="Download files to this directory")
     args = parser.parse_args()
 
@@ -130,11 +158,27 @@ def main():
     print("...")
 
     files = query_files(args.target, args.telescope, args.filetype)
-    print(f"Found {len(files)} files\n")
+    print(f"Found {len(files)} files")
 
     if not files:
         print("No files found. Try using --find to locate the correct target name.")
         return
+
+    # Exact-target filter: the API prefix-matches ?target= against every
+    # name, so HIP2 returns HIP2 plus HIP225, HIP26, HIP29806, ... Keep only
+    # files whose filename target token exactly matches (case-insensitive).
+    if not args.raw:
+        exact = [f for f in files
+                 if parse_filename(f.get("url", "")).get("target", "").upper()
+                 == args.target.upper()]
+        hidden = len(files) - len(exact)
+        if hidden:
+            print(f"  ({hidden} prefix-matched files from other targets hidden; "
+                  f"--raw shows everything)")
+        files = exact
+        print(f"Exact match: {len(files)} files\n")
+        if not files:
+            return
 
     # Parse file info
     parsed = []
@@ -153,7 +197,15 @@ def main():
             total_size = sum(e.get("filesize", 0) for e in entries)
             print(f"MJD {mjd}: {len(on_files)} ON, {len(off_files)} OFF ({format_size(total_size)} total)")
             for e in entries[:6]:
-                tag = "ON " if e.get("position") == "S" else "OFF"
+                if e.get("grammar") == "gbt":
+                    tag = "A  "  # GBT: target-pointed scan; offs are
+                                # ABACAD companion targets, not S/R files
+                elif e.get("position") == "S":
+                    tag = "ON "
+                elif e.get("position") == "R":
+                    tag = "OFF"
+                else:
+                    tag = "?  "
                 print(f"  [{tag}] {e['filename']} ({format_size(e.get('filesize', 0))})")
                 print(f"        {e['url']}")
             if len(entries) > 6:
