@@ -361,7 +361,13 @@ after barycentric correction:
   Python releases yet. If your system default is 3.12+, install 3.11 alongside
   it and run every command below with 3.11 explicitly (e.g. `py -3.11` on
   Windows, `python3.11` on Linux).
-- git
+- git. On Windows, use the **Git for Windows** installer
+  (git-scm.com/download/win) and keep the default "Git from the command line
+  and also from 3rd-party software" option on the "Adjusting your PATH
+  environment" screen, so `git` works in CMD/PowerShell. **Close and reopen
+  any terminal windows after installing**; PATH changes only reach terminals
+  opened after the install. Quick sanity check: a fresh terminal running
+  `git --version` should print a version, not "not recognized".
 
 ### Quick Start: clone to running dashboard
 
