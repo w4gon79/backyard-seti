@@ -40,10 +40,10 @@ BAND_START = 2743.957
 BAND_STOP = 3444.152
 
 
-def _pair_residual(mjd_int, on_seq, off_seq, f0, f1):
+def _pair_residual(mjd_int, on_seq, off_seq, f0, f1, target='PROXCEN'):
     """ON-OFF time-averaged residual for one window, or None."""
-    on_path = find_h5(f"Parkes_{mjd_int}_{on_seq}_PROXCEN_S_fine.h5")
-    off_path = find_h5(f"Parkes_{mjd_int}_{off_seq}_PROXCEN_R_fine.h5")
+    on_path = find_h5(f"Parkes_{mjd_int}_{on_seq}_{target}_S_fine.h5")
+    off_path = find_h5(f"Parkes_{mjd_int}_{off_seq}_{target}_R_fine.h5")
     if not on_path or not off_path:
         return None
     _, on_p = load_spectrum_window(on_path, f0, f1)
@@ -57,8 +57,9 @@ def _pair_residual(mjd_int, on_seq, off_seq, f0, f1):
 
 def audit_epoch(label, window_mhz=WINDOW_MHZ, threshold=RATIO_THRESHOLD,
                 confirm_pairs=CONFIRM_PAIRS, dry_run=False, verbose=True,
-                progress_callback=None):
-    """Audit one epoch. Returns dict report (also written to results/epoch_audit/).
+                progress_callback=None, target='PROXCEN'):
+    """Audit one epoch of any Parkes target. Returns dict report (also
+    written to results/epoch_audit/).
 
     progress_callback: optional fn(dict) with {'phase': 'scanning',
     'window', 'total', 'pair'} / {'phase': 'confirming'} / {'phase': 'done',
@@ -66,9 +67,9 @@ def audit_epoch(label, window_mhz=WINDOW_MHZ, threshold=RATIO_THRESHOLD,
     """
     # Fresh scan every run so newly downloaded epochs are found without
     # restarting anything
-    epochs = _discover_epochs()
+    epochs = _discover_epochs(target)
     if label not in epochs:
-        print(f"Unknown epoch {label} (have: {sorted(epochs)})")
+        print(f"Unknown epoch {label} of {target} (have: {sorted(epochs)})")
         return None
     info = epochs[label]
     mjd_int, seqs = info['mjd_int'], info['seqs']
@@ -79,7 +80,7 @@ def audit_epoch(label, window_mhz=WINDOW_MHZ, threshold=RATIO_THRESHOLD,
     band_stop = BAND_STOP
     import h5py
     for _p in seqs:
-        _hp = find_h5(f"Parkes_{mjd_int}_{_p[0]}_PROXCEN_S_fine.h5")
+        _hp = find_h5(f"Parkes_{mjd_int}_{_p[0]}_{target}_S_fine.h5")
         if _hp:
             with h5py.File(_hp, 'r') as _f:
                 _a = _f['data'].attrs
@@ -102,7 +103,8 @@ def audit_epoch(label, window_mhz=WINDOW_MHZ, threshold=RATIO_THRESHOLD,
             if progress_callback:
                 progress_callback({'phase': 'scanning', 'window': i + 1,
                                    'total': n_win, 'pair': pair_idx + 1})
-            r = _pair_residual(mjd_int, pair[0], pair[1], f0, f0 + window_mhz)
+            r = _pair_residual(mjd_int, pair[0], pair[1], f0, f0 + window_mhz,
+                               target=target)
             if r is None:
                 ok = False
                 break
@@ -129,6 +131,7 @@ def audit_epoch(label, window_mhz=WINDOW_MHZ, threshold=RATIO_THRESHOLD,
 
     report = {
         'epoch': label,
+        'target': target,
         'window_mhz': window_mhz,
         'noise_floor': noise_floor,
         'n_windows': int(good.sum()),
@@ -174,7 +177,7 @@ def audit_epoch(label, window_mhz=WINDOW_MHZ, threshold=RATIO_THRESHOLD,
     for f0, f1, r_max in regions:
         votes = 1  # scan pair already voted
         for pair in other_pairs:
-            r = _pair_residual(mjd_int, pair[0], pair[1], f0, f1)
+            r = _pair_residual(mjd_int, pair[0], pair[1], f0, f1, target=target)
             if r is None:
                 continue
             m = float(np.mean(r))
@@ -215,18 +218,21 @@ def _write_report(report):
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--epoch', help='audit a single epoch label')
+    ap.add_argument('--target', default='PROXCEN',
+                    help='target token as it appears in filenames '
+                         '(default PROXCEN)')
     ap.add_argument('--window', type=float, default=WINDOW_MHZ)
     ap.add_argument('--threshold', type=float, default=RATIO_THRESHOLD)
     ap.add_argument('--confirm-pairs', type=int, default=CONFIRM_PAIRS)
     ap.add_argument('--dry-run', action='store_true')
     args = ap.parse_args()
 
-    labels = [args.epoch] if args.epoch else sorted(_discover_epochs())
+    labels = [args.epoch] if args.epoch else sorted(_discover_epochs(args.target))
     for label in labels:
         audit_epoch(label, window_mhz=args.window,
                     threshold=args.threshold,
                     confirm_pairs=args.confirm_pairs,
-                    dry_run=args.dry_run)
+                    dry_run=args.dry_run, target=args.target)
 
 
 if __name__ == '__main__':

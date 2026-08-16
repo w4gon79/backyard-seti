@@ -1863,10 +1863,13 @@ async function startEpochAudit() {
     var inp = document.getElementById('audit-epoch-input');
     var epoch = inp ? inp.value.trim() : '';
     if (!/^\d{5}$/.test(epoch)) { alert('Enter a 5-digit epoch number, e.g. 57910'); return; }
+    var body = { epoch: epoch };
+    var t = document.getElementById('target-input');
+    if (t && t.value.trim()) body.target = t.value.trim().toUpperCase();
     try {
         var resp = await fetch('/api/audit/run', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ epoch: epoch }),
+            body: JSON.stringify(body),
         });
         var data = await resp.json();
         if (data.error) { alert(data.error); return; }

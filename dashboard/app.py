@@ -1777,7 +1777,7 @@ def _enqueue_download(url, filename, target_dir, expected_size=None):
         # Wait if another download is active (serialize downloads)
         while download_state['active'] is not None and download_state['active'] is not dl_item:
             _time.sleep(1)
-            if dl_item not in download_state['queue']:
+            if dl_item not in download_state['queue'] or dl_item.get('status') == 'cancelled':
                 return  # Cancelled
 
         download_state['active'] = dl_item
@@ -1797,6 +1797,11 @@ def _enqueue_download(url, filename, target_dir, expected_size=None):
                     last_done = 0
 
                     while True:
+                        if dl_item.get('status') == 'cancelled':
+                            # cancel endpoint marked us; stop reading, clean
+                            # up the partial after the file handle closes
+                            # (its own os.remove fails while we hold the file)
+                            break
                         chunk = resp.read(chunk_size)
                         if not chunk:
                             break
@@ -1819,8 +1824,15 @@ def _enqueue_download(url, filename, target_dir, expected_size=None):
                             last_time = now
                             last_done = done
 
-            dl_item['status'] = 'complete'
-            dl_item['progress'] = 100.0
+            if dl_item.get('status') == 'cancelled':
+                if os.path.isfile(dl_item['target_path']):
+                    try:
+                        os.remove(dl_item['target_path'])
+                    except OSError:
+                        pass
+            else:
+                dl_item['status'] = 'complete'
+                dl_item['progress'] = 100.0
 
         except Exception as e:
             dl_item['status'] = 'error'
@@ -1872,9 +1884,12 @@ audit_state = {'active': False, 'epoch': None, 'stage': '', 'progress': 0,
 
 @app.route('/api/audit/run', methods=['POST'])
 def api_audit_run():
-    """Run epoch_audit.py on one epoch in a background thread."""
+    """Run epoch_audit.py on one epoch of any Parkes target in a
+    background thread. Target defaults to PROXCEN; the UI passes the
+    name from the Target Search box."""
     params = request.json or {}
     epoch = str(params.get('epoch', '')).strip()
+    target = str(params.get('target', 'PROXCEN')).strip().upper() or 'PROXCEN'
     if not epoch.isdigit():
         return jsonify({'error': 'Epoch must be numeric, e.g. 57910'}), 400
     if audit_state['active']:
@@ -1898,10 +1913,12 @@ def api_audit_run():
             if _root not in sys.path:
                 sys.path.insert(0, _root)
             import epoch_audit as _ea
-            report = _ea.audit_epoch(epoch, progress_callback=_cb)
+            report = _ea.audit_epoch(epoch, progress_callback=_cb,
+                                     target=target)
             if report is None:
-                audit_state['error'] = ('no report - epoch not found on disk '
-                                        'or files unreadable')
+                audit_state['error'] = (f"no report - epoch {epoch} of "
+                                        f"{target} not found on disk or "
+                                        f"files unreadable")
             else:
                 audit_state['result'] = report
         except Exception as e:
@@ -1911,10 +1928,11 @@ def api_audit_run():
         finally:
             audit_state['active'] = False
 
-    audit_state.update({'active': True, 'epoch': epoch, 'stage': 'starting',
+    audit_state.update({'active': True, 'epoch': epoch, 'target': target,
+                        'stage': 'starting',
                         'progress': 0, 'total': 0, 'result': None, 'error': None})
     threading.Thread(target=_run, daemon=True).start()
-    return jsonify({'status': 'queued', 'epoch': epoch})
+    return jsonify({'status': 'queued', 'epoch': epoch, 'target': target})
 
 
 @app.route('/api/audit/status')
