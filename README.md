@@ -40,9 +40,10 @@ intuitive from the archive web page; this section is the decoder ring.
 
 All of it is built into the dashboard: search, cadence/session browsing,
 band selection, and downloads are all buttons. This section explains what
-you are actually looking at, because BL documents none of it. CLI
-equivalents for everything here live in the **CLI Reference** section at
-the bottom of this README.
+you are actually looking at, because BL documents none of it. Once your
+first epoch is on disk, continue with **End-to-End: From Download to
+Stacked Epochs** below. CLI equivalents for everything here live in the
+**CLI Reference** section at the bottom of this README.
 
 **One API, two grammars.** Every file is reached through the same query
 (`api/query-files?target=NAME`), but what you get back and what an
@@ -120,6 +121,72 @@ target token **parsed from the filename itself**. Every tool in this repo
 automatically; if you write your own query code, you must too. Short names
 are the dangerous ones: HIP2, GJ1, HIP26 all collide. Long unique names
 (PROXCEN, NGC1426) are unaffected.
+
+## End-to-End: From Download to Stacked Epochs
+
+Follow this walkthrough with any target and you end with RFI-filtered,
+barycentric-corrected, cross-epoch-validated epochs and an incoherent
+stack plot. Every step is a dashboard button; no terminal needed. Times
+assume default scan settings (262,144 sub-band width).
+
+### 0. Register the target (once)
+
+The barycentric panel and stack page draw their target dropdowns from the
+Target Registry. Add your target first: type the name in the Target
+Registry box and click **Add** (coordinates resolve via SIMBAD), or click
+**Add to Registry** on any BL Catalog row. Aliases are fine, "Ross 128"
+resolves to the same place as GJ447.
+
+### Track A: Parkes (explicit ON/OFF cadence)
+
+1. **Download one epoch.** Search the target, filter to Fine, download the
+   S and R files sharing one MJD (3 ON + 3 OFF, ~75 GB). See "Downloading
+   Observation Epochs" for the cadence mechanics.
+2. **Scan.** The cadence appears in Local Data. Select its files and click
+   **Start Scan**. Expect roughly 21 hours for a 6-file cadence at default
+   settings. Interrupted scans resume from where they stopped, and Mission
+   Control shows live progress. Hits land in the database automatically.
+3. **Reject RFI.** In the Results panel, select the scan, leave Freq
+   Tolerance 0.003 MHz and Drift Tolerance 100, click **Run ON/OFF
+   Rejection**. Signals present in both ON and OFF frames are terrestrial
+   and get flagged.
+4. **Repeat** steps 1-3 for every epoch you want, then **Archive Epoch to
+   D:** each finished cadence to free SSD staging space (the data stays
+   reachable from the archive).
+
+### Track B: GBT (ABACAD sessions)
+
+1. **Download sessions.** Search the target (e.g. GJ447), click **Browse
+   GBT Sessions** in the banner, pick a band (L recommended: ~15 GB per
+   session), optionally check **+ companions**, and click **Download** on
+   each session row. Two sessions minimum; more epochs means stronger
+   cross-epoch rejection.
+2. **Scan.** Same as Parkes: select the session's files in Local Data and
+   **Start Scan**. Whole-band GBT files run ~4-5 hours each at defaults.
+3. **RFI:** GBT has no OFF files, so skip the rejection step. Cross-epoch
+   matching (next) is the RFI filter for GBT.
+
+### Shared finishing steps (both tracks)
+
+4. **Barycentric correction.** In the Barycentric panel pick the target
+   (RA/Dec auto-fill from the registry), set **Telescope** to Parkes or
+   GBT to match your data, and click **Run Correction** for each scan.
+   This shifts hit frequencies into the solar-system barycenter frame so a
+   real transmitter holds still across epochs; uncorrected, Earth's
+   orbital motion smears a genuine signal by 36-115 kHz between sessions
+   (measured on NGC1426's epoch spacing).
+5. **Cross-epoch search.** Tick 2+ corrected scans, keep Tolerance 10 Hz
+   and Min Epochs 2 (raise to 3 when you have many epochs), optionally set
+   Min SNR 10, and click **Run Cross-Epoch Search**. Candidates show the
+   same barycentric frequency in multiple epochs: RFI cannot hold that
+   frame, so this is the strongest automated filter in the pipeline.
+   Anything surviving deserves a manual waterfall look (click the hit).
+6. **Stack.** Open the Stack page (`http://localhost:8070/stack`), pick the
+   target, a center frequency and window width, select epochs (All), leave
+   N-sigma at 5, and run. Stacking averages N epochs of power: a signal at
+   SNR 1.5 in single epochs rises to ~SNR 6.7 with 20 epochs. The result
+   badge reports the measured improvement and the peak table lists
+   detections at your sigma threshold.
 
 ## Project Structure
 
