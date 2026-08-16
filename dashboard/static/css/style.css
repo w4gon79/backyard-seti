@@ -767,6 +767,13 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
     max-width: 100%;
     overflow-x: auto;
     padding: 6px 0;
+    flex-basis: 100%;
+}
+/* Controls always claim their own full row below the scan list, even
+   when the list is empty (placeholder text) - without this the wrap
+   container pulls them up beside the 'Cross-Epoch Scans' label. */
+.bary-cross-controls {
+    flex-basis: 100%;
 }
 .bary-scan-checkbox {
     display: inline-flex;
