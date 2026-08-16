@@ -162,100 +162,114 @@ The Flask dashboard at `http://localhost:8070` provides:
   fine-res availability (one-time background sweep, cached in `bl_catalog`),
   filter by epochs/ON-OFF cadence, click rows onto the sky map, one-click add to
   registry.
+- **Mission Control** (`/mission`) - Real-time scan monitoring with a rolling
+  hit ticker.
 - **Mission Control** (`/mission`) - Real-time scan monitoring with hit ticker
+
+## Screenshots
+
+**Main dashboard** - sky map, target registry, and scan controls:
+
+![Main dashboard](docs/screenshots/SETI_Dashboard.png)
+
+**Mission Control** - live scan progress with the rolling hit ticker:
+
+![Mission Control](docs/screenshots/SETI_Mission_Control.png)
+
+**Incoherent stack waterfall** - six epochs of Proxima Centauri averaged
+after barycentric correction:
+
+![Incoherent stack](docs/screenshots/SETI_Stack.png)
 
 ## Setup
 
 ### Prerequisites
 
-- Python 3.11 (not 3.14, incompatible with blimpy)
+- Python 3.11. The Berkeley tools (blimpy, turbo_seti) do not support newer
+  Python releases yet. If your system default is 3.12+, install 3.11 alongside
+  it and run every command below with 3.11 explicitly (e.g. `py -3.11` on
+  Windows, `python3.11` on Linux).
 - git
 
-### Install
+### Quick Start: clone to running dashboard
+
+Four steps, in order. Running the dashboard is all you need; the CLI commands
+further down are optional extras.
+
+**Step 1: Clone the repository**
 
 ```bash
-# Clone this repo
 git clone https://github.com/w4gon79/backyard-seti.git
 cd backyard-seti
-
-# Install Berkeley SETI tools
-pip install blimpy turbo_seti astropy
-
-# Core dependencies (dashboard, HDF5 I/O, env config)
-pip install flask numpy python-dotenv h5py hdf5plugin
-
-# For incoherent stacking
-pip install matplotlib scipy
 ```
 
-### Python Path
+**Step 2: Install the dependencies**
 
-This project requires Python 3.11 with the Berkeley SETI tools installed.
-If your system default is a different Python, invoke 3.11 explicitly when
-running pipelines (e.g. `py -3.11` on Windows or the full path to your
-3.11 interpreter).
+```bash
+pip install -r requirements.txt
+```
 
-> Note: Python 3.13/3.14 may be default on PATH but turbo_seti requires 3.11.
+One command pulls in everything: the Berkeley SETI tools (blimpy, turbo_seti,
+astropy), the dashboard stack (Flask, numpy, python-dotenv), HDF5 I/O (h5py,
+hdf5plugin), and the stacking tools (matplotlib, scipy). This can take a few
+minutes; turbo_seti compiles Cython extensions.
 
-### Environment
+**Step 3 (optional): Configure a second drive for data files**
 
-Create a `.env` file in the project root:
+BL fine-res files are roughly 12 GB each. If you plan to collect several and
+would rather keep them on a second drive, create a `.env` file in the project
+root:
+
 ```
 SETI_DATA_SECONDARY=D:\seti_data\fine
 ```
 
-## Usage
+Skip this to start. The dashboard defaults to storing downloads under `data/`
+inside the project, and everything works without the file.
 
-### Database
-
-```bash
-# Initialize (creates schema if needed)
-python src/db.py init
-
-# Import existing JSON scan results into SQLite
-python src/migrate_to_sqlite.py
-
-# Query hits
-python src/db.py hits --scan-id PROXCEN_2026-08-08_2333 --min-snr 10 --on-off ON
-```
-
-### Dashboard
+**Step 4: Start the dashboard**
 
 ```bash
 python dashboard/app.py
-# Open http://localhost:8070
 ```
 
-### Scanning
+Then open **http://localhost:8070** in your browser. That is the whole setup.
+The SQLite database and its schema are created automatically on first launch;
+there is no manual init step.
+
+From the dashboard you can search the Breakthrough Listen archive, add targets
+(coordinates resolved automatically via SIMBAD), download data, run scans with
+live progress, reject RFI, apply barycentric correction, run cross-epoch
+search, and view incoherent stacks. The stack UI lives at
+`http://localhost:8070/stack` and live scan monitoring at
+`http://localhost:8070/mission`.
+
+## CLI Reference (optional)
+
+**None of these commands are required.** The dashboard from Step 4 covers the
+entire workflow interactively. These exist for scripting, automation, and
+completeness:
 
 ```bash
-# Download BL data
+# Query hits directly from the SQLite database
+python src/db.py hits --scan-id PROXCEN_2026-08-08_2333 --min-snr 10 --on-off ON
+
+# Download BL data for Proxima cadences
 python src/download_proxima.py
 
-# Run fine-res pipeline (SNR 5, 262k sub-bands)
+# Run the fine-res pipeline on a single file (SNR 5, 262k sub-bands)
 python src/fine_res_pipeline.py data/fine/Parkes_58020_21048_PROXCEN_S_fine.h5
-```
 
-### Barycentric Correction
-
-```bash
-# Correct a single scan
+# Barycentric-correct a scan directory
 python src/barycentric_correct.py scan results/PROXCEN_2026-08-08_2333 --target PROXCEN
 
-# Cross-epoch search across multiple scans
+# Cross-epoch search across multiple corrected scans
 python src/barycentric_correct.py cross-epoch \
   results/PROXCEN_2026-08-07_1911 results/PROXCEN_2026-08-08_2333 \
   --min-snr 10 --min-epochs 2
-```
 
-### Incoherent Stacking
-
-```bash
-# CLI (targeted window)
+# Incoherent stack, targeted window, with plot
 python incoherent_stack.py --target PROXCEN --freq-center 3000 --width 10 --plot
-
-# Dashboard (interactive)
-# Open http://localhost:8070/stack
 ```
 
 ## Proxima Centauri Testbed
