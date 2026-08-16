@@ -383,8 +383,13 @@ pip install -r requirements.txt
 
 One command pulls in everything: the Berkeley SETI tools (blimpy, turbo_seti,
 astropy), the dashboard stack (Flask, numpy, python-dotenv), HDF5 I/O (h5py,
-hdf5plugin), and the stacking tools (matplotlib, scipy). This can take a few
-minutes; turbo_seti compiles Cython extensions.
+hdf5plugin), and the stacking tools (matplotlib, scipy). All dependencies
+ship prebuilt wheels for 3.11 on Windows, so no compiler is needed.
+
+**Note on the Python version:** 3.11.9 is the newest 3.11 release with a
+Windows installer (later 3.11.x patches are source-only). Grab the 3.11.9
+64-bit installer from python.org. If your laptop already has a newer Python,
+install 3.11.9 alongside it and run the commands below with `py -3.11`.
 
 **Step 3 (optional): Configure a second drive for data files**
 
