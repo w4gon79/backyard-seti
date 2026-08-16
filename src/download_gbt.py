@@ -41,12 +41,15 @@ Usage:
         --session 58050 --list gbt_urls.txt
 """
 import argparse
+import math
+import os
 import re
 import sys
 import time
 import urllib.parse
 import urllib.request
 import json
+from concurrent.futures import ThreadPoolExecutor
 from collections import defaultdict
 
 BL_API = "http://seti.berkeley.edu/opendata/api"
@@ -68,6 +71,20 @@ BANDS = {
 }
 DEFAULT_BAND = (1100, 2000)
 SPAN_MHZ = 187.5  # each rawspec.0000 file covers ~187.5 MHz
+
+# Proximity companion discovery: the API has no "query by session"
+# endpoint, so the prefix response can only reveal companions that share
+# the target's name prefix. Instead we take the nearest catalog targets on
+# the sky (coords from the bl_catalog sweep table) and ask each directly
+# whether it has files in the session MJDs. BL's ABACAD secondaries sit
+# within a few degrees of the primary, so a small radius finds them.
+PROX_RADIUS_DEG = 10.0
+PROX_MAX_CANDIDATES = 20
+PROX_THREADS = 4
+PROX_SEQ_PAD = 500   # companion scans interleave with the target's own
+                    # scans (~700 seq apart) and the D position can land a
+                    # few hundred seq after the final A scan; +/-500 covers
+                    # the cadence block without pulling in unrelated blocks
 
 
 def api_query(target):
@@ -115,16 +132,18 @@ def sessions_for(files, fine_only=True):
     return dict(sorted(sess.items(), key=lambda kv: int(kv[0])))
 
 
-def companion_seqs(target_seqs):
-    """Candidate companion sequence windows: +/- 10 SEQ around each A scan."""
-    lo = min(target_seqs) - 10
-    hi = max(target_seqs) + 10
+def companion_seqs(target_seqs, pad=10):
+    """Candidate companion sequence window around the target's scans."""
+    lo = min(target_seqs) - pad
+    hi = max(target_seqs) + pad
     return lo, hi
 
 
 def find_companions(all_files, mjd, target, target_seqs):
     """Files from other targets in the same session, SEQ-adjacent to the
-    target's scans. Returns {target_name: [files]} for seq-neighbors only."""
+    target's scans. Returns {target_name: [files]} for seq-neighbors only.
+    NOTE: only sees targets present in `all_files` (the prefix response);
+    use find_companions_proximity for the general case."""
     lo, hi = companion_seqs(target_seqs)
     comps = defaultdict(list)
     for f in all_files:
@@ -136,6 +155,85 @@ def find_companions(all_files, mjd, target, target_seqs):
         if lo <= p["seq"] <= hi:
             comps[p["target"]].append(f)
     return dict(comps)
+
+
+def _ang_dist_deg(ra1_h, dec1, ra2_h, dec2):
+    """Great-circle distance in degrees between two RA(hour)/Dec(deg) points."""
+    r1, d1, r2, d2 = (math.radians(ra1_h * 15), math.radians(dec1),
+                      math.radians(ra2_h * 15), math.radians(dec2))
+    cosv = (math.sin(d1) * math.sin(d2)
+            + math.cos(d1) * math.cos(d2) * math.cos(r1 - r2))
+    return math.degrees(math.acos(max(-1.0, min(1.0, cosv))))
+
+
+def find_companions_proximity(target, session_seqs, db_path=None,
+                              radius_deg=PROX_RADIUS_DEG,
+                              max_candidates=PROX_MAX_CANDIDATES):
+    """Session companions via sky proximity: the nearest catalog targets
+    to `target` are queried directly for files in the session MJDs.
+
+    session_seqs: {mjd: [target's own seq numbers in that session]};
+    companion files must fall in a +/-SEQ window around the target's
+    scans within the same session. Needs the bl_catalog sweep table for
+    coordinates. Returns {mjd: {companion_name: [files]}}, or {} when
+    the catalog is unavailable (callers fall back to the prefix method)."""
+    try:
+        import sqlite3
+        conn = sqlite3.connect(db_path or _default_db_path())
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            'SELECT ra_hours, dec FROM bl_catalog WHERE UPPER(target)=?',
+            (target.upper(),)).fetchone()
+        if not row or row['ra_hours'] is None or row['dec'] is None:
+            conn.close()
+            return {}
+        ra_h, dec = float(row['ra_hours']), float(row['dec'])
+        near = conn.execute(
+            'SELECT target, ra_hours, dec FROM bl_catalog '
+            'WHERE ra_hours IS NOT NULL AND dec IS NOT NULL '
+            "AND telescopes LIKE '%GBT%' AND n_fine > 0"
+        ).fetchall()
+        conn.close()
+    except Exception:
+        return {}
+
+    cands = []
+    for r in near:
+        if r['target'].upper() == target.upper():
+            continue
+        d = _ang_dist_deg(ra_h, dec, float(r['ra_hours']), float(r['dec']))
+        if d <= radius_deg:
+            cands.append((d, r['target']))
+    cands.sort()
+    cands = [t for _, t in cands[:max_candidates]]
+    if not cands:
+        return {}
+
+    windows = {m: companion_seqs(seqs, pad=PROX_SEQ_PAD)
+               for m, seqs in session_seqs.items()}
+    out = defaultdict(lambda: defaultdict(list))
+
+    def _q(name):
+        try:
+            return name, api_query(name)
+        except Exception:
+            return name, []
+
+    with ThreadPoolExecutor(max_workers=PROX_THREADS) as ex:
+        for name, files in ex.map(_q, cands):
+            for f in files:
+                p = f['_parsed']
+                if p['mjd'] not in windows or not is_fine(p):
+                    continue
+                lo, hi = windows[p['mjd']]
+                if lo <= p['seq'] <= hi:
+                    out[p['mjd']][name].append(f)
+    return {m: dict(v) for m, v in out.items()}
+
+
+def _default_db_path():
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(root, 'data', 'seti_hits.db')
 
 
 def in_band(f, band):

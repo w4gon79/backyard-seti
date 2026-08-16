@@ -97,18 +97,25 @@ For serious RFI work include the companion scans' same sub-bands too.
 Ross 128). When the results contain GBT files, a **"GBT data detected"**
 banner appears: click **Browse GBT Sessions**. You get one row per
 observation session (MJD) showing fine file counts, in-band file count and
-GB for the selected band (L/S/C/X dropdown), and any ABACAD companions it
-found. Check **+ companions** to include the OFF scans, then click a
-session's **Download** button: every in-band fine file is queued into the
-standard Downloads panel with progress and cancel. Repeat for each session
-you want as an epoch.
+GB for the selected band (L/S/C/X dropdown), and the ABACAD companions
+found for that session. Check **+ companions** to include the OFF scans,
+then click a session's **Download** button: every in-band fine file is
+queued into the standard Downloads panel with progress and cancel. Repeat
+for each session you want as an epoch.
 
-Caveat on companions: the API has no "query by session" endpoint, so
-companion discovery is best-effort, limited to targets sharing your target's
-name prefix (the prefix-match response conveniently includes them). For
-HIP-style observing blocks that usually finds the neighbors; for isolated
-targets it finds nothing, and cross-epoch matching remains the primary RFI
-filter.
+**How companions are found (proximity method).** The BL API has no
+"what else was observed this session" endpoint, so the session browser
+discovers ABACAD companions itself: it takes the nearest targets on the
+sky to yours (within 10 deg, coordinates from the BL Catalog sweep), asks
+each directly whether it has files in your session's MJD, and keeps the
+ones whose sequence numbers interleave with your target's scans. BL
+schedules its B/C/D positions a few degrees from the primary, so this
+finds them reliably - even when they share no name prefix with your
+target (Ross 128 = GJ447 has HIP56376/HIP56378/HIP56445 companions in one
+session and HIP56677/HIP56682/HIP56691 in the other). If the catalog is
+unswept, discovery falls back to prefix-response neighbors and the table
+notes which method produced the results (`companion_source`).
+Cross-epoch matching remains the primary RFI filter either way.
 
 ### The prefix-match trap (applies to EVERYTHING)
 

@@ -1583,11 +1583,14 @@ def api_archive_status():
 @app.route('/api/gbt/sessions')
 def api_gbt_sessions():
     """GBT session layout for a target: sessions grouped by MJD, in-band
-    file counts for the chosen band, and best-effort ABACAD companion
-    discovery (see src/download_gbt.py for the caveats)."""
+    file counts for the chosen band, and ABACAD companions found by sky
+    proximity (nearest catalog targets queried directly for the session
+    MJDs; prefix-response neighbors are the fallback when the catalog is
+    unavailable)."""
     from download_gbt import (api_query as gbt_api_query,
                               sessions_for as gbt_sessions_for,
                               find_companions as gbt_find_companions,
+                              find_companions_proximity as gbt_find_companions_prox,
                               in_band as gbt_in_band,
                               BANDS as GBT_BANDS)
 
@@ -1611,6 +1614,14 @@ def api_gbt_sessions():
     files = [f for f in raw
              if f['_parsed']['target'].upper() == target.upper()]
     sess = gbt_sessions_for(files)
+
+    # Companion discovery: proximity (nearest catalog targets on sky,
+    # queried for these session MJDs) with prefix-response fallback.
+    prox = gbt_find_companions_prox(
+        target, {m: sorted({f['_parsed']['seq'] for f in fs})
+                 for m, fs in sess.items()})
+    prox_source = 'proximity' if prox else None
+
     out = []
     for mjd, fs in sess.items():
         seqs = sorted({f['_parsed']['seq'] for f in fs})
@@ -1619,7 +1630,11 @@ def api_gbt_sessions():
         def gb(lst):
             return round(sum(f['_parsed']['size'] for f in lst) / 1e9, 1)
 
-        comps = gbt_find_companions(raw, mjd, target, seqs)
+        if mjd in prox:
+            comps = prox[mjd]
+        else:
+            comps = gbt_find_companions(raw, mjd, target, seqs)
+            prox_source = prox_source or 'prefix-fallback'
         comp_out = []
         for cname, cfs in sorted(comps.items()):
             cb = [f for f in cfs if gbt_in_band(f, band_range)]
@@ -1632,7 +1647,9 @@ def api_gbt_sessions():
     out.sort(key=lambda s: int(s['mjd']))
     return jsonify({'target': target, 'band': band,
                     'n_exact_files': len(files),
-                    'n_response_files': len(raw), 'sessions': out})
+                    'n_response_files': len(raw),
+                    'companion_source': prox_source,
+                    'sessions': out})
 
 
 @app.route('/api/gbt/download', methods=['POST'])
@@ -1642,6 +1659,7 @@ def api_gbt_download():
     from download_gbt import (api_query as gbt_api_query,
                               sessions_for as gbt_sessions_for,
                               find_companions as gbt_find_companions,
+                              find_companions_proximity as gbt_find_companions_prox,
                               in_band as gbt_in_band,
                               BANDS as GBT_BANDS)
 
@@ -1674,7 +1692,10 @@ def api_gbt_download():
     seqs = sorted({f['_parsed']['seq'] for f in fs})
     sel = [f for f in fs if gbt_in_band(f, band_range)]
     if want_comps:
-        for cfs in gbt_find_companions(raw, mjd, target, seqs).values():
+        prox = gbt_find_companions_prox(
+            target, {mjd: seqs})
+        comps = prox.get(mjd) or gbt_find_companions(raw, mjd, target, seqs)
+        for cfs in comps.values():
             sel += [f for f in cfs if gbt_in_band(f, band_range)]
 
     queued = skipped = 0
