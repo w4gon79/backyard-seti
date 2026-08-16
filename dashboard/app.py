@@ -331,23 +331,39 @@ def api_targets():
 
 @app.route('/api/blsearch')
 def api_blsearch():
-    """Proxy search to Berkeley SETI open data API."""
+    """Proxy search to Berkeley SETI open data API.
+
+    Results are filtered to files whose target token (parsed from the
+    filename itself) exactly matches the query: the BL API prefix-matches
+    ?target= (HIP2 also returns HIP26, HIP225, ...), which used to pollute
+    the dashboard with hundreds of wrong-target files. Pass raw=1 to see
+    the unfiltered response."""
     import urllib.request
     import urllib.parse
-    
+    from bl_catalog import _exact_target
+
     target = request.args.get('target', '')
     if not target:
         return jsonify({'error': 'No target specified'}), 400
-    
+
     api_url = f'https://seti.berkeley.edu/opendata/api/query-files?target={urllib.parse.quote(target)}'
-    
+
     try:
         req = urllib.request.Request(api_url, headers={'User-Agent': 'BackyardSETI/1.0'})
         with urllib.request.urlopen(req, timeout=30) as resp:
             data = json.loads(resp.read().decode())
-        return jsonify(data)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+    if request.args.get('raw', '0') != '1' and isinstance(data, dict):
+        files = data.get('data', [])
+        want = target.upper()
+        exact = [f for f in files
+                 if (_exact_target((f.get('url') or '').split('/')[-1]) or '')
+                 .upper() == want]
+        data['raw_count'] = len(files)
+        data['data'] = exact
+    return jsonify(data)
 
 
 # ---------------------------------------------------------------------------
@@ -1560,6 +1576,122 @@ def api_archive_status():
     return jsonify(archive_state)
 
 
+# ---------------------------------------------------------------------------
+# API: GBT epoch sessions (ABACAD cadence browser + bulk download)
+# ---------------------------------------------------------------------------
+
+@app.route('/api/gbt/sessions')
+def api_gbt_sessions():
+    """GBT session layout for a target: sessions grouped by MJD, in-band
+    file counts for the chosen band, and best-effort ABACAD companion
+    discovery (see src/download_gbt.py for the caveats)."""
+    from download_gbt import (api_query as gbt_api_query,
+                              sessions_for as gbt_sessions_for,
+                              find_companions as gbt_find_companions,
+                              in_band as gbt_in_band,
+                              BANDS as GBT_BANDS)
+
+    target = request.args.get('target', '').strip()
+    band = request.args.get('band', 'L')
+    if not target:
+        return jsonify({'error': 'No target specified'}), 400
+    if band.upper() in GBT_BANDS:
+        band_range = GBT_BANDS[band.upper()]
+    else:
+        try:
+            lo, hi = band.split(',')
+            band_range = (float(lo), float(hi))
+        except Exception:
+            return jsonify({'error': f'Bad band: {band}'}), 400
+    try:
+        raw = gbt_api_query(target)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+    files = [f for f in raw
+             if f['_parsed']['target'].upper() == target.upper()]
+    sess = gbt_sessions_for(files)
+    out = []
+    for mjd, fs in sess.items():
+        seqs = sorted({f['_parsed']['seq'] for f in fs})
+        band_files = [f for f in fs if gbt_in_band(f, band_range)]
+
+        def gb(lst):
+            return round(sum(f['_parsed']['size'] for f in lst) / 1e9, 1)
+
+        comps = gbt_find_companions(raw, mjd, target, seqs)
+        comp_out = []
+        for cname, cfs in sorted(comps.items()):
+            cb = [f for f in cfs if gbt_in_band(f, band_range)]
+            comp_out.append({'target': cname, 'n_fine': len(cfs),
+                             'n_band': len(cb), 'gb_band': gb(cb)})
+        out.append({'mjd': mjd, 'n_fine': len(fs), 'gb_fine': gb(fs),
+                    'n_band': len(band_files), 'gb_band': gb(band_files),
+                    'seq_first': seqs[0], 'seq_last': seqs[-1],
+                    'companions': comp_out})
+    out.sort(key=lambda s: int(s['mjd']))
+    return jsonify({'target': target, 'band': band,
+                    'n_exact_files': len(files),
+                    'n_response_files': len(raw), 'sessions': out})
+
+
+@app.route('/api/gbt/download', methods=['POST'])
+def api_gbt_download():
+    """Queue one GBT session's in-band fine files (optionally plus
+    ABACAD companion scans) into the standard download pipeline."""
+    from download_gbt import (api_query as gbt_api_query,
+                              sessions_for as gbt_sessions_for,
+                              find_companions as gbt_find_companions,
+                              in_band as gbt_in_band,
+                              BANDS as GBT_BANDS)
+
+    params = request.json or {}
+    target = (params.get('target') or '').strip()
+    mjd = str(params.get('mjd') or '')
+    band = params.get('band', 'L')
+    want_comps = bool(params.get('companions'))
+    if not target or not mjd:
+        return jsonify({'error': 'target and mjd required'}), 400
+    if band.upper() in GBT_BANDS:
+        band_range = GBT_BANDS[band.upper()]
+    else:
+        try:
+            lo, hi = band.split(',')
+            band_range = (float(lo), float(hi))
+        except Exception:
+            return jsonify({'error': f'Bad band: {band}'}), 400
+    try:
+        raw = gbt_api_query(target)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+    files = [f for f in raw
+             if f['_parsed']['target'].upper() == target.upper()]
+    sess = gbt_sessions_for(files)
+    if mjd not in sess:
+        return jsonify({'error': f'No fine session {mjd} for {target}'}), 404
+    fs = sess[mjd]
+    seqs = sorted({f['_parsed']['seq'] for f in fs})
+    sel = [f for f in fs if gbt_in_band(f, band_range)]
+    if want_comps:
+        for cfs in gbt_find_companions(raw, mjd, target, seqs).values():
+            sel += [f for f in cfs if gbt_in_band(f, band_range)]
+
+    queued = skipped = 0
+    total = 0
+    for f in sel:
+        fname = f['url'].rsplit('/', 1)[-1]
+        res = _enqueue_download(f['url'], fname, FINE_DIR,
+                                expected_size=f['_parsed']['size'] or None)
+        if res.get('status') == 'queued':
+            queued += 1
+            total += f['_parsed']['size']
+        else:
+            skipped += 1
+    return jsonify({'queued': queued, 'skipped': skipped,
+                    'gb_queued': round(total / 1e9, 1)})
+
+
 @app.route('/api/download', methods=['POST'])
 def api_download():
     """Download a file from BL servers to local data directory.
@@ -1592,18 +1724,37 @@ def api_download():
     os.makedirs(target_dir, exist_ok=True)
     target_path = os.path.join(target_dir, filename)
     
-    # Check if already downloading
+    res = _enqueue_download(url, filename, target_dir)
+    code = 409 if res.get('status') == 'already-downloading' else 200
+    return jsonify(res), code
+
+
+def _enqueue_download(url, filename, target_dir, expected_size=None):
+    """Queue one file into the serialized download pipeline.
+
+    Shared by /api/download (single file from the search UI) and
+    /api/gbt/download (session bulk). expected_size lets partial files
+    left by a killed download be detected (wrong size) and replaced
+    instead of blocking re-downloads forever.
+    """
+    os.makedirs(target_dir, exist_ok=True)
+    target_path = os.path.join(target_dir, filename)
+
     for item in download_state['queue']:
-        if item['filename'] == filename and item['status'] == 'downloading':
-            return jsonify({'error': 'Already downloading'}), 409
-    
-    # Check if file already exists
+        if item['filename'] == filename and item['status'] in ('downloading', 'queued'):
+            return {'error': 'Already downloading',
+                    'status': 'already-downloading', 'filename': filename}
     if os.path.isfile(target_path):
         size = os.path.getsize(target_path)
-        return jsonify({'status': 'exists', 'filename': filename, 'size_bytes': size,
-                       'path': os.path.relpath(target_path, SETI_ROOT)})
-    
-    # Create download tracker
+        if expected_size and size != expected_size:
+            try:
+                os.remove(target_path)  # partial: killed mid-download earlier
+            except OSError:
+                pass
+        else:
+            return {'status': 'exists', 'filename': filename, 'size_bytes': size,
+                    'path': os.path.relpath(target_path, SETI_ROOT)}
+
     item = {
         'url': url,
         'filename': filename,
@@ -1613,38 +1764,38 @@ def api_download():
         'progress': 0.0,
         'speed_mbs': 0.0,
         'eta_s': 0,
-        'size_total': 0,
+        'size_total': expected_size or 0,
         'size_done': 0,
         'error': None,
     }
     download_state['queue'].append(item)
-    
-    # Start download in background thread
+
     def do_download(dl_item):
         import urllib.request
         import time as _time
-        
+
         # Wait if another download is active (serialize downloads)
         while download_state['active'] is not None and download_state['active'] is not dl_item:
             _time.sleep(1)
             if dl_item not in download_state['queue']:
                 return  # Cancelled
-        
+
         download_state['active'] = dl_item
         dl_item['status'] = 'downloading'
-        
+
         try:
-            req = urllib.request.Request(dl_item['url'], 
+            req = urllib.request.Request(dl_item['url'],
                                          headers={'User-Agent': 'BackyardSETI/1.0'})
             with urllib.request.urlopen(req, timeout=60) as resp:
-                dl_item['size_total'] = int(resp.headers.get('Content-Length', 0))
-                
+                if int(resp.headers.get('Content-Length', 0) or 0):
+                    dl_item['size_total'] = int(resp.headers['Content-Length'])
+
                 with open(dl_item['target_path'], 'wb') as f:
                     done = 0
                     chunk_size = 1024 * 1024  # 1 MB chunks
                     last_time = _time.time()
                     last_done = 0
-                    
+
                     while True:
                         chunk = resp.read(chunk_size)
                         if not chunk:
@@ -1652,10 +1803,10 @@ def api_download():
                         f.write(chunk)
                         done += len(chunk)
                         dl_item['size_done'] = done
-                        
+
                         if dl_item['size_total'] > 0:
                             dl_item['progress'] = round(done / dl_item['size_total'] * 100, 2)
-                        
+
                         # Calculate speed every 2 seconds
                         now = _time.time()
                         if now - last_time >= 2:
@@ -1667,10 +1818,10 @@ def api_download():
                                 dl_item['eta_s'] = int(remaining / (bytes_diff / elapsed))
                             last_time = now
                             last_done = done
-            
+
             dl_item['status'] = 'complete'
             dl_item['progress'] = 100.0
-            
+
         except Exception as e:
             dl_item['status'] = 'error'
             dl_item['error'] = str(e)
@@ -1683,11 +1834,10 @@ def api_download():
         finally:
             if download_state['active'] is dl_item:
                 download_state['active'] = None
-    
+
     thread = threading.Thread(target=do_download, args=(item,), daemon=True)
     thread.start()
-    
-    return jsonify({'status': 'queued', 'filename': filename})
+    return {'status': 'queued', 'filename': filename}
 
 
 @app.route('/api/download/status')

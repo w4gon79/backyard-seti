@@ -391,11 +391,92 @@ async function searchBL() {
                 }
             }
             renderBLResults();
+            if (gbtDetect(blResults)) gbtShowBanner(target.toUpperCase());
         } else {
             resultsDiv.innerHTML = '<p style="color:#546e7a;">No observations found.</p>';
         }
     } catch(e) {
         resultsDiv.innerHTML = '<p style="color:#ef5350;">Error: ' + e.message + '</p>';
+    }
+}
+
+// --- GBT session browser (ABACAD epochs, no ON/OFF files) ----------------
+
+function gbtDetect(list) {
+    return (list || []).some(function (f) { return /guppi_/.test(f.url || ''); });
+}
+
+function gbtShowBanner(target) {
+    var d = document.getElementById('bl-search-results');
+    var old = document.getElementById('gbt-session-banner');
+    if (old) old.remove();
+    var b = document.createElement('div');
+    b.id = 'gbt-session-banner';
+    b.style.cssText = 'margin:6px 0;padding:6px 8px;border:1px solid #2a3b4d;border-radius:4px;';
+    b.innerHTML = '<span style="color:#ffb74d;">GBT data detected</span> ' +
+        '<button class="btn-small" onclick="gbtLoadSessions(\'' + target.replace(/'/g, '') + '\')">Browse GBT Sessions</button>' +
+        ' <span style="color:#90a4ae;font-size:0.8em;">(ABACAD cadence: companion targets are the OFFs)</span>';
+    d.insertBefore(b, d.firstChild);
+}
+
+async function gbtLoadSessions(target) {
+    var band = window._gbtBand || 'L';
+    var d = document.getElementById('bl-search-results');
+    d.innerHTML = '<p style="color:#8ab4f8;">Loading GBT sessions for ' + escapeHtml(target) + '...</p>';
+    try {
+        var resp = await fetch('/api/gbt/sessions?target=' + encodeURIComponent(target) + '&band=' + band);
+        var data = await resp.json();
+        if (data.error) { d.innerHTML = '<p style="color:#ef5350;">' + data.error + '</p>'; return; }
+        renderGbtSessions(target, data);
+    } catch (e) {
+        d.innerHTML = '<p style="color:#ef5350;">' + e.message + '</p>';
+    }
+}
+
+function renderGbtSessions(target, data) {
+    var d = document.getElementById('bl-search-results');
+    var html = '<div class="bl-summary"><span style="color:#66bb6a;font-weight:600;">' + escapeHtml(target) +
+        ' GBT sessions</span> <span style="color:#90a4ae;">(' + data.n_exact_files +
+        ' exact files; prefix hits from other targets ignored)</span></div>';
+    html += '<div class="bl-filters"><label>Band:</label><select onchange="window._gbtBand=this.value;gbtLoadSessions(\'' + target.replace(/'/g, '') + '\')">';
+    ['L', 'S', 'C', 'X'].forEach(function (b) {
+        html += '<option value="' + b + '"' + ((window._gbtBand || 'L') === b ? ' selected' : '') + '>' + b + '</option>';
+    });
+    html += '</select>';
+    html += '<label style="margin-left:8px;"><input type="checkbox" ' + (window._gbtComps ? 'checked' : '') +
+        ' onchange="window._gbtComps=this.checked"> + companions (ABACAD OFFs)</label>';
+    html += ' <button class="btn-small" onclick="searchBL()">Back to file list</button></div>';
+    html += '<table class="bl-table"><thead><tr><th>Session MJD</th><th>Fine files</th><th>Fine GB</th><th>In band</th><th>Band GB</th><th>Companions</th><th></th></tr></thead><tbody>';
+    (data.sessions || []).forEach(function (s) {
+        var compNames = (s.companions || []).map(function (c) {
+            return c.target + (c.n_band ? ' (' + c.n_band + ')' : '');
+        }).join(', ') || 'none found';
+        html += '<tr><td style="color:#4fc3f7;">' + s.mjd + '</td><td>' + s.n_fine + '</td><td>' + s.gb_fine + '</td>' +
+            '<td>' + s.n_band + '</td><td>' + s.gb_band + '</td>' +
+            '<td style="color:#90a4ae;font-size:0.85em;">' + compNames + '</td>' +
+            '<td><button class="btn-small" onclick="gbtDownloadSession(\'' + target.replace(/'/g, '') + '\',' + s.mjd + ')">Download ' +
+            (window._gbtBand || 'L') + '-band</button></td></tr>';
+    });
+    html += '</tbody></table>';
+    if (!(data.sessions || []).length) {
+        html += '<p style="color:#546e7a;">No fine-res GBT sessions for this target.</p>';
+    }
+    d.innerHTML = html;
+}
+
+async function gbtDownloadSession(target, mjd) {
+    try {
+        var resp = await fetch('/api/gbt/download', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ target: target, mjd: mjd, band: window._gbtBand || 'L', companions: !!window._gbtComps })
+        });
+        var d = await resp.json();
+        if (d.error) { alert(d.error); return; }
+        alert('Queued ' + d.queued + ' files (' + d.gb_queued + ' GB)' +
+              (d.skipped ? ', ' + d.skipped + ' skipped (already present or downloading)' : ''));
+        showDownloadPanel();
+    } catch (e) {
+        alert('Queue failed: ' + e.message);
     }
 }
 
@@ -540,6 +621,7 @@ function getFilteredBL() {
         else if (url.indexOf('_mid.') !== -1) res = 'mid';
         else if (url.indexOf('_time.') !== -1) res = 'time';
         else if (url.indexOf('_coarse.') !== -1) res = 'coarse';
+        else if (url.indexOf('guppi_') !== -1) res = url.indexOf('.0000.h5') !== -1 ? 'fine' : 'mid';
 
         var fileType = (obs.file_type || '').toLowerCase();
         var targetName = obs.target || '';
