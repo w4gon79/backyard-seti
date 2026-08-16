@@ -1226,9 +1226,14 @@ def api_scan_resume():
 
     # Find the scan to resume
     if not scan_id:
-        # Find the most recent scan that has a checkpoint
-        scan_dirs = _discover_scans()
-        for sid in reversed(scan_dirs):
+        # Find the most recent scan that has a checkpoint.
+        # _discover_scans() returns metadata dicts sorted newest-first;
+        # extract the scan_id string (passing the dict to _get_scan_dir
+        # crashes its regex -> the historical 500 on body-less resume).
+        for scan_meta_cp in _discover_scans():
+            sid = scan_meta_cp.get('scan_id', '') if isinstance(scan_meta_cp, dict) else scan_meta_cp
+            if not sid:
+                continue
             cp_path = os.path.join(_get_scan_dir(sid), 'checkpoint.json')
             if os.path.isfile(cp_path):
                 scan_id = sid
