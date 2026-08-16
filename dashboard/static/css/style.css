@@ -76,14 +76,16 @@ body {
     justify-content: flex-start;
     padding-top: 8px;
 }
-#celestial-map { width: 100%; height: 440px; }
+#celestial-map { width: 100%; height: 440px; flex: 0 0 auto; }
 #sky-map-info {
     width: 100%;
     padding: 6px 12px;
     background: rgba(10, 10, 26, 0.85);
     font-size: 0.85em;
     border-top: 1px solid #1e3a5f;
-    margin-top: auto;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
     min-height: 36px;
 }
 
@@ -934,7 +936,7 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 
     /* Sky map */
     #sky-map-container { height: 360px; }
-    #celestial-map { height: 300px; }
+    #celestial-map { height: 300px; flex: 0 0 auto; }
 
     /* Search box */
     .search-box { flex-direction: column; gap: 6px; }
@@ -1018,7 +1020,7 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
     .panel-header { font-size: 0.8em; padding: 6px 10px; }
 
     #sky-map-container { height: 280px; }
-    #celestial-map { height: 220px; }
+    #celestial-map { height: 220px; flex: 0 0 auto; }
 
     .scan-buttons button { min-width: 100%; }
 

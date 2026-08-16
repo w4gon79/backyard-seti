@@ -526,6 +526,9 @@ async function blCatalogAdd(name) {
         if (d.error) { alert(name + ': ' + d.error); return; }
         alert(name + ' added to registry (coords via ' +
               (d.target.coord_source || '?') + ').');
+        if (typeof loadRegistry === 'function') {
+            try { loadRegistry(); } catch (e) {}
+        }
     } catch (e) { alert('Add failed: ' + e.message); }
 }
 
