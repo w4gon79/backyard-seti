@@ -38,6 +38,12 @@ BL data comes from two telescopes with **completely different filename
 grammars, cadence conventions, and download strategies**. None of this is
 intuitive from the archive web page; this section is the decoder ring.
 
+All of it is built into the dashboard: search, cadence/session browsing,
+band selection, and downloads are all buttons. This section explains what
+you are actually looking at, because BL documents none of it. CLI
+equivalents for everything here live in the **CLI Reference** section at
+the bottom of this README.
+
 **One API, two grammars.** Every file is reached through the same query
 (`api/query-files?target=NAME`), but what you get back and what an
 "observation" even means differs by telescope:
@@ -58,7 +64,12 @@ Parkes_57791_72989_PROXCEN_S_fine.h5
 - The `_S`/`_R` marker is **optional** in the filename (bare forms like
   `Parkes_57770_78921_ALPHACEN_fine.h5` exist); a missing marker means the
   position must be inferred from sequence order or the observing log.
-- Download with `src/bl_search.py --target NAME --cadence --download DIR`.
+
+**Downloading from the dashboard:** type the target name (e.g. `PROXCEN`)
+in Target Search and hit **Search BL API**. Filter to Fine resolution and
+download the S/R file set that shares one MJD (consecutive sequence
+numbers), typically 3 ON + 3 OFF, ~75 GB per epoch. Files land in
+`data/fine/` with live progress in the Downloads panel.
 
 ### GBT: no ON/OFF files at all, ABACAD companion cadences instead
 
@@ -81,15 +92,17 @@ each (~3.8 GB), together covering 1.1-11.9 GHz (~100 GB per scan). You can
 scan, selected by the API's `center_freq` field (1220, 1408, 1595, 1783 MHz).
 For serious RFI work include the companion scans' same sub-bands too.
 
-Download with `src/download_gbt.py`:
+**Downloading from the dashboard:** search the target (e.g. `GJ447` for
+Ross 128). When the results contain GBT files, a **"GBT data detected"**
+banner appears: click **Browse GBT Sessions**. You get one row per
+observation session (MJD) showing fine file counts, in-band file count and
+GB for the selected band (L/S/C/X dropdown), and any ABACAD companions it
+found. Check **+ companions** to include the OFF scans, then click a
+session's **Download** button: every in-band fine file is queued into the
+standard Downloads panel with progress and cancel. Repeat for each session
+you want as an epoch.
 
-```bash
-python src/download_gbt.py --target HIP69                  # list sessions
-python src/download_gbt.py --target HIP69 --session 58050  # one session's layout
-python src/download_gbt.py --target HIP69 --band L --companions --download data/gbt
-```
-
-Caveat on `--companions`: the API has no "query by session" endpoint, so
+Caveat on companions: the API has no "query by session" endpoint, so
 companion discovery is best-effort, limited to targets sharing your target's
 name prefix (the prefix-match response conveniently includes them). For
 HIP-style observing blocks that usually finds the neighbors; for isolated
@@ -229,6 +242,12 @@ The Flask dashboard at `http://localhost:8070` provides:
 
 - **Main page** (`/`) - Sky map, target search, scan controls, hit browser with
   waterfall inspection, ON/OFF rejection, barycentric correction, cross-epoch search
+- **Target Search + GBT Sessions** (main page) - Exact-match search of the BL
+  archive: prefix hits from other targets are hidden automatically (see "The
+  prefix-match trap"). Parkes files download per file with ON/OFF visible in the
+  name; GBT targets get a session browser instead (one row per observation
+  date, L/S/C/X band selector, ABACAD companion toggle, one-click epoch
+  download). See "Downloading Observation Epochs" above for the walkthrough.
 - **Incoherent Stack** (`/stack`) - Phase 2C power spectrum stacking with
   frequency window selection, epoch multi-select, background job runner, progress
   tracking, peak detection table, and waterfall follow-up. Registry-driven target
@@ -240,7 +259,6 @@ The Flask dashboard at `http://localhost:8070` provides:
   registry.
 - **Mission Control** (`/mission`) - Real-time scan monitoring with a rolling
   hit ticker.
-- **Mission Control** (`/mission`) - Real-time scan monitoring with hit ticker
 
 ## Screenshots
 
@@ -333,9 +351,25 @@ python src/db.py hits --scan-id PROXCEN_2026-08-08_2333 --min-snr 10 --on-off ON
 # Download BL data for Proxima cadences
 python src/download_proxima.py
 
-# Browse a GBT target's sessions and download an L-band epoch (see
-# "Downloading Observation Epochs" above for the GBT/Parkes differences)
-python src/download_gbt.py --target HIP69 --band L --companions --download data/gbt
+# Find a target's BL catalog name (fuzzy search; Ross 128 -> GJ447)
+python src/bl_search.py --find ross
+
+# Search a target's files. Exact-match by default; --raw shows the
+# prefix pollution from other targets (see "The prefix-match trap")
+python src/bl_search.py --target GJ447
+
+# Parkes: group files into ON/OFF cadence sessions by observation date
+python src/bl_search.py --target PROXCEN --cadence
+
+# GBT: list a target's sessions, then download an L-band epoch
+# (see "Downloading Observation Epochs" for the GBT/Parkes differences)
+python src/download_gbt.py --target GJ447
+python src/download_gbt.py --target GJ447 --all-sessions --band L --download data/fine
+
+# GBT: include ABACAD companion scans (best-effort), or export a URL
+# list for an external download manager instead
+python src/download_gbt.py --target HIP2 --band L --companions --download data/fine
+python src/download_gbt.py --target HIP2 --band L --companions --list gbt_urls.txt
 
 # Run the fine-res pipeline on a single file (SNR 5, 262k sub-bands)
 python src/fine_res_pipeline.py data/fine/Parkes_58020_21048_PROXCEN_S_fine.h5
