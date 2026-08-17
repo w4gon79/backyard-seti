@@ -2213,7 +2213,7 @@ async function loadBarycentricTargets() {
         var resp = await fetch('/api/barycentric/targets');
         var data = await resp.json();
         var select = document.getElementById('bary-target-select');
-        var html = '';
+        var html = '<option value="">-- Select Target --</option>';
         baryTargets = {};
         for (var i = 0; i < data.targets.length; i++) {
             var t = data.targets[i];
@@ -2224,13 +2224,8 @@ async function loadBarycentricTargets() {
             html = '<option value="">No targets in registry</option>';
         }
         select.innerHTML = html;
-        // Registry-only (Custom retired): auto-select the first target
-        // and display its registry coordinates
-        if (data.targets.length > 0) {
-            select.value = data.targets[0].name;
-            document.getElementById('bary-ra').value = data.targets[0].ra_hours;
-            document.getElementById('bary-dec').value = data.targets[0].dec_deg;
-        }
+        // No default selection: nothing loads (corrections, scan list,
+        // coordinates) until the user explicitly picks a target.
         // Store which scans have barycentric correction completed
         window.correctedScanIds = data.corrected_scans || [];
         // Store detailed status (complete vs partial)
@@ -2248,6 +2243,9 @@ function onBaryTargetSelected() {
     if (target && baryTargets[target]) {
         document.getElementById('bary-ra').value = baryTargets[target].ra;
         document.getElementById('bary-dec').value = baryTargets[target].dec;
+    } else {
+        document.getElementById('bary-ra').value = '';
+        document.getElementById('bary-dec').value = '';
     }
     // Re-filter the Cross-Epoch scan list for the selected target
     updateBaryScanCheckboxes();
@@ -2259,6 +2257,12 @@ function updateBaryScanCheckboxes() {
     // Filter by the Barycentric Target dropdown above this list
     var sel = document.getElementById('bary-target-select');
     var activeTarget = (sel && sel.value) ? sel.value.toUpperCase() : '';
+    // Nothing until a target is chosen: corrections display is
+    // selection-driven, not auto-loaded on startup
+    if (!activeTarget) {
+        container.innerHTML = '<span style="color:#546e7a;font-size:0.85em;">Select a target to see its corrected scans.</span>';
+        return;
+    }
     if (scansList.length === 0) {
         container.innerHTML = '<span style="color:#546e7a;font-size:0.85em;">No scans available.</span>';
         return;
