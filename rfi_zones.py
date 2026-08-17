@@ -98,8 +98,15 @@ def trim_window(f_start, f_stop, epoch_label):
 
 
 def coverage_fraction(f_start, f_stop, epoch_label):
-    """Fraction of the window covered by zones (0..1)."""
+    """Fraction of the window covered by zones (0..1).
+
+    Frequency order agnostic: GBT h5 files run descending (f_start > f_stop),
+    so normalize orientation before measuring. A truly zero-width window is
+    treated as fully covered (degenerate).
+    """
     total = 0.0
+    if f_start > f_stop:
+        f_start, f_stop = f_stop, f_start
     w = float(f_stop) - float(f_start)
     if w <= 0:
         return 1.0
