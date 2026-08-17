@@ -2569,9 +2569,29 @@ function renderCrossEpochResults(data) {
     var summary = data.summary || {};
     var candidates = data.candidates || [];
 
+    // Identify the run: target + epochs from the scan_ids in the result.
+    // Shown even (especially) when zero candidates, so a null result is
+    // still attributable to a target and epoch set.
+    var runIds = summary.scan_ids || Object.keys(summary.epoch_info || {});
+    var runEps = [];
+    var runTargets = [];
+    for (var ri = 0; ri < runIds.length; ri++) {
+        var sid = String(runIds[ri]);
+        var em = /_(\d{5})_\d{4}-\d{2}-\d{2}/.exec(sid);
+        if (em && runEps.indexOf(em[1]) === -1) runEps.push(em[1]);
+        var pref = sid.split('_')[0];
+        if (pref && runTargets.indexOf(pref) === -1) runTargets.push(pref);
+    }
+
     // Render summary
     var summaryHtml = '';
-    summaryHtml += '<div class="bs-item"><span class="bs-label">Scans:</span><span class="bs-val">' + summary.total_scans + '</span></div>';
+    if (runTargets.length) {
+        summaryHtml += '<div class="bs-item"><span class="bs-label">Target:</span><span class="bs-val" style="color:#4fc3f7;font-weight:600;">' + escapeHtml(runTargets.join(' + ')) + '</span></div>';
+    }
+    if (runEps.length) {
+        summaryHtml += '<div class="bs-item"><span class="bs-label">Epochs:</span><span class="bs-val">' + runEps.join(', ') + ' (MJD)</span></div>';
+    }
+    summaryHtml += '<div class="bs-item"><span class="bs-label">Scans:</span><span class="bs-val">' + (summary.total_scans || runIds.length) + '</span></div>';
     summaryHtml += '<div class="bs-item"><span class="bs-label">ON freqs checked:</span><span class="bs-val">' + (summary.total_on_frequencies || 0).toLocaleString() + '</span></div>';
         if (summary.freqs_meeting_min_epochs !== undefined) {
             summaryHtml += '<div class="bs-item"><span class="bs-label">Freqs in &ge;' + (summary.min_epochs || 2) + ' epochs:</span><span class="bs-val">' + (summary.freqs_meeting_min_epochs || 0).toLocaleString() + '</span></div>';
@@ -2588,7 +2608,9 @@ function renderCrossEpochResults(data) {
     // Render candidate table
     var tbody = document.getElementById('bary-cross-tbody');
     if (candidates.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" class="empty">No cross-epoch candidates found. ' +
+        var ctxInfo = (runTargets.length ? ' for ' + escapeHtml(runTargets.join(' + ')) : '')
+            + (runEps.length ? ' (epochs ' + runEps.join(', ') + ')' : '');
+        tbody.innerHTML = '<tr><td colspan="7" class="empty">No cross-epoch candidates found' + ctxInfo + '. ' +
             'This is expected for RFI-dominated data. Try different tolerance or min_epochs settings.</td></tr>';
         return;
     }
