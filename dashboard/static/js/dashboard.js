@@ -2692,8 +2692,11 @@ async function loadCrossEpochHistory() {
         }
         select.innerHTML = html;
         
-        // Auto-load most recent run
-        loadCrossEpochRun(runs[0].id || runs[0].filename);
+        // Do NOT auto-load the most recent run on startup: leave the
+        // results panel empty until the user picks a run. (Auto-load made
+        // stale PROXCEN results appear while the dropdown still read
+        // '-- Select previous run --'.) Loading now happens only via
+        // explicit dropdown selection.
     } catch(e) {
         console.error('Error loading cross-epoch history:', e);
         select.innerHTML = '<option value="">Error loading history</option>';
