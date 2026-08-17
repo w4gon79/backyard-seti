@@ -458,10 +458,9 @@ html, body {
     min-width: 0;
 }
 
-/* Long filenames (GBT spliced names): smaller, single-line, ellipsized.
+/* Long filenames (GBT spliced names): single-line, ellipsized.
    Full name stays available via the hover tooltip (title attr). */
 #stat-file.stat-value {
-    font-size: 0.95em;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
