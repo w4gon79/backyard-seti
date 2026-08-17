@@ -1035,21 +1035,39 @@ async function startScan() {
     var scanTarget = 'PROXCEN';
     var scanRes = 'fine';
     if (selectedFiles.size > 0) {
-        var fn = Array.from(selectedFiles)[0].split('/').pop();
-        var parts = fn.split('_');
-        var gi = parts.indexOf('guppi');
-        if (gi !== -1 && parts.length >= gi + 4) {
-            // guppi_MJD_SECONDS_TARGET_SCAN: target is three tokens past 'guppi'
-            var tok = parts[gi + 3];
-            if (/^\d+$/.test(tok)) {
-                // paranoia: landed on a numeric token, grammar shifted
-                scanTarget = 'PROXCEN';
-            } else {
-                scanTarget = tok;
+        // Derive target by majority vote across ALL selected files, not the
+        // first-clicked one. ABACAD cadence: the A target appears in ~half the
+        // files (3 of 6); each companion appears once. First-file parse would
+        // label the whole scan after whatever the user clicked first.
+        var tally = {};
+        var firstTok = null;
+        selectedFiles.forEach(function (p) {
+            var fn = p.split('/').pop();
+            var parts = fn.split('_');
+            var tok = null;
+            var gi = parts.indexOf('guppi');
+            if (gi !== -1 && parts.length >= gi + 4) {
+                var t3 = parts[gi + 3];  // guppi_MJD_SECONDS_TARGET_SCAN
+                if (!/^\d+$/.test(t3)) tok = t3;
+            } else if (parts.length >= 4 && parts[0] !== 'spliced' &&
+                       !/^blc\d+$/.test(parts[0])) {
+                tok = parts[3];        // Parkes_57910_34684_PROXCEN_S_fine.h5
             }
-        } else if (parts.length >= 4) {
-            scanTarget = parts[3];
+            if (tok) {
+                tally[tok] = (tally[tok] || 0) + 1;
+                if (firstTok === null) firstTok = tok;
+            }
+        });
+        var best = null, bestN = 0, tied = false;
+        for (var t in tally) {
+            if (!tally.hasOwnProperty(t)) continue;
+            if (tally[t] > bestN) { best = t; bestN = tally[t]; tied = false; }
+            else if (tally[t] === bestN) tied = true;
         }
+        // Clear winner wins; a tie falls back to first-file token (fail-safe,
+        // same behavior as before but only in genuinely ambiguous selections)
+        scanTarget = (best !== null && !tied) ? best : (firstTok || 'PROXCEN');
+        var fn = Array.from(selectedFiles)[0].split('/').pop();
         if (fn.indexOf('_mid.') !== -1) scanRes = 'mid';
         else if (fn.indexOf('_time.') !== -1) scanRes = 'time';
     }
