@@ -2356,6 +2356,45 @@ def api_barycentric_correct():
             target_name=target_name,
         )
         
+        # Sync correction results into the database so hits views show bary freqs
+        bary_stats = {}
+        try:
+            from db import (update_barycentric_freqs, update_scan_barycentric,
+                            count_hits)
+            bary_updates = []
+            vel = mjd_val = None
+            for fname in result['files_corrected']:
+                bp = os.path.join(result['barycentric_dir'],
+                                  os.path.basename(fname) + '_bary_hits.json')
+                if not os.path.isfile(bp):
+                    continue
+                with open(bp) as f:
+                    bdata = json.load(f)
+                sf = bdata.get('file', os.path.basename(fname))
+                if sf and not sf.endswith('.h5'):
+                    sf += '.h5'
+                for h in bdata.get('hits', []):
+                    if 'barycentric_freq' in h:
+                        if vel is None:
+                            vel = h.get('barycentric_velocity_mps', 0) or 0
+                        if mjd_val is None:
+                            mjd_val = h.get('mjd', 0) or 0
+                        bary_updates.append({
+                            'freq': h.get('freq'),
+                            'barycentric_freq': h['barycentric_freq'],
+                            'source_file': sf,
+                        })
+            if bary_updates:
+                update_barycentric_freqs(scan_id, bary_updates)
+                bary_stats = {'bary_updated': len(bary_updates)}
+                if vel is not None:
+                    update_scan_barycentric(
+                        scan_id, vel, mjd_val, ra_hours, dec_deg, telescope)
+        except Exception as e:
+            import traceback
+            bary_stats = {'db_sync_error': str(e),
+                          'traceback': traceback.format_exc()[-300:]}
+        
         return jsonify({
             'status': 'complete',
             'scan_id': scan_id,
@@ -2363,6 +2402,7 @@ def api_barycentric_correct():
             'total_hits': result['total_hits'],
             'corrections': result['corrections'],
             'barycentric_dir': result['barycentric_dir'],
+            'db_sync': bary_stats,
         })
     except Exception as e:
         import traceback

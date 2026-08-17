@@ -768,14 +768,19 @@ def import_scan_from_json(scan_dir, db_path=None):
             for bf in bary_files:
                 with open(bf) as f:
                     data = json.load(f)
-                bary_vel = data.get('barycentric_velocity_mps', bary_vel)
-                bary_mjd = data.get('barycentric_mjd', bary_mjd)
                 for h in data.get('hits', []):
                     if 'barycentric_freq' in h:
+                        sf = h.get('file', h.get('source_file', '')) or ''
+                        if sf and not sf.endswith('.h5'):
+                            sf += '.h5'  # bary JSON stores basename; hits table stores .h5
+                        if bary_vel in (0, None):
+                            bary_vel = h.get('barycentric_velocity_mps', 0) or 0
+                        if not bary_mjd:
+                            bary_mjd = h.get('mjd', 0) or 0
                         bary_updates.append({
                             'freq': h.get('freq'),
                             'barycentric_freq': h['barycentric_freq'],
-                            'source_file': h.get('file', h.get('source_file', '')),
+                            'source_file': sf,
                         })
             if bary_updates:
                 update_barycentric_freqs(scan_id, bary_updates, db_path)
