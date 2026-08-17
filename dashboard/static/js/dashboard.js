@@ -1038,8 +1038,15 @@ async function startScan() {
         var fn = Array.from(selectedFiles)[0].split('/').pop();
         var parts = fn.split('_');
         var gi = parts.indexOf('guppi');
-        if (gi !== -1 && parts.length >= gi + 3) {
-            scanTarget = parts[gi + 2];
+        if (gi !== -1 && parts.length >= gi + 4) {
+            // guppi_MJD_SECONDS_TARGET_SCAN: target is three tokens past 'guppi'
+            var tok = parts[gi + 3];
+            if (/^\d+$/.test(tok)) {
+                // paranoia: landed on a numeric token, grammar shifted
+                scanTarget = 'PROXCEN';
+            } else {
+                scanTarget = tok;
+            }
         } else if (parts.length >= 4) {
             scanTarget = parts[3];
         }

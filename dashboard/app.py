@@ -202,6 +202,25 @@ _GBT_LOCAL_PAT = re.compile(
     r'\.(rawspec|gpuspec)\.(\d+)\.h5$')
 
 
+
+
+def _file_is_on(fname, scan_target=''):
+    """True if fname is an ON-source observation.
+
+    Parkes: _S_ marker (ON) vs _R_ (OFF).
+    GBT: guppi target token equals the scan target (ABACAD A-scans are ON).
+    """
+    fname = os.path.basename(str(fname or ''))
+    if '_S_' in fname:
+        return True
+    if '_R_' in fname:
+        return False
+    if 'guppi_' in fname:
+        m = _GBT_LOCAL_PAT.search(fname)
+        if m:
+            tok = m.group(3).upper()
+            return bool(tok) and tok == str(scan_target or '').upper()
+    return False
 def _local_file_target_mjd(fname):
     """(target, mjd, grammar) for any local BL filename, or None.
     Parkes: Parkes_57910_34684_PROXCEN_S_fine.h5 -> (PROXCEN, 57910)
@@ -529,7 +548,7 @@ def api_scans_list():
                 total = 0
                 for hf in hit_files:
                     fname = os.path.basename(hf)
-                    is_on = '_S_' in fname
+                    is_on = _file_is_on(fname, scan.get('target', ''))
                     try:
                         with open(hf) as f:
                             data = json.load(f)
@@ -589,6 +608,7 @@ def api_scan_results(scan_id):
     
     # Include scan metadata
     meta = _load_scan_meta(scan_dir) or {}
+    _scan_target = str(meta.get('target', '') or '')
     
     # Include rejection results if they exist
     reject_path = os.path.join(scan_dir, 'rejection', 'rejection_results.json')
@@ -704,7 +724,7 @@ def api_scans_complete(scan_id):
                 data = json.load(f)
             hits = data.get('hits', [])
             fname = os.path.basename(fpath)
-            is_on = '_S_' in fname
+            is_on = _file_is_on(fname, _scan_target)
             count = len(hits)
             total_hits += count
             if is_on:
@@ -1178,9 +1198,9 @@ def api_scan_start():
                     scan_state['subband_hits'].append(n_hits)
                     # Fix 3: Classify as ON or OFF based on filename
                     cur_file = scan_state.get('current_file', '')
-                    if '_S_' in cur_file:
+                    if _file_is_on(cur_file, scan_state.get('target', '')):
                         scan_state['on_hits'] += n_hits
-                    elif '_R_' in cur_file:
+                    else:
                         scan_state['off_hits'] += n_hits
                 
                 # Parse top hit: find_doppler.N INFO     Top hit found! SNR X, Drift Rate Y, index Z
@@ -1414,9 +1434,9 @@ def api_scan_resume():
                         scan_state['subband_hits'].append(n_hits)
                         # Fix 3: ON/OFF classification
                         cur_file = scan_state.get('current_file', '')
-                        if '_S_' in cur_file:
+                        if _file_is_on(cur_file, scan_state.get('target', '')):
                             scan_state['on_hits'] += n_hits
-                        elif '_R_' in cur_file:
+                        else:
                             scan_state['off_hits'] += n_hits
 
                     top_match = re.search(r'Top hit found!.*SNR\s+([\d.]+).*Drift Rate\s+([-\d.]+).*index\s+(\d+)', line_stripped)
@@ -2055,6 +2075,7 @@ def _complete_scan_meta(scan_id, duration_s=0):
         'target': 'unknown',
         'timestamp': datetime.now().isoformat(timespec='seconds'),
     }
+    _scan_target = str(meta.get('target', '') or '')
     
     on_hits = 0
     off_hits = 0
@@ -2067,7 +2088,7 @@ def _complete_scan_meta(scan_id, duration_s=0):
                 data = json.load(f)
             hits = data.get('hits', [])
             fname = os.path.basename(fpath)
-            is_on = '_S_' in fname
+            is_on = _file_is_on(fname, _scan_target)
             count = len(hits)
             total_hits += count
             if is_on:
@@ -2131,7 +2152,7 @@ def api_stats():
                 if isinstance(data, dict):
                     hits = data.get('hits', [])
                     total_hits += len(hits)
-                    is_on = '_S_' in os.path.basename(fpath)
+                    is_on = _file_is_on(fpath, scan_id.split('_')[0] if scan_id else '')
                     if is_on:
                         on_hits += len(hits)
                     else:
@@ -2186,7 +2207,7 @@ def api_reject():
                 data = json.load(f)
             hits = data.get('hits', [])
             filename = data.get('file', os.path.basename(fpath))
-            is_on = '_S_' in filename or data.get('on_off') == 'ON'
+            is_on = _file_is_on(filename, source.split('_')[0]) or data.get('on_off') == 'ON'
             for h in hits:
                 h['source_file'] = filename
                 if is_on:
