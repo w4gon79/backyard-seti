@@ -455,6 +455,18 @@ html, body {
     flex-direction: column;
     gap: 2px;
     position: relative;
+    min-width: 0;
+}
+
+/* Long filenames (GBT spliced names): smaller, single-line, ellipsized.
+   Full name stays available via the hover tooltip (title attr). */
+#stat-file.stat-value {
+    font-size: 0.95em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+    display: block;
 }
 
 .stat-cell .stat-label {
@@ -631,8 +643,8 @@ html, body {
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
-    padding: 6px;
+    justify-content: flex-start;
+    padding: 6px 6px 2px;
     background: #000400;
 }
 
@@ -640,18 +652,22 @@ html, body {
     display: block;
     width: 100%;
     max-width: 220px;
-    height: 200px;
+    height: 185px;
+    flex: 0 0 auto;
 }
 
 .starmap-coords {
     display: flex;
     justify-content: space-between;
     width: 100%;
-    padding: 4px 8px 2px;
+    flex: 0 0 auto;
+    padding: 4px 6px 8px;
     font-size: 0.7em;
+    line-height: 1.25;
     color: var(--phos-dim);
     font-family: var(--font-mono);
-    letter-spacing: 1px;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
 }
 
 .starmap-coords span {

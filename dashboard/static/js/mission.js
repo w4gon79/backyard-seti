@@ -118,42 +118,78 @@ let STARMAP_CENTER_DEC = TARGET_SKY[currentTargetKey].dec;
 const STARMAP_RANGE_RA   = 15;
 const STARMAP_RANGE_DEC  = 15;
 
-function updateStarmapTarget(targetName) {
+async function updateStarmapTarget(targetName) {
+    if (!targetName) return;
     // Normalize target name to match keys
     let key = targetName.toUpperCase().replace(/\s/g, '_');
     // Try direct lookup
-    if (TARGET_SKY[key]) {
-        currentTargetKey = key;
-    } else {
+    if (!TARGET_SKY[key]) {
         // Try partial match
         for (const k in TARGET_SKY) {
             if (k.indexOf(key) !== -1 || key.indexOf(k) !== -1) {
-                currentTargetKey = k;
+                key = k;
                 break;
             }
         }
     }
-    const t = TARGET_SKY[currentTargetKey];
-    if (t) {
-        STARMAP_STARS = t.stars;
-        STARMAP_CENTER_RA = t.ra;
-        STARMAP_CENTER_DEC = t.dec;
-        // Update coordinate readout
-        const raH = Math.floor(STARMAP_CENTER_RA / 15);
-        const raM = Math.floor((STARMAP_CENTER_RA / 15 - raH) * 60);
-        const raS = ((STARMAP_CENTER_RA / 15 - raH) * 60 - raM) * 60;
-        const decSign = STARMAP_CENTER_DEC < 0 ? '-' : '+';
-        const decAbs = Math.abs(STARMAP_CENTER_DEC);
-        const decD = Math.floor(decAbs);
-        const decM = Math.floor((decAbs - decD) * 60);
-        const decS = ((decAbs - decD) * 60 - decM) * 60;
-        const coordsDiv = document.querySelector('.starmap-coords');
-        if (coordsDiv) {
-            const spans = coordsDiv.querySelectorAll('span');
-            if (spans[0]) spans[0].textContent = `RA: ${raH}h ${raM}m ${raS.toFixed(0)}s`;
-            if (spans[1]) spans[1].textContent = `DEC: ${decSign}${decD}\u00b0 ${decM}' ${decS.toFixed(0)}"`;
-        }
+    if (!TARGET_SKY[key]) {
+        // Unknown target: resolve coordinates from the BL open-data API
+        // (same source as the main dashboard sky map). On failure keep the
+        // previous target rather than silently falling back to Proxima.
+        try {
+            const resp = await fetch('/api/blsearch?target=' + encodeURIComponent(targetName));
+            const data = await resp.json();
+            const first = (data.data || [])[0];
+            if (first && first.ra != null && first.decl != null) {
+                let raDeg = typeof first.ra === 'number'
+                    ? first.ra : _parseRaString(String(first.ra)) * 15;
+                let decDeg = typeof first.decl === 'number'
+                    ? first.decl : _parseDecString(String(first.decl));
+                if (raDeg != null && isFinite(raDeg) && decDeg != null && isFinite(decDeg)) {
+                    TARGET_SKY[key] = {
+                        ra: raDeg, dec: decDeg, name: targetName.toUpperCase(),
+                        stars: [{ra: raDeg, dec: decDeg, mag: 4,
+                                 name: targetName.toUpperCase(), isTarget: true}],
+                    };
+                }
+            }
+        } catch (e) { /* keep previous target */ }
     }
+    const t = TARGET_SKY[key];
+    if (!t) return;   // unresolved: leave the map on the previous target
+    currentTargetKey = key;
+    STARMAP_STARS = t.stars;
+    STARMAP_CENTER_RA = t.ra;
+    STARMAP_CENTER_DEC = t.dec;
+    // Update coordinate readout
+    const raH = Math.floor(STARMAP_CENTER_RA / 15);
+    const raM = Math.floor((STARMAP_CENTER_RA / 15 - raH) * 60);
+    const raS = ((STARMAP_CENTER_RA / 15 - raH) * 60 - raM) * 60;
+    const decSign = STARMAP_CENTER_DEC < 0 ? '-' : '+';
+    const decAbs = Math.abs(STARMAP_CENTER_DEC);
+    const decD = Math.floor(decAbs);
+    const decM = Math.floor((decAbs - decD) * 60);
+    const decS = ((decAbs - decD) * 60 - decM) * 60;
+    const coordsDiv = document.querySelector('.starmap-coords');
+    if (coordsDiv) {
+        const spans = coordsDiv.querySelectorAll('span');
+        if (spans[0]) spans[0].textContent = `RA: ${raH}h ${raM}m ${raS.toFixed(0)}s`;
+        if (spans[1]) spans[1].textContent = `DEC: ${decSign}${decD}\u00b0 ${decM}' ${decS.toFixed(0)}"`;
+    }
+}
+
+// Minimal coordinate string parsers (BL API sometimes returns sexagesimal)
+function _parseRaString(s) {
+    const p = s.trim().split(/[\s:]+/).map(Number);
+    if (p.some(isNaN)) return null;
+    return (p[0] || 0) + (p[1] || 0) / 60 + (p[2] || 0) / 3600;  // hours
+}
+function _parseDecString(s) {
+    const neg = /^-/.test(s.trim());
+    const p = s.trim().replace(/^[-+]/, '').split(/[\s:]+/).map(Number);
+    if (p.some(isNaN)) return null;
+    const v = (p[0] || 0) + (p[1] || 0) / 60 + (p[2] || 0) / 3600;
+    return neg ? -v : v;  // degrees
 }
 
 function initStarmap() {
@@ -794,6 +830,7 @@ function updateStats() {
         if (s.currentFile) {
             var fileIdxStr = s.fileTotal > 0 ? 'File ' + s.currentFileIndex + '/' + s.fileTotal : 'File ' + s.currentFileIndex;
             fileEl.textContent = fileIdxStr + ': ' + s.currentFile;
+            fileEl.title = s.currentFile;  // full name on hover
             fileEl.className = 'stat-value bright';
         } else {
             fileEl.textContent = '---';
