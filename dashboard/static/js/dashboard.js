@@ -2707,9 +2707,18 @@ async function loadCrossEpochHistory() {
     }
 }
 
+// Clear the cross-epoch results panel: fires when the Previous Runs
+// dropdown is set back to '-- Select previous run --'. Mirrors the Target
+// dropdown behavior (choosing the placeholder clears stale display).
+function clearCrossEpochResults() {
+    var summary = document.getElementById('bary-cross-summary');
+    if (summary) summary.innerHTML = '';
+    var tbody = document.getElementById('bary-cross-tbody');
+    if (tbody) tbody.innerHTML = '';
+}
+
 async function loadCrossEpochRun(val) {
-    if (!val) return;
-    try {
+    if (!val) return;    try {
         var resp;
         // Check if val is numeric (DB id) or string (legacy filename)
         if (/^\d+$/.test(val)) {

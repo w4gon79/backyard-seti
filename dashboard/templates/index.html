@@ -196,7 +196,7 @@
                 </div>
                 <div class="bary-cross-history-row" style="margin-top:8px;">
                     <label style="font-size:0.85em;color:#8ab4f8;">Previous Runs:</label>
-                    <select id="bary-cross-history" onchange="if(this.value) loadCrossEpochRun(this.value)" style="max-width:500px;font-size:0.85em;">
+                    <select id="bary-cross-history" onchange="if(this.value) loadCrossEpochRun(this.value); else clearCrossEpochResults()" style="max-width:500px;font-size:0.85em;">
                         <option value="">Loading...</option>
                     </select>
                     <button id="btn-delete-xepoch" class="btn-danger-small" onclick="deleteCrossEpochRun()" title="Delete selected run">✕</button>
