@@ -3062,12 +3062,31 @@ def api_db_scans():
 
 @app.route('/api/db/scans/<scan_id>', methods=['DELETE'])
 def api_db_delete_scan(scan_id):
-    """Delete a scan and all its hits from the database."""
+    """Delete a scan: DB rows AND the on-disk results directory.
+
+    The results dir is moved to results/.trash (recoverable) because the
+    scan dropdown merges DB scans with disk discovery - leaving the dir in
+    place makes the scan reappear in the list after deletion.
+    """
     if not re.match(r'^[A-Za-z0-9_-]+$', scan_id):
         return jsonify({'error': 'Invalid scan_id'}), 400
     try:
         from db import delete_scan
         result = delete_scan(scan_id)
+        # Also remove the results directory (to trash, not permanent)
+        scan_dir = _get_scan_dir(scan_id)
+        if scan_dir and os.path.isdir(scan_dir):
+            import shutil
+            trash_dir = os.path.join(RESULTS_DIR, '.trash')
+            os.makedirs(trash_dir, exist_ok=True)
+            dst = os.path.join(trash_dir, scan_id)
+            if os.path.exists(dst):
+                import time as _t
+                dst = os.path.join(trash_dir, scan_id + '.' + str(int(_t.time())))
+            shutil.move(scan_dir, dst)
+            result['results_dir_removed'] = True
+        else:
+            result['results_dir_removed'] = False
         return jsonify(result)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
