@@ -2660,7 +2660,8 @@ async function loadCrossEpochHistory() {
                 }
             } catch(e) {}
             var ts = r.created_at || r.timestamp || '';
-            var label = (eps.length ? 'Ep ' + eps.join(',') + ' | ' : '') + ts.substring(0, 19).replace('T', ' ');
+            var label = (r.target ? escapeHtml(r.target) + ' | ' : '')
+                + (eps.length ? 'Ep ' + eps.join(',') + ' | ' : '') + ts.substring(0, 19).replace('T', ' ');
             label += ' | SNR ' + (r.min_snr || 0);
             label += ' | tol ' + (r.tolerance_hz || 10);
             label += ' | ' + (r.candidate_count || 0) + ' cand';

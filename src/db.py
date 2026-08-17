@@ -468,8 +468,28 @@ def save_cross_epoch_result(result_dict, db_path=None):
         conn.close()
 
 
+def _parse_scan_ids(scan_ids_str):
+    """Parse scan_ids column into a list. Stored as JSON array string
+    (new format) or comma-separated plain text (legacy)."""
+    s = (scan_ids_str or '').strip()
+    if not s:
+        return []
+    try:
+        v = json.loads(s)
+        if isinstance(v, list):
+            return [str(x).strip() for x in v if str(x).strip()]
+    except (ValueError, TypeError):
+        pass
+    return [p.strip() for p in s.split(',') if p.strip()]
+
+
 def get_cross_epoch_history(limit=50, db_path=None):
-    """List cached cross-epoch results, newest first."""
+    """List cached cross-epoch results, newest first.
+
+    Each row gains a 'target' field (distinct targets across the compared
+    scans) so the Previous Runs dropdown can show what each run was run
+    against - the raw scan_ids string gives no obvious clue.
+    """
     conn = get_db(db_path)
     try:
         rows = conn.execute('''
@@ -479,7 +499,31 @@ def get_cross_epoch_history(limit=50, db_path=None):
             ORDER BY created_at DESC
             LIMIT ?
         ''', (limit,)).fetchall()
-        return [dict(r) for r in rows]
+        # Resolve targets for the batch: one pass over scans table
+        scan_target = {}
+        all_sids = set()
+        for r in rows:
+            all_sids.update(_parse_scan_ids(r['scan_ids']))
+        if all_sids:
+            placeholders = ','.join('?' * len(all_sids))
+            for sid, tgt in conn.execute(
+                    f'SELECT scan_id, target FROM scans WHERE scan_id IN ({placeholders})',
+                    tuple(all_sids)):
+                scan_target[sid] = (tgt or '').strip()
+        out = []
+        for r in rows:
+            d = dict(r)
+            tgts = []
+            for sid in _parse_scan_ids(d['scan_ids']):
+                t = scan_target.get(sid)
+                if not t and '_' in sid:
+                    # scan not in DB (deleted): fall back to scan_id prefix
+                    t = sid.split('_')[0]
+                if t and t not in tgts:
+                    tgts.append(t)
+            d['target'] = ' + '.join(tgts) if tgts else ''
+            out.append(d)
+        return out
     finally:
         conn.close()
 
