@@ -466,9 +466,17 @@ function drawFreqMap() {
     const current = mcState.currentSubBand;
     const subBandWidth = barW / total;
 
+    // GBT h5 files run DESCENDING: sub-band 0 is the HIGH-frequency end.
+    // The fill is indexed by sub-band; the amber marker is placed by real
+    // frequency. Without mirroring, fill and marker sit on opposite ends.
+    const descending = (mcState.currentFreqStart || 0) > (mcState.currentFreqStop || 0);
+    const segX = (i) => descending
+        ? padX + (total - 1 - i) * subBandWidth
+        : padX + i * subBandWidth;
+
     // Draw each sub-band segment
     for (let i = 0; i < total; i++) {
-        const x = padX + i * subBandWidth;
+        const x = segX(i);
         const segW = Math.max(subBandWidth - 1, 0.5);
 
         if (i < done) {
