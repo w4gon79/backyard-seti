@@ -1019,12 +1019,28 @@ function refreshFileDetailPanel() {
             if (fileInfo) break;
         }
         if (!fileInfo) return;
-        // Cadence: Parkes _S_/_R_ markers; GBT (guppi): ON when the file's
-        // target token matches the group target (ABACAD A-scans are ON).
+        // Cadence: Parkes _S_/_R_ markers. GBT (guppi): ABACAD - within an
+        // epoch the target with multiple files is the ON (A-scans);
+        // single-file targets are the OFF companions. Counted across the
+        // whole local cache so it works regardless of which files are
+        // selected (same rule the ON/OFF rejection effectively uses).
         var isOn = fileInfo.name.indexOf('_S_') !== -1;
         if (!isOn && fileInfo.name.indexOf('_R_') === -1 && fileInfo.name.indexOf('guppi_') !== -1) {
-            var gm = fileInfo.name.match(/guppi_\d+_\d+_([A-Za-z0-9+\-.]+?)_\d+\./);
-            isOn = !!(gm && target && gm[1].toUpperCase() === String(target).toUpperCase());
+            var gm = fileInfo.name.match(/guppi_(\d+)_\d+_([A-Za-z0-9+\-.]+?)_\d+\./);
+            if (gm) {
+                var epochMjd = gm[1], epochTok = gm[2].toUpperCase();
+                var sameEpochCount = 0;
+                for (var tgt in localDataCache) {
+                    if (!localDataCache.hasOwnProperty(tgt)) continue;
+                    var tgtFiles = (localDataCache[tgt].fine || []).concat(localDataCache[tgt].mid || [])
+                        .concat(localDataCache[tgt].filterbank || []).concat(localDataCache[tgt].h5 || []);
+                    for (var k = 0; k < tgtFiles.length; k++) {
+                        var km = tgtFiles[k].name.match(/guppi_(\d+)_\d+_([A-Za-z0-9+\-.]+?)_\d+\./);
+                        if (km && km[1] === epochMjd && km[2].toUpperCase() === epochTok) sameEpochCount++;
+                    }
+                }
+                isOn = sameEpochCount >= 2;
+            }
         }
         var header = fileHeaderCache[path];
         var headerData = header ? header.header : null;
