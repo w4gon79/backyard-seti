@@ -1606,7 +1606,7 @@ function getFilteredHits() {
     }
 
     var hits = allHits.slice();
-    if (filter === 'on') hits = hits.filter(function(h) { return h.on_off === 'ON' || (h._source || '').indexOf('_S_') !== -1 || (h.source_file || '').indexOf('_S_') !== -1 || (h.file || '').indexOf('_S_') !== -1; });
+    if (filter === 'on') hits = hits.filter(function(h) { return h.on_off === 'ON' || h.status === 'CANDIDATE' || (h._source || '').indexOf('_S_') !== -1 || (h.source_file || '').indexOf('_S_') !== -1 || (h.file || '').indexOf('_S_') !== -1; });
     else if (filter === 'off') hits = hits.filter(function(h) { return h.on_off === 'OFF' || (h._source || '').indexOf('_R_') !== -1 || (h.source_file || '').indexOf('_R_') !== -1 || (h.file || '').indexOf('_R_') !== -1; });
     else if (filter === 'candidates') hits = rejectionCandidates.slice();
 
@@ -1686,7 +1686,7 @@ function renderHitTable() {
     for (var i = 0; i < pageData.length; i++) {
         var h = pageData[i];
         var rowNum = startIdx + i + 1;
-        var isOn = h.on_off === 'ON' || (h._source || '').indexOf('_S_') !== -1 || (h.source_file || '').indexOf('_S_') !== -1 || (h.file || '').indexOf('_S_') !== -1;
+        var isOn = h.on_off === 'ON' || h.status === 'CANDIDATE' || (h._source || '').indexOf('_S_') !== -1 || (h.source_file || '').indexOf('_S_') !== -1 || (h.file || '').indexOf('_S_') !== -1;
         var statusHtml = '';
         if (h.status === 'CANDIDATE') statusHtml = '<span style="color:#66bb6a;font-weight:bold;">CANDIDATE</span>';
         else if (h.status === 'RFI') statusHtml = '<span style="color:#ef5350;">RFI</span>';
@@ -1727,7 +1727,7 @@ function renderHitChart() {
         return;
     }
     
-    var onHits = hits.filter(function(h) { return h.on_off === 'ON' || (h._source || '').indexOf('_S_') !== -1 || (h.source_file || '').indexOf('_S_') !== -1 || (h.file || '').indexOf('_S_') !== -1; });
+    var onHits = hits.filter(function(h) { return h.on_off === 'ON' || h.status === 'CANDIDATE' || (h._source || '').indexOf('_S_') !== -1 || (h.source_file || '').indexOf('_S_') !== -1 || (h.file || '').indexOf('_S_') !== -1; });
     var offHits = hits.filter(function(h) { return h.on_off === 'OFF' || (h._source || '').indexOf('_R_') !== -1 || (h.source_file || '').indexOf('_R_') !== -1 || (h.file || '').indexOf('_R_') !== -1; });
     var traces = [{
         x: onHits.map(function(h) { return h.freq; }), y: onHits.map(function(h) { return h.snr; }),
@@ -2027,7 +2027,7 @@ function showWaterfall(rowEl) {
     var freq = h.freq || 0;
     var snr = h.snr || 0;
     var drift = h.drift_rate || 0;
-    var isOn = h.on_off === 'ON' || (h._source || '').indexOf('_S_') !== -1 || (h.source_file || '').indexOf('_S_') !== -1 || (h.file || '').indexOf('_S_') !== -1;
+    var isOn = h.on_off === 'ON' || h.status === 'CANDIDATE' || (h._source || '').indexOf('_S_') !== -1 || (h.source_file || '').indexOf('_S_') !== -1 || (h.file || '').indexOf('_S_') !== -1;
     var sourceFile = h._source || h.source_file || h.file || '?';
 
     // Set title

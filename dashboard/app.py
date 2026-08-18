@@ -2259,9 +2259,11 @@ def api_reject():
         
         if matched:
             h['status'] = 'RFI'
+            h['on_off'] = 'OFF'
             rejected.append(h)
         else:
             h['status'] = 'CANDIDATE'
+            h['on_off'] = 'ON'
             candidates.append(h)
     
     # Sort candidates by SNR descending
