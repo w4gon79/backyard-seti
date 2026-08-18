@@ -38,6 +38,7 @@ from barycentric_correct import cross_epoch_match, resolve_target_coords
 from incoherent_stack import (
     EPOCHS, find_h5, load_spectrum_window, build_common_grid, find_peaks,
     process_epoch, compute_barycentric_velocity, extract_mjd_from_filename,
+    _discover_epochs,
 )
 from ml.layer25_analysis import analyze_all_candidates
 
@@ -105,7 +106,8 @@ def run_cross_epoch_filter(scan_dirs, tolerance_hz=10, min_epochs=3, min_snr=8):
     return result
 
 
-def _compute_pulse_periodicity(time_series_2d, common_grid, freq_center, stack_width_mhz):
+def _compute_pulse_periodicity(time_series_2d, common_grid, freq_center, stack_width_mhz,
+                               dt_seconds=1.07):
     """Extract power curve at peak frequency and compute autocorrelation.
     
     Returns dict: {period_s, confidence, duty_cycle, has_periodicity}
@@ -167,9 +169,7 @@ def _compute_pulse_periodicity(time_series_2d, common_grid, freq_center, stack_w
     above = power_curve > pc_mean
     duty_cycle = float(np.mean(above))
     
-    # Estimate period in seconds (Parkes typical integration time ~1.07s per record)
-    # The HDF5 time resolution is in the header; we approximate with common Parkes value
-    dt_seconds = 1.07  # seconds per time integration (Parkes fine channel)
+    # dt_seconds comes from the h5 header (tsamp): Parkes ~1.07 s, GBT differs
     period_s = float(peak_lag * dt_seconds)
     
     has_periodicity = confidence > 0.5 and peak_height > 0.3
@@ -196,7 +196,39 @@ def targeted_stack(candidate_freq, stack_width_mhz, epoch_labels, target='PROXCE
         print(f"ERROR: no coordinates for target '{target}' "
               f"(not in registry or legacy dict); refusing to stack")
         return None
-    
+
+    # Re-discover epochs for THIS target: module-level EPOCHS is from import
+    # time (PROXCEN default) and won't contain other targets (GJ447 etc.)
+    epochs_map = EPOCHS
+    if epoch_labels and any(l not in epochs_map for l in epoch_labels):
+        epochs_map = _discover_epochs(target)
+
+    # Telescope auto-detect from epoch info (barycentric correction needs
+    # the right observatory location; GBT epochs carry telescope='GBT')
+    if telescope in (None, '', 'auto'):
+        _tinfo = epochs_map.get(epoch_labels[0], {}) if epoch_labels else {}
+        telescope = str(_tinfo.get('telescope', 'Parkes')).lower()
+
+    # Integration time from the h5 header (tsamp). Pulse periodicity needs
+    # the true per-record dt: Parkes fine ~1.07 s, GBT spliced differs.
+    tsamp_s = 1.07
+    try:
+        _info0 = epochs_map.get(epoch_labels[0], {}) if epoch_labels else {}
+        if _info0.get('gbt_pairs'):
+            _fname0 = _info0['gbt_pairs'][0][0]
+        elif _info0.get('seqs'):
+            _fname0 = f"Parkes_{_info0['mjd_int']}_{_info0['seqs'][0][0]}_{target}_S_fine.h5"
+        else:
+            _fname0 = None
+        if _fname0:
+            _path0 = find_h5(_fname0)
+            if _path0:
+                import h5py
+                with h5py.File(_path0, 'r') as _f0:
+                    tsamp_s = float(_f0['data'].attrs.get('tsamp', 1.07))
+    except Exception:
+        pass
+
     freq_center = candidate_freq
     
     # Process each epoch
@@ -212,11 +244,11 @@ def targeted_stack(candidate_freq, stack_width_mhz, epoch_labels, target='PROXCE
     time_series_2d = None  # from first epoch for pulse analysis
     
     for label in epoch_labels:
-        if label not in EPOCHS:
+        if label not in epochs_map:
             continue
         
         spec, ts = process_epoch(
-            label, EPOCHS[label], target_ra, target_dec,
+            label, epochs_map[label], target_ra, target_dec,
             f_start_obs, f_stop_obs, common_grid, telescope,
             return_time_series=True,
         )
@@ -270,7 +302,8 @@ def targeted_stack(candidate_freq, stack_width_mhz, epoch_labels, target='PROXCE
     
     # Compute pulse periodicity from time-series data
     pulse_periodicity = _compute_pulse_periodicity(
-        time_series_2d, common_grid, freq_center, stack_width_mhz)
+        time_series_2d, common_grid, freq_center, stack_width_mhz,
+        dt_seconds=tsamp_s)
     
     return {
         'freq_center': freq_center,

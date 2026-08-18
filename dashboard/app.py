@@ -4764,8 +4764,10 @@ def api_two_layer_run():
             sys.path.insert(0, os.path.join(SETI_ROOT, 'ml'))
 
             from barycentric_correct import cross_epoch_match
-            from incoherent_stack import EPOCHS
+            from incoherent_stack import (get_available_epochs,
+                                          compute_epoch_overlap)
             from ml.two_layer_pipeline import get_scan_dirs, targeted_stack
+            epochs_avail = get_available_epochs(target)
 
             # ─── Determine epochs ──────────────────────────────────
             # Only use epochs that have barycentrically-corrected scan data
@@ -4780,10 +4782,11 @@ def api_two_layer_run():
                             _combined = json.load(_f)
                         for _hit in (_combined.get('hits', []) or [])[:50]:
                             _sf = _hit.get('source_file', '')
-                            _parts = _sf.split('_')
-                            if len(_parts) >= 2:
-                                _mjd = _parts[1]
-                                if _mjd in EPOCHS and _mjd not in available_epoch_labels:
+                            # Parkes: Parkes_<MJD>_...; GBT: ..._guppi_<MJD>_...
+                            _m = re.search(r'(?:^|guppi_)(\d{5})_', _sf)
+                            if _m:
+                                _mjd = _m.group(1)
+                                if _mjd in epochs_avail and _mjd not in available_epoch_labels:
                                     available_epoch_labels.append(_mjd)
                     except Exception:
                         pass
@@ -4808,12 +4811,24 @@ def api_two_layer_run():
             job_state['progress'] = 5
             job_state['progress_msg'] = f'Layer 1: Filtering {len(scan_dirs)} scans ({len(epoch_labels)} epochs)...'
 
+            # Clip Layer 1 to the epochs' shared frequency coverage: mixed
+            # GBT L/S sessions overlap only partially, and frequencies
+            # outside the overlap can only produce meaningless no-matches.
+            xepoch_kwargs = {}
+            try:
+                _ov = compute_epoch_overlap(target, epoch_labels)
+                if _ov is not None:
+                    xepoch_kwargs = {'freq_min_mhz': _ov[0], 'freq_max_mhz': _ov[1]}
+            except Exception:
+                pass
+
             t0 = time.time()
             xepoch_result = cross_epoch_match(
                 scan_dirs,
                 freq_tolerance_hz=tolerance_hz,
                 min_epochs=min_epochs,
                 min_snr=min_snr,
+                **xepoch_kwargs
             )
             elapsed = time.time() - t0
 
