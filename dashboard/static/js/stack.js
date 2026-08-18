@@ -52,8 +52,32 @@ document.addEventListener('DOMContentLoaded', function() {
     var presets = document.querySelectorAll('.btn-preset');
     for (var i = 0; i < presets.length; i++) {
         presets[i].onclick = function() {
-            var w = this.getAttribute('data-width');
-            var c = this.getAttribute('data-center');
+            var btn = this;
+            var w = btn.getAttribute('data-width');
+            var c = btn.getAttribute('data-center');
+            if (btn.id === 'btn-preset-fullband') {
+                // Live shared-coverage lookup: full band = what the selected
+                // epochs actually overlap on (Parkes: 580 MHz; mixed GBT
+                // sessions: only their shared strip).
+                var tgt = document.getElementById('stack-target').value || 'PROXCEN';
+                var eps = [];
+                document.querySelectorAll('.epoch-item input[type="checkbox"]:checked').forEach(function(cb) {
+                    eps.push(cb.getAttribute('data-epoch'));
+                });
+                var old = btn.textContent;
+                btn.textContent = 'computing...';
+                fetch('/api/stack/overlap?target=' + encodeURIComponent(tgt) + '&epochs=' + encodeURIComponent(eps.join(',')))
+                    .then(function(r) { return r.json(); })
+                    .then(function(d) {
+                        btn.textContent = old;
+                        if (d.error || !d.overlap) { alert(d.error || 'No shared coverage for selected epochs'); return; }
+                        document.getElementById('stack-width').value = d.width;
+                        document.getElementById('stack-freq-center').value = d.center;
+                        btn.classList.add('active');
+                    })
+                    .catch(function(e) { btn.textContent = old; alert('Overlap lookup failed: ' + e.message); });
+                return;
+            }
             document.getElementById('stack-width').value = w;
             document.getElementById('stack-freq-center').value = c;
             // Highlight active

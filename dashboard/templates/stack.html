@@ -56,7 +56,7 @@
                     <button class="btn-preset" data-width="10" data-center="3000" title="10 MHz window around 3000 MHz. ~30 min with 4 epochs.">10 MHz</button>
                     <button class="btn-preset" data-width="50" data-center="3000" title="50 MHz window. ~2.5 hours with 4 epochs.">50 MHz</button>
                     <button class="btn-preset" data-width="100" data-center="3000" title="100 MHz window. ~5 hours with 4 epochs.">100 MHz</button>
-                    <button class="btn-preset" data-width="580" data-center="3034" title="Full 580 MHz band. Overnight run with 4 epochs.">Full Band</button>
+                    <button class="btn-preset" id="btn-preset-fullband" data-width="580" data-center="3034" title="Full shared band of the selected epochs (computed live from file headers). For Parkes PROXCEN this is the full 580 MHz; for mixed GBT sessions it is the epochs' actual overlap.">Full Band</button>
                 </div>
 
                 <div class="control-group">
@@ -294,6 +294,6 @@
     </div>
 </div>
 
-<script src="/static/js/stack.js?v=44"></script>
+<script src="/static/js/stack.js?v=45"></script>
 </body>
 </html>

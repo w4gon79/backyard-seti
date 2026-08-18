@@ -3424,6 +3424,27 @@ def api_stack_epochs():
     return jsonify({'epochs': result})
 
 
+@app.route('/api/stack/overlap')
+def api_stack_overlap():
+    """Shared frequency coverage of a target's selected epochs (MHz).
+    Query: target, epochs (comma-separated labels)."""
+    target = request.args.get('target', 'PROXCEN').upper()
+    labels = [l for l in request.args.get('epochs', '').split(',') if l]
+    try:
+        from incoherent_stack import compute_epoch_overlap, get_available_epochs
+        if not labels:
+            labels = list(get_available_epochs(target).keys())
+        ov = compute_epoch_overlap(target, labels)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    if ov is None:
+        return jsonify({'overlap': None,
+                        'error': 'Selected epochs share no frequency coverage'})
+    return jsonify({'overlap': [round(ov[0], 1), round(ov[1], 1)],
+                    'center': round((ov[0] + ov[1]) / 2.0, 1),
+                    'width': round(ov[1] - ov[0], 1)})
+
+
 @app.route('/api/stack/run', methods=['POST'])
 def api_stack_run():
     """Start an incoherent stack job in the background.
