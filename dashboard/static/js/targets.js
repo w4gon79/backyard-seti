@@ -60,7 +60,7 @@ async function loadRegistry() {
                 '<td style="padding:4px 6px;color:#90a4ae;">' + escReg(t.coord_source || '-') + '</td>' +
                 '<td style="padding:4px 6px;">' + blTxt + '</td>' +
                 '<td style="padding:4px 6px;white-space:nowrap;">' +
-                    '<button class="btn-small" onclick="registryBLCheck(\'' + escReg(t.name) + '\')">Check BL</button> ' +
+                    '<button class="btn-small" onclick="registryBLCheck(\'' + escReg(t.name) + '\', this)">Check BL</button> ' +
                     '<button class="btn-small btn-danger-small" onclick="registryDelete(\'' + escReg(t.name) + '\')">Del</button>' +
                 '</td></tr>';
         }
@@ -142,17 +142,20 @@ async function registryAdd() {
     }
 }
 
-async function registryBLCheck(name) {
+async function registryBLCheck(name, btnEl) {
+    var doneChk = busyButton(btnEl, 'Checking...');
     try {
         var resp = await fetch('/api/registry/' + encodeURIComponent(name) + '/blcheck', {
             method: 'POST'});
         var data = await resp.json();
+        doneChk();
         if (data.error) {
             alert('BL check failed: ' + data.error);
             return;
         }
         loadRegistry();
     } catch (e) {
+        doneChk();
         alert('BL check failed: ' + e.message);
     }
 }

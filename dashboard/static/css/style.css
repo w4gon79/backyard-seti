@@ -192,6 +192,14 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
     color: #b0bec5;
 }
 .btn-secondary:hover:not(:disabled) { background: #455a64; }
+
+/* Busy (task running) state: gray + unmistakable */
+.btn-busy, button:disabled.btn-busy {
+    background: #455a64 !important;
+    color: #90a4ae !important;
+    cursor: wait;
+    opacity: 0.7;
+}
 .btn-warning {
     background: #e65100;
     color: white;

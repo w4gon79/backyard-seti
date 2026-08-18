@@ -356,9 +356,28 @@ function formatDec(decDeg) {
 
 // ─── Target Search (BL API) ───────────────────────────────────────────
 
+// === Busy-button helper ================================================
+// Default behavior for any button triggering a slow task: gray it out,
+// show working text, restore on completion. Usage in async handlers:
+//   var doneBtn = busyButton(document.getElementById('btn-x'), 'Working...');
+//   ... await ... ; doneBtn();    (call on success AND error paths)
+function busyButton(el, text) {
+    if (!el || el.disabled) return function() {};
+    var oldHtml = el.innerHTML;
+    el.disabled = true;
+    el.classList.add('btn-busy');
+    el.textContent = text || 'Working...';
+    return function() {
+        el.disabled = false;
+        el.classList.remove('btn-busy');
+        el.innerHTML = oldHtml;
+    };
+}
+
 async function searchBL() {
     var target = document.getElementById('target-input').value.trim();
     if (!target) return;
+    var doneSearch = busyButton(document.getElementById('btn-search-bl'), 'Searching...');
 
     var resultsDiv = document.getElementById('bl-search-results');
     resultsDiv.innerHTML = '<p style="color:#8ab4f8;">Searching BL API...</p>';
@@ -366,6 +385,7 @@ async function searchBL() {
     try {
         var resp = await fetch('/api/blsearch?target=' + encodeURIComponent(target));
         var data = await resp.json();
+        doneSearch();
 
         if (data.error) {
             resultsDiv.innerHTML = '<p style="color:#ef5350;">Error: ' + data.error + '</p>';
@@ -396,6 +416,7 @@ async function searchBL() {
             resultsDiv.innerHTML = '<p style="color:#546e7a;">No observations found.</p>';
         }
     } catch(e) {
+        doneSearch();
         resultsDiv.innerHTML = '<p style="color:#ef5350;">Error: ' + e.message + '</p>';
     }
 }
@@ -454,7 +475,7 @@ function renderGbtSessions(target, data) {
         html += '<tr><td style="color:#4fc3f7;">' + s.mjd + '</td><td>' + s.n_fine + '</td><td>' + s.gb_fine + '</td>' +
             '<td>' + s.n_band + '</td><td>' + s.gb_band + '</td>' +
             '<td style="color:#90a4ae;font-size:0.85em;">' + compNames + '</td>' +
-            '<td><button class="btn-small" onclick="gbtDownloadSession(\'' + target.replace(/'/g, '') + '\',' + s.mjd + ')">Download ' +
+            '<td><button class="btn-small" onclick="gbtDownloadSession(\'' + target.replace(/'/g, '') + '\',' + s.mjd + ',this)">Download ' +
             (window._gbtBand || 'L') + '-band</button></td></tr>';
     });
     html += '</tbody></table>';
@@ -464,13 +485,15 @@ function renderGbtSessions(target, data) {
     d.innerHTML = html;
 }
 
-async function gbtDownloadSession(target, mjd) {
+async function gbtDownloadSession(target, mjd, btnEl) {
+    var doneQ = busyButton(btnEl, 'Queuing...');
     try {
         var resp = await fetch('/api/gbt/download', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ target: target, mjd: mjd, band: window._gbtBand || 'L', companions: !!window._gbtComps })
         });
         var d = await resp.json();
+        doneQ();
         if (d.error) { alert(d.error); return; }
         alert('Queued ' + d.queued + ' files (' + d.gb_queued + ' GB)' +
               (d.skipped ? ', ' + d.skipped + ' skipped (already present or downloading)' : ''));
@@ -492,15 +515,18 @@ async function blCatalogBrowse() {
               (window._blCatOnOff ? '&require_onoff=1' : '') +
               (q ? '&q=' + encodeURIComponent(q) : '');
     resultsDiv.innerHTML = '<p style="color:#8ab4f8;">Loading catalog...</p>';
+    var doneCat = busyButton(document.getElementById('btn-blcatalog'), 'Loading...');
     try {
         var resp = await fetch(url);
         var d = await resp.json();
+        doneCat();
         if (d.error) {
             resultsDiv.innerHTML = '<p style="color:#ef5350;">' + d.error + '</p>';
             return;
         }
         renderBLCatalog(d);
     } catch (e) {
+        doneCat();
         resultsDiv.innerHTML = '<p style="color:#ef5350;">' + e.message + '</p>';
         return;
     }
@@ -1902,15 +1928,20 @@ async function startEpochAudit() {
     var body = { epoch: epoch };
     var t = document.getElementById('target-input');
     if (t && t.value.trim()) body.target = t.value.trim().toUpperCase();
+    var auditBtn = document.getElementById('btn-audit-run');
+    var doneAudit = busyButton(auditBtn, 'Auditing...');
     try {
         var resp = await fetch('/api/audit/run', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(body),
         });
         var data = await resp.json();
-        if (data.error) { alert(data.error); return; }
+        if (data.error) { doneAudit(); alert(data.error); return; }
+        // Keep the button grayed while the audit runs; auditPollStatus
+        // re-enables it when the run finishes (or errors).
+        window._auditBtnRestore = doneAudit;
         auditPollStatus();
-    } catch(e) { alert('Audit start failed: ' + e.message); }
+    } catch(e) { doneAudit(); alert('Audit start failed: ' + e.message); }
 }
 
 var _auditLastHtml = '';
@@ -1924,6 +1955,9 @@ async function auditPollStatus() {
     try {
         var resp = await fetch('/api/audit/status');
         var d = await resp.json();
+        if (!d.active && window._auditBtnRestore) {
+            window._auditBtnRestore(); window._auditBtnRestore = null;
+        }
         auditRunning = !!d.active;
         var h = '';
         if (d.active) {
