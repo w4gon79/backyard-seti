@@ -168,8 +168,18 @@ def extract_mjd_from_filename(filename):
     Extract MJD from a BL filename.
     
     Example: Parkes_57791_72989_PROXCEN_S_fine.h5 -> 57791.72989
+    Example: spliced_blc00_guppi_57532_03272_GJ447_0009.gpuspec.0000.h5 -> 57532
     """
     parts = filename.replace('.h5', '').split('_')
+    # GBT grammar: (spliced_)blcNN_guppi_MJD_SEQ_TARGET_SCAN.PROD.TIER
+    # MJD is the token immediately after 'guppi'; integer only (no fraction).
+    if 'guppi' in parts:
+        i = parts.index('guppi')
+        if i + 1 < len(parts):
+            try:
+                return float(parts[i + 1])
+            except ValueError:
+                pass
     if len(parts) >= 3:
         try:
             mjd_int = int(parts[1])
