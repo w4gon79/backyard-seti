@@ -120,7 +120,7 @@ function renderEpochs() {
             '<input type="checkbox" checked data-epoch="' + escapeHtml(ep.label) + '">' +
             '<span class="epoch-label">' + escapeHtml(ep.label) + '</span>' +
             (ep.cadence_ok === false ? '<span style="color:#ffb74d;font-size:0.85em;">incomplete cadence (' + ep.n_pairs + '/3 pairs)</span> ' : '') +
-            (ep.telescope === 'GBT' ? '<span style="color:#90a4ae;font-size:0.85em;">GBT (no pairing)</span> ' : '') +
+            (ep.telescope === 'GBT' ? '<span style="color:#8ab4f8;font-size:0.85em;">GBT ABACAD (' + ep.n_pairs + ' pairs)</span> ' : '') +
             (ep.scan_status === 'complete' ? '<span style="color:#66bb6a;font-size:0.85em;">scanned</span> ' : (ep.scan_status ? '<span style="color:#4fc3f7;font-size:0.85em;">' + escapeHtml(ep.scan_status) + '</span>' : '<span style="color:#546e7a;font-size:0.85em;">unscanned</span> ')) +
             '<span class="epoch-meta">' + ep.n_pairs + ' pairs · MJD ' + ep.mjd_int + '</span>' +
             '</label>';
