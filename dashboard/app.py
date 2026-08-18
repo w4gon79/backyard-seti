@@ -284,15 +284,15 @@ def api_targets():
     if os.path.isdir(FILT_DIR):
         for f in os.listdir(FILT_DIR):
             if f.endswith('.fil'):
-                parts = f.split('_')
-                target = parts[3] if len(parts) >= 4 else 'unknown'
+                info = _local_file_target_mjd(f)
+                target = info[0] if info else (f.split('_')[3] if len(f.split('_')) >= 4 else 'unknown')
                 if target not in targets:
                     targets[target] = {'fine': [], 'mid': [], 'filterbank': [], 'h5': []}
                 targets[target]['filterbank'].append({
                     'name': f,
                     'size_gb': round(os.path.getsize(os.path.join(FILT_DIR, f)) / 1e9, 2),
                     'path': f'filterbank/{f}',
-                    'date': mjd_to_date(parts[1]) if len(parts) >= 2 else '',
+                    'date': mjd_to_date(info[1]) if info else '',
                 })
     
     # Scan generic h5 files (no resolution marker)
@@ -316,20 +316,21 @@ def api_targets():
             continue
         for f in os.listdir(sec_dir):
             if f.endswith('.h5'):
-                parts = f.split('_')
-                if len(parts) >= 4:
-                    target = parts[3]
-                    if target not in targets:
-                        targets[target] = {'fine': [], 'mid': [], 'filterbank': [], 'h5': []}
-                    # Avoid duplicates: skip if already listed from primary
-                    existing_names = [item['name'] for item in targets[target]['fine']]
-                    if f not in existing_names:
-                        targets[target]['fine'].append({
-                            'name': f,
-                            'size_gb': round(os.path.getsize(os.path.join(sec_dir, f)) / 1e9, 2),
-                            'path': f'fine/{f}',  # _resolve_data_file checks secondary dirs too
-                            'date': mjd_to_date(parts[1]) if len(parts) >= 2 else '',
-                        })
+                info = _local_file_target_mjd(f)
+                if not info:
+                    continue
+                target = info[0]
+                if target not in targets:
+                    targets[target] = {'fine': [], 'mid': [], 'filterbank': [], 'h5': []}
+                # Avoid duplicates: skip if already listed from primary
+                existing_names = [item['name'] for item in targets[target]['fine']]
+                if f not in existing_names:
+                    targets[target]['fine'].append({
+                        'name': f,
+                        'size_gb': round(os.path.getsize(os.path.join(sec_dir, f)) / 1e9, 2),
+                        'path': f'fine/{f}',  # _resolve_data_file checks secondary dirs too
+                        'date': mjd_to_date(info[1]),
+                    })
 
     # Per-target archive dirs (3B): D:\seti_data\{TARGET}\fine
     if os.path.isdir(ARCHIVE_ROOT):
@@ -340,10 +341,10 @@ def api_targets():
             for f in os.listdir(tfine):
                 if not f.endswith('.h5'):
                     continue
-                parts = f.split('_')
-                if len(parts) < 4:
+                info = _local_file_target_mjd(f)
+                if not info:
                     continue
-                target = parts[3]
+                target = info[0]
                 if target not in targets:
                     targets[target] = {'fine': [], 'mid': [], 'filterbank': [], 'h5': []}
                 existing_names = [item['name'] for item in targets[target]['fine']]
@@ -352,25 +353,26 @@ def api_targets():
                         'name': f,
                         'size_gb': round(os.path.getsize(os.path.join(tfine, f)) / 1e9, 2),
                         'path': f'fine/{f}',  # _resolve_data_file finds archive paths
-                        'date': mjd_to_date(parts[1]) if len(parts) >= 2 else '',
+                        'date': mjd_to_date(info[1]),
                     })
 
     # Also scan old PROXCEN dir for backwards compat
     if os.path.isdir(PROXCEN_DIR):
         for f in os.listdir(PROXCEN_DIR):
             if f.endswith('.h5'):
-                parts = f.split('_')
-                if len(parts) >= 4:
-                    target = parts[3]
-                    if target not in targets:
-                        targets[target] = {'fine': [], 'mid': [], 'filterbank': [], 'h5': []}
-                    if target in targets and len(targets[target]['mid']) == 0:
-                        targets[target]['mid'].append({
-                            'name': f,
-                            'size_gb': round(os.path.getsize(os.path.join(PROXCEN_DIR, f)) / 1e6, 1),
-                            'path': f'PROXCEN/{f}',
-                            'date': mjd_to_date(parts[1]) if len(parts) >= 2 else '',
-                        })
+                info = _local_file_target_mjd(f)
+                if not info:
+                    continue
+                target = info[0]
+                if target not in targets:
+                    targets[target] = {'fine': [], 'mid': [], 'filterbank': [], 'h5': []}
+                if len(targets[target]['mid']) == 0:
+                    targets[target]['mid'].append({
+                        'name': f,
+                        'size_gb': round(os.path.getsize(os.path.join(PROXCEN_DIR, f)) / 1e6, 1),
+                        'path': f'PROXCEN/{f}',
+                        'date': mjd_to_date(info[1]),
+                    })
     
     return jsonify(targets)
 
