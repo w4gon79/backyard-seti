@@ -293,13 +293,27 @@ def correct_hits_file(hits_path, ra_hours=None, dec_deg=None, telescope='parkes'
 
     filename = data.get('file', os.path.basename(hits_path))
 
-    # Resolve MJD
+    # Resolve MJD. Prefer the HDF5 tstart header (full fractional-day
+    # precision) over filename parsing (integer MJD for GBT grammar,
+    # ~500 Hz/hr barycentric error). Filename is the last resort.
     if mjd is None:
-        mjd = extract_mjd_from_filename(filename)
-        if mjd is None and h5_dir:
-            h5_path = os.path.join(h5_dir, filename)
-            if os.path.isfile(h5_path):
-                mjd = get_mjd_from_h5(h5_path)
+        h5_path = None
+        if h5_dir:
+            c = os.path.join(h5_dir, filename)
+            if os.path.isfile(c):
+                h5_path = c
+        if h5_path is None:
+            seti_root = Path(hits_path).parents[3]
+            for d in _h5_search_dirs(target_name):
+                candidate = (os.path.join(d, filename) if os.path.isabs(d)
+                             else os.path.join(seti_root, d, filename))
+                if os.path.isfile(candidate):
+                    h5_path = candidate
+                    break
+        if h5_path:
+            mjd = get_mjd_from_h5(h5_path)
+        if mjd is None:
+            mjd = extract_mjd_from_filename(filename)
     if mjd is None:
         raise ValueError(f"Could not determine MJD for {filename}. Provide mjd parameter.")
 
