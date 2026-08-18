@@ -364,7 +364,8 @@ def build_common_grid(freq_center_mhz, width_mhz, chan_width_mhz=2.7939677e-6):
 
 def process_epoch(epoch_label, epoch_info, target_ra, target_dec,
                   f_start_obs, f_stop_obs, common_grid, telescope='parkes',
-                  progress_callback=None, return_time_series=False):
+                  progress_callback=None, return_time_series=False,
+                  off_control=False):
     """Process one epoch: load ON/OFF pairs, subtract, correct, interpolate.
     
     Returns the stacked (averaged) residual spectrum for this epoch,
@@ -404,19 +405,34 @@ def process_epoch(epoch_label, epoch_info, target_ra, target_dec,
     print(f"    MJD: {mjd:.5f}, velocity: {v_bary:.1f} m/s, correction: {correction_factor:.10f}")
     
     residuals = []  # One residual spectrum per ON/OFF pair
-    
-    for pair_idx, pair in enumerate(seqs):
-        if is_gbt:
-            on_file, off_file = pair  # actual filenames
-        else:
-            on_file = f"Parkes_{mjd_int}_{pair[0]}_PROXCEN_S_fine.h5"
-            off_file = f"Parkes_{mjd_int}_{pair[1]}_PROXCEN_R_fine.h5"
+
+    # OFF-control mode (GBT only): control spectrum from
+    # companion-vs-companion residuals (OFF1-OFF2, OFF2-OFF3, ...).
+    # A line standing tall here exists on sky positions that are NOT the
+    # target, i.e. persistent RFI; signal-stack peaks matching it get
+    # vetoed. Parkes OFF-OFF is same-star (~0 residual): no control pass.
+    if off_control:
+        if not is_gbt:
+            return None
+        _offs = [p[1] for p in epoch_info['gbt_pairs']]
+        run_pairs = [(_offs[i], _offs[i + 1]) for i in range(len(_offs) - 1)]
+        if not run_pairs:
+            return None
+    elif is_gbt:
+        run_pairs = list(seqs)  # (on_fname, off_fname) pairs
+    else:
+        run_pairs = [(f"Parkes_{mjd_int}_{p[0]}_PROXCEN_S_fine.h5",
+                      f"Parkes_{mjd_int}_{p[1]}_PROXCEN_R_fine.h5")
+                     for p in seqs]
+
+    for pair_idx, pair in enumerate(run_pairs):
+        on_file, off_file = pair  # OFF-control: both are companion files
 
         on_path = find_h5(on_file)
         off_path = find_h5(off_file)
         
         if not on_path or not off_path:
-            print(f"    SKIP pair {on_seq}/{off_seq}: file not found")
+            print(f"    SKIP pair {os.path.basename(str(on_file))[:20]}/{os.path.basename(str(off_file))[:20]}: file not found")
             continue
         
         print(f"    Loading ON: {on_file}...", end='', flush=True)
@@ -787,6 +803,38 @@ def process_single_chunk(target, freq_center, width, epoch_labels,
     sigma = float(1.4826 * mad)
 
     peaks = find_peaks(stack, common_grid, n_sigma=n_sigma)
+
+    # OFF-control veto: control stack from companion-vs-companion
+    # residuals (GBT). Peaks >=5 sigma in the control stack are
+    # persistent RFI (present on non-target pointings) -> vetoed.
+    try:
+        control_spectra = []
+        for _label in used_epochs:
+            _cinfo = EPOCHS.get(_label, {})
+            if not _cinfo.get('gbt_pairs'):
+                continue  # Parkes: no control (same-star OFF-OFF = 0)
+            _cspec = process_epoch(
+                _label, _cinfo, target_ra, target_dec,
+                f_start_obs, f_stop_obs, common_grid, telescope,
+                off_control=True)
+            if _cspec is not None and np.isfinite(_cspec).any():
+                control_spectra.append(_cspec)
+        if len(control_spectra) >= 2:
+            control = np.nanmean(control_spectra, axis=0)
+            cf = control[np.isfinite(control)]
+            if cf.size:
+                c_med = float(np.median(cf))
+                c_mad = float(np.median(np.abs(cf - c_med)))
+                c_sigma = float(1.4826 * c_mad)
+                if c_sigma > 0:
+                    for pk in peaks:
+                        _idx = int(np.argmin(np.abs(common_grid - pk['freq_mhz'])))
+                        _cval = float(control[_idx]) if _idx < len(control) else 0.0
+                        pk['off_control_snr'] = round((_cval - c_med) / c_sigma, 1)
+                        if (_cval - c_med) > 5 * c_sigma:
+                            pk['off_control_veto'] = True
+    except Exception as _e:
+        print(f"  OFF-control veto skipped: {_e}")
 
     # Flush spectra to per-chunk .npy files when requested (chunked runs):
     # nothing big stays resident across chunks

@@ -4381,8 +4381,17 @@ def api_stack_classify(job_id):
                     score += 1
                     reasons.append('below individual threshold')
 
+            # OFF-control veto (from the stack itself): peak also stands
+            # >=5 sigma in the companion-vs-companion control stack ->
+            # persistent RFI present on non-target pointings.
+            off_control_veto = bool(p.get('off_control_veto'))
+
             # Assign class
-            if score >= 4:
+            if off_control_veto:
+                cls = 'rfi'
+                reasons.append('OFF-control veto: in companion-only stack '
+                               f"(SNR {p.get('off_control_snr', '?')})")
+            elif score >= 4:
                 cls = 'candidate'
             elif score >= 1:
                 cls = 'possible'
