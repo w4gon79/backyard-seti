@@ -2333,6 +2333,25 @@ def api_rejection_results():
 
 # ─── API: Barycentric Correction ─────────────────────────────────────
 
+# === Barycentric busy guard: one operation per scan at a time ===
+# Without this, delete during an active correction hits WinError 32 on
+# Windows (files held open by the correction worker) and dies partway
+# through, leaving a half-deleted barycentric/ directory (2026-08-18).
+_bary_busy_lock = threading.Lock()
+_bary_busy = {}  # scan_id -> operation description
+
+def _bary_mark_busy(scan_id, op):
+    with _bary_busy_lock:
+        if scan_id in _bary_busy:
+            return False
+        _bary_busy[scan_id] = op
+        return True
+
+def _bary_clear_busy(scan_id):
+    with _bary_busy_lock:
+        _bary_busy.pop(scan_id, None)
+
+
 @app.route('/api/barycentric/correct', methods=['POST'])
 def api_barycentric_correct():
     """Run barycentric correction on a scan directory.
@@ -2352,6 +2371,9 @@ def api_barycentric_correct():
     scan_dir = _get_scan_dir(scan_id)
     if not scan_dir:
         return jsonify({'error': f'Scan not found: {scan_id}'}), 404
+    
+    if not _bary_mark_busy(scan_id, 'correction'):
+        return jsonify({'error': 'A barycentric operation is already running for this scan. Wait for it to finish.'}), 409
     
     try:
         from barycentric_correct import correct_scan, resolve_target_coords
@@ -2430,6 +2452,8 @@ def api_barycentric_correct():
     except Exception as e:
         import traceback
         return jsonify({'error': str(e), 'traceback': traceback.format_exc()[-500:]}), 500
+    finally:
+        _bary_clear_busy(scan_id)
 
 
 @app.route('/api/barycentric/results/<scan_id>')
@@ -2706,11 +2730,32 @@ def api_barycentric_delete(scan_id):
     if not os.path.isdir(bary_dir):
         return jsonify({'error': 'No barycentric correction found for this scan'}), 404
     
+    if not _bary_mark_busy(scan_id, 'delete'):
+        return jsonify({'error': 'A barycentric operation is already running for this scan. Wait for it to finish, then delete again.'}), 409
+    
+    def _rmtree_retry(path, retries=6, delay_s=1.0):
+        """rmtree with brief retries for transient Windows file locks
+        (AV scanners, h5py handles closing)."""
+        import time as _time
+        last_err = None
+        for attempt in range(retries):
+            try:
+                shutil.rmtree(path)
+                return None
+            except Exception as e:
+                last_err = e
+                _time.sleep(delay_s)
+        return last_err
+    
     try:
-        shutil.rmtree(bary_dir)
+        err = _rmtree_retry(bary_dir)
+        if err:
+            raise err
         return jsonify({'success': True, 'deleted': scan_id})
     except Exception as e:
         return jsonify({'error': f'Failed to delete barycentric data: {e}'}), 500
+    finally:
+        _bary_clear_busy(scan_id)
 
 
 # ============================================================================
