@@ -804,11 +804,15 @@ def process_single_chunk(target, freq_center, width, epoch_labels,
 
     peaks = find_peaks(stack, common_grid, n_sigma=n_sigma)
 
-    # OFF-control veto: control stack from companion-vs-companion
-    # residuals (GBT). Peaks >=5 sigma in the control stack are
-    # persistent RFI (present on non-target pointings) -> vetoed.
+    # OFF-control veto: per-epoch control spectra from companion-vs-
+    # companion residuals (GBT). A peak >=5 sigma in ANY single epoch's
+    # control spectrum is persistent RFI (present on non-target pointings)
+    # -> vetoed. Per-epoch, NOT averaged: the two epochs have ~50 km/s
+    # different barycentric velocities (~320 kHz shift at 1.9 GHz), so
+    # averaging control spectra smears the line and under-vetoes its core
+    # (2026-08-18 run: 117 candidates all from one 1921.53 MHz RFI line).
     try:
-        control_spectra = []
+        control_specs = []  # [(label, spectrum)]
         for _label in used_epochs:
             _cinfo = EPOCHS.get(_label, {})
             if not _cinfo.get('gbt_pairs'):
@@ -818,23 +822,45 @@ def process_single_chunk(target, freq_center, width, epoch_labels,
                 f_start_obs, f_stop_obs, common_grid, telescope,
                 off_control=True)
             if _cspec is not None and np.isfinite(_cspec).any():
-                control_spectra.append(_cspec)
-        if len(control_spectra) >= 2:
-            control = np.nanmean(control_spectra, axis=0)
-            cf = control[np.isfinite(control)]
-            if cf.size:
-                c_med = float(np.median(cf))
-                c_mad = float(np.median(np.abs(cf - c_med)))
-                c_sigma = float(1.4826 * c_mad)
-                if c_sigma > 0:
-                    for pk in peaks:
-                        _idx = int(np.argmin(np.abs(common_grid - pk['freq_mhz'])))
-                        _cval = float(control[_idx]) if _idx < len(control) else 0.0
-                        pk['off_control_snr'] = round((_cval - c_med) / c_sigma, 1)
-                        if (_cval - c_med) > 5 * c_sigma:
-                            pk['off_control_veto'] = True
+                control_specs.append((_label, _cspec))
+        if control_specs:
+            for pk in peaks:
+                _idx = int(np.argmin(np.abs(common_grid - pk['freq_mhz'])))
+                _worst = 0.0
+                for _lbl, _cspec in control_specs:
+                    _cf = _cspec[np.isfinite(_cspec)]
+                    if _cf.size == 0:
+                        continue
+                    _med = float(np.median(_cf))
+                    _mad = float(np.median(np.abs(_cf - _med)))
+                    _sig = float(1.4826 * _mad)
+                    if _sig <= 0:
+                        continue
+                    _val = float(_cspec[_idx]) if _idx < len(_cspec) else 0.0
+                    _snr = (_val - _med) / _sig
+                    _worst = max(_worst, _snr)
+                pk['off_control_snr'] = round(_worst, 1)
+                if _worst > 5.0:
+                    pk['off_control_veto'] = True
     except Exception as _e:
         print(f"  OFF-control veto skipped: {_e}")
+
+    # Cluster collapsing: one spectral feature often yields many adjacent
+    # peaks (1921.53 MHz line -> 117 rows, 2026-08-18). Merge peaks within
+    # 10 kHz into one representative (highest SNR), keeping the count.
+    if peaks:
+        peaks.sort(key=lambda x: x['freq_mhz'])
+        merged = []
+        for pk in peaks:
+            if merged and (pk['freq_mhz'] - merged[-1]['freq_mhz']) <= 0.01:
+                # same cluster: keep the stronger peak as representative
+                merged[-1]['n_merged'] = merged[-1].get('n_merged', 1) + 1
+                if pk['snr'] > merged[-1]['snr']:
+                    pk['n_merged'] = merged[-1]['n_merged']
+                    merged[-1] = pk
+            else:
+                merged.append(pk)
+        peaks = merged
 
     # Flush spectra to per-chunk .npy files when requested (chunked runs):
     # nothing big stays resident across chunks
