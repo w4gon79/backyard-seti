@@ -191,6 +191,12 @@
                     <input type="number" id="bary-min-epochs" value="2" min="2" max="10" step="1" style="width:60px;" title="Minimum number of epochs a signal must appear in to count as a candidate. Default 2. Raise to 3+ for stricter filtering when you have many epochs.">
                     <label title="Post-filter: only use hits with SNR at or above this value. Since turboSETI's SNR threshold is a simple cutoff on the detection statistic, post-filtering existing results is mathematically equivalent to re-running turboSETI at the higher threshold. No re-scan needed. Default 0 = use all hits from the original search. Try 10 or 15 to eliminate noise detections.">Min SNR</label>
                     <input type="number" id="bary-min-snr" value="0" min="0" max="100" step="1" style="width:60px;" title="Post-filter hits by SNR. 0 = use all. 10-15 recommended for noise rejection. Equivalent to re-running turboSETI at that SNR threshold without re-scanning.">
+                    <label title="Restrict the cross-epoch match to this frequency window (MHz). Auto-suggests the shared coverage of the selected scans: frequencies outside what BOTH scans observed can never cross-match and only produce noise. Leave blank for full band (only sensible when scans share the same band).">Freq Window (MHz)</label>
+                    <input type="number" id="bary-freq-min" placeholder="min" min="0" step="0.1" style="width:85px;" title="Window lower edge MHz. Use Auto to fill the shared coverage.">
+                    <span style="color:#546e7a;">-</span>
+                    <input type="number" id="bary-freq-max" placeholder="max" min="0" step="0.1" style="width:85px;" title="Window upper edge MHz. Use Auto to fill the shared coverage.">
+                    <button class="btn-small" id="btn-xepoch-window" onclick="autoSuggestWindow()" title="Compute the shared frequency coverage of the selected scans and fill the window inputs.">Auto</button>
+                    <span id="xepoch-window-hint" style="font-size:0.8em;color:#546e7a;"></span>
                     <button id="btn-cross-epoch" class="btn-warning" onclick="runCrossEpoch()">Run Cross-Epoch Search</button>
                     </div>
                 </div>
@@ -344,7 +350,7 @@
     </div>
 </div>
 
-<script src="/static/js/dashboard.js?v=81"></script>
+<script src="/static/js/dashboard.js?v=82"></script>
 <script src="/static/js/targets.js?v=3"></script>
 </body>
 </html>

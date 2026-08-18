@@ -553,7 +553,8 @@ def correct_scan(scan_dir, ra_hours=None, dec_deg=None, telescope='parkes',
 
 # ─── Cross-Epoch Comparison ───────────────────────────────────────────
 
-def cross_epoch_match(scan_dirs, freq_tolerance_hz=10, min_epochs=2, min_snr=0):
+def cross_epoch_match(scan_dirs, freq_tolerance_hz=10, min_epochs=2, min_snr=0,
+                      freq_min_mhz=None, freq_max_mhz=None):
     """
     Find barycentric frequencies present in ON frames across multiple epochs
     but absent from OFF frames.
@@ -657,12 +658,19 @@ def cross_epoch_match(scan_dirs, freq_tolerance_hz=10, min_epochs=2, min_snr=0):
                     'warning': f'Used uncorrected hits: {e}',
                 }
 
-        # Bucket hits (apply min_snr post-filter)
+        # Bucket hits (apply min_snr post-filter and optional frequency window)
         for hit in hits:
             if hit.get('snr', 0) < min_snr:
                 continue
             freq = hit.get('barycentric_freq', hit.get('freq', 0))
             if freq == 0:
+                continue
+            # Restrict to shared-coverage window (if given): frequencies
+            # outside what BOTH epochs observed can never cross-match, and
+            # would otherwise report meaningless no-match noise.
+            if freq_min_mhz is not None and freq < freq_min_mhz:
+                continue
+            if freq_max_mhz is not None and freq > freq_max_mhz:
                 continue
             bucket = int(round(freq * grid_resolution))
             is_on = hit.get('on_off', 'ON' if '_S_' in hit.get('source_file', '') else 'OFF') == 'ON'
@@ -777,6 +785,8 @@ def cross_epoch_match(scan_dirs, freq_tolerance_hz=10, min_epochs=2, min_snr=0):
             'freqs_meeting_min_epochs': freqs_ge_min,
             'total_candidates': len(candidates),
             'freq_tolerance_hz': freq_tolerance_hz,
+        'freq_min_mhz': freq_min_mhz,
+        'freq_max_mhz': freq_max_mhz,
             'min_epochs': min_epochs,
             'min_snr': min_snr,
             'scan_ids': [os.path.basename(os.path.abspath(sd)) for sd in scan_dirs],

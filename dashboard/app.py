@@ -2458,6 +2458,37 @@ def api_barycentric_correct():
         _bary_clear_busy(scan_id)
 
 
+@app.route('/api/barycentric/coverage', methods=['POST'])
+def api_barycentric_coverage():
+    """Shared frequency coverage across scans (for cross-epoch window
+    auto-suggest). Uses each scan's f_start/f_stop from its saved
+    parameters; falls back to h5 header scan if missing."""
+    params = request.json or {}
+    scan_ids = params.get('scan_ids', [])
+    if len(scan_ids) < 1:
+        return jsonify({'error': 'No scan_ids'}), 400
+    ranges = []
+    per_scan = {}
+    for sid in scan_ids:
+        sd = _get_scan_dir(sid)
+        if not sd:
+            continue
+        meta = _load_scan_meta(sd) or {}
+        p = meta.get('parameters', {})
+        lo, hi = p.get('f_start'), p.get('f_stop')
+        if lo is None or hi is None:
+            continue
+        lo, hi = float(lo), float(hi)
+        per_scan[sid] = [min(lo, hi), max(lo, hi)]
+        ranges.append((min(lo, hi), max(lo, hi)))
+    if not ranges:
+        return jsonify({'per_scan': per_scan, 'overlap': None})
+    o_lo = max(r[0] for r in ranges)
+    o_hi = min(r[1] for r in ranges)
+    overlap = [round(o_lo, 1), round(o_hi, 1)] if o_hi > o_lo else None
+    return jsonify({'per_scan': per_scan, 'overlap': overlap})
+
+
 @app.route('/api/barycentric/results/<scan_id>')
 def api_barycentric_results(scan_id):
     """Get corrected hits for a scan."""
@@ -2515,19 +2546,21 @@ def _cross_epoch_cache_dir():
     os.makedirs(cache_dir, exist_ok=True)
     return cache_dir
 
-def _cross_epoch_cache_filename(scan_ids, min_snr, tol_hz, min_epochs):
+def _cross_epoch_cache_filename(scan_ids, min_snr, tol_hz, min_epochs, fmin=None, fmax=None):
     """Build a deterministic cache filename for given parameters."""
     ids_str = '_'.join(scan_ids)
     # Sanitize: keep alphanumerics, underscores, hyphens
     ids_safe = re.sub(r'[^A-Za-z0-9_-]', '', ids_str)
-    return f'cross_epoch_{ids_safe}_snr{min_snr}_tol{tol_hz}_ep{min_epochs}.json'
+    fw = f'_f{fmin:g}-{fmax:g}' if (fmin is not None and fmax is not None) else ''
+    return f'cross_epoch_{ids_safe}_snr{min_snr}_tol{tol_hz}_ep{min_epochs}{fw}.json'
 
 
 @app.route('/api/barycentric/cross-epoch', methods=['POST'])
 def api_barycentric_cross_epoch():
     """Run cross-epoch comparison across multiple scans.
     
-    Body: {scan_ids, freq_tolerance_hz?, min_epochs?, min_snr?, force_rerun?}
+    Body: {scan_ids, freq_tolerance_hz?, min_epochs?, min_snr?, force_rerun?,
+           freq_min_mhz?, freq_max_mhz?}
     """
     params = request.json or {}
     scan_ids = params.get('scan_ids', [])
@@ -2535,6 +2568,10 @@ def api_barycentric_cross_epoch():
     min_epochs = params.get('min_epochs', 2)
     min_snr = params.get('min_snr', 0)
     force_rerun = params.get('force_rerun', False)
+    freq_min_mhz = params.get('freq_min_mhz', None)
+    freq_max_mhz = params.get('freq_max_mhz', None)
+    if freq_min_mhz is not None: freq_min_mhz = float(freq_min_mhz)
+    if freq_max_mhz is not None: freq_max_mhz = float(freq_max_mhz)
     
     if not scan_ids or len(scan_ids) < 2:
         return jsonify({'error': 'Need at least 2 scan_ids for cross-epoch comparison'}), 400
@@ -2548,7 +2585,7 @@ def api_barycentric_cross_epoch():
     
     # Check cache first (unless force_rerun)
     cache_dir = _cross_epoch_cache_dir()
-    cache_file = _cross_epoch_cache_filename(scan_ids, min_snr, freq_tolerance_hz, min_epochs)
+    cache_file = _cross_epoch_cache_filename(scan_ids, min_snr, freq_tolerance_hz, min_epochs, freq_min_mhz, freq_max_mhz)
     cache_path = os.path.join(cache_dir, cache_file)
     
     if not force_rerun and os.path.isfile(cache_path):
@@ -2571,6 +2608,8 @@ def api_barycentric_cross_epoch():
             freq_tolerance_hz=float(freq_tolerance_hz),
             min_epochs=int(min_epochs),
             min_snr=float(min_snr),
+            freq_min_mhz=freq_min_mhz,
+            freq_max_mhz=freq_max_mhz,
         )
         result['summary']['from_cache'] = False
         result['summary']['cache_file'] = cache_file

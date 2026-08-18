@@ -2543,6 +2543,34 @@ async function loadBaryCorrectedResults(scanId, page) {
     }
 }
 
+async function autoSuggestWindow() {
+    var container = document.getElementById('bary-scan-checkboxes');
+    var checked = container.querySelectorAll('input[type="checkbox"]:checked');
+    var scanIds = [];
+    for (var i = 0; i < checked.length; i++) scanIds.push(checked[i].value);
+    if (scanIds.length < 2) { alert('Select at least 2 scans first.'); return; }
+    var hint = document.getElementById('xepoch-window-hint');
+    hint.textContent = 'computing...'; hint.style.color = '#8ab4f8';
+    try {
+        var resp = await fetch('/api/barycentric/coverage', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({scan_ids: scanIds})});
+        var d = await resp.json();
+        if (d.error) { hint.textContent = d.error; hint.style.color = '#ef5350'; return; }
+        if (!d.overlap) {
+            hint.textContent = 'NO shared coverage - these scans cannot cross-match!';
+            hint.style.color = '#ef5350';
+            return;
+        }
+        document.getElementById('bary-freq-min').value = d.overlap[0];
+        document.getElementById('bary-freq-max').value = d.overlap[1];
+        hint.textContent = 'shared coverage: ' + d.overlap[0] + ' - ' + d.overlap[1] + ' MHz';
+        hint.style.color = '#66bb6a';
+    } catch (e) {
+        hint.textContent = 'error: ' + e.message; hint.style.color = '#ef5350';
+    }
+}
+
 async function runCrossEpoch() {
     var btn = document.getElementById('btn-cross-epoch');
     btn.disabled = true;
@@ -2570,6 +2598,12 @@ async function runCrossEpoch() {
         min_snr: parseFloat(document.getElementById('bary-min-snr').value) || 0,
         force_rerun: true,
     };
+    var fmin = parseFloat(document.getElementById('bary-freq-min').value);
+    var fmax = parseFloat(document.getElementById('bary-freq-max').value);
+    if (!isNaN(fmin) && !isNaN(fmax) && fmax > fmin) {
+        params.freq_min_mhz = fmin;
+        params.freq_max_mhz = fmax;
+    }
 
     // Show loading indicator
     var resultsContainer = document.getElementById('bary-results-container');
