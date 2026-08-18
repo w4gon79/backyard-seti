@@ -1019,7 +1019,13 @@ function refreshFileDetailPanel() {
             if (fileInfo) break;
         }
         if (!fileInfo) return;
+        // Cadence: Parkes _S_/_R_ markers; GBT (guppi): ON when the file's
+        // target token matches the group target (ABACAD A-scans are ON).
         var isOn = fileInfo.name.indexOf('_S_') !== -1;
+        if (!isOn && fileInfo.name.indexOf('_R_') === -1 && fileInfo.name.indexOf('guppi_') !== -1) {
+            var gm = fileInfo.name.match(/guppi_\d+_\d+_([A-Za-z0-9+\-.]+?)_\d+\./);
+            isOn = !!(gm && target && gm[1].toUpperCase() === String(target).toUpperCase());
+        }
         var header = fileHeaderCache[path];
         var headerData = header ? header.header : null;
         html += '<div class="file-detail-card">';
