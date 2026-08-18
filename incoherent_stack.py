@@ -114,12 +114,17 @@ def _discover_epochs(target='PROXCEN'):
     """
     epochs = {}
     pat = _re.compile(r'Parkes_(\d+)_(\d+)_' + target + r'_[SR]_fine\.h5$')
-    # GBT grammar: *_guppi_<MJD>_<SEQ>_<TARGET>_* (gpuspec files). No S/R
-    # cadence markers exist, so GBT epochs are list-only: files counted,
-    # cadence_ok stays None (unknown) until ON/OFF conventions verified.
-    gbt_pat = _re.compile(r'guppi_(\d+)_(\d+)_' + target + r'_')
+    # GBT grammar: *_guppi_<MJD>_<SEQ>_<TARGET>_<SCAN>.PROD.TIER.h5
+    # No S/R cadence markers. ABACAD: within an epoch the session target
+    # is observed 3x (A-scans = ON) and each companion once (B/C/D = OFF).
+    # ON/OFF pairs are built in seq order: each A-scan pairs with the
+    # next companion observation. Companions are DIFFERENT targets, so
+    # we must scan every guppi file in the data dirs for this epoch.
+    gbt_pat = _re.compile(
+        r'guppi_(\d+)_(\d+)_([A-Za-z0-9+\-.]+?)_\d+\.(?:rawspec|gpuspec)\.\d+\.h5$')
 
-    for d in _fine_dirs_for(target):
+    gbt_by_mjd = {}  # mjd -> [(seq, target_tok, fname)]
+    for d in _all_fine_dirs():
         if not os.path.isdir(d):
             continue
         for f in os.listdir(d):
@@ -128,20 +133,54 @@ def _discover_epochs(target='PROXCEN'):
                 mjd, seq = m.group(1), m.group(2)
                 is_on = ('_' + target + '_S_') in f
                 tel = 'Parkes'
+                if mjd not in epochs:
+                    epochs[mjd] = {'mjd_int': int(mjd), 'telescope': tel,
+                                   'files': [], 'seqs': []}
+                epochs[mjd]['files'].append((seq, is_on, f))
             else:
                 m = gbt_pat.search(f)
-                if not m:
-                    continue
-                mjd, seq = m.group(1), m.group(2)
-                is_on = False
-                tel = 'GBT'
-            if mjd not in epochs:
-                epochs[mjd] = {'mjd_int': int(mjd), 'telescope': tel,
-                               'files': [], 'seqs': []}
-            epochs[mjd]['files'].append((seq, is_on, f))
+                if m:
+                    gbt_by_mjd.setdefault(m.group(1), []).append(
+                        (m.group(2), m.group(3).upper(), f))
+
+    # Build GBT epochs for THIS target only (A-scans = files whose target
+    # token matches). Pairs: each target file (seq order) + next companion.
+    tgt_u = str(target).strip().upper()
+    for mjd, entries in gbt_by_mjd.items():
+        tgt_files = sorted([e for e in entries if e[1] == tgt_u],
+                           key=lambda x: int(x[0]))
+        if not tgt_files:
+            continue
+        companions = sorted([e for e in entries if e[1] != tgt_u],
+                            key=lambda x: int(x[0]))
+        pairs = []
+        used_off = set()
+        for seq, _, fname in tgt_files:
+            nxt = [c for c in companions
+                   if int(c[0]) > int(seq) and c[2] not in used_off]
+            if nxt:
+                used_off.add(nxt[0][2])
+                pairs.append((fname, nxt[0][2]))
+        epochs[mjd] = {
+            'mjd_int': int(mjd), 'telescope': 'GBT',
+            'files': [(e[0], e[1] == tgt_u, e[2]) for e in sorted(
+                entries, key=lambda x: int(x[0]))],
+            'seqs': pairs,  # GBT: seqs holds (on_fname, off_fname) pairs
+            'gbt_pairs': pairs,
+        }
 
     # Build ON/OFF pairs from discovered files
     for mjd, info in epochs.items():
+        if info.get('telescope') == 'GBT':
+            # Pairs already built from filenames above. Cadence check:
+            # ABACAD = target observed 2+ times (normally 3) with
+            # companions; each pair needs one companion.
+            info['n_on'] = sum(1 for _, is_on, _ in info['files'] if is_on)
+            info['n_off'] = len(info['files']) - info['n_on']
+            info['cadence_ok'] = (info['n_on'] >= 2 and
+                                  len(info['gbt_pairs']) >= 2)
+            del info['files']
+            continue
         files = sorted(info['files'], key=lambda x: x[0])
         pairs = []
         i = 0
@@ -352,7 +391,11 @@ def process_epoch(epoch_label, epoch_info, target_ra, target_dec,
     
     # Compute barycentric velocity for this epoch
     # Use the first ON file's MJD (most accurate)
-    first_on = f"Parkes_{mjd_int}_{seqs[0][0]}_PROXCEN_S_fine.h5"
+    is_gbt = bool(epoch_info.get('gbt_pairs'))
+    if is_gbt:
+        first_on = epoch_info['gbt_pairs'][0][0]
+    else:
+        first_on = f"Parkes_{mjd_int}_{seqs[0][0]}_PROXCEN_S_fine.h5"
     mjd = extract_mjd_from_filename(first_on)
     v_bary = compute_barycentric_velocity(mjd, target_ra, target_dec, telescope)
     c = 299792458.0
@@ -362,10 +405,13 @@ def process_epoch(epoch_label, epoch_info, target_ra, target_dec,
     
     residuals = []  # One residual spectrum per ON/OFF pair
     
-    for pair_idx, (on_seq, off_seq) in enumerate(seqs):
-        on_file = f"Parkes_{mjd_int}_{on_seq}_PROXCEN_S_fine.h5"
-        off_file = f"Parkes_{mjd_int}_{off_seq}_PROXCEN_R_fine.h5"
-        
+    for pair_idx, pair in enumerate(seqs):
+        if is_gbt:
+            on_file, off_file = pair  # actual filenames
+        else:
+            on_file = f"Parkes_{mjd_int}_{pair[0]}_PROXCEN_S_fine.h5"
+            off_file = f"Parkes_{mjd_int}_{pair[1]}_PROXCEN_R_fine.h5"
+
         on_path = find_h5(on_file)
         off_path = find_h5(off_file)
         
@@ -480,9 +526,12 @@ def process_epoch(epoch_label, epoch_info, target_ra, target_dec,
         # Build 2D time-series residual from the first valid ON/OFF pair.
         # We need to reload with 2D data for the first pair that produced a residual.
         time_series_2d = None
-        for pair_idx, (on_seq, off_seq) in enumerate(seqs):
-            on_file = f"Parkes_{mjd_int}_{on_seq}_PROXCEN_S_fine.h5"
-            off_file = f"Parkes_{mjd_int}_{off_seq}_PROXCEN_R_fine.h5"
+        for pair_idx, pair in enumerate(seqs):
+            if is_gbt:
+                on_file, off_file = pair
+            else:
+                on_file = f"Parkes_{mjd_int}_{pair[0]}_PROXCEN_S_fine.h5"
+                off_file = f"Parkes_{mjd_int}_{pair[1]}_PROXCEN_R_fine.h5"
             on_path = find_h5(on_file)
             off_path = find_h5(off_file)
             if not on_path or not off_path:
@@ -511,6 +560,69 @@ def process_epoch(epoch_label, epoch_info, target_ra, target_dec,
         return interpolated, time_series_2d
     
     return interpolated
+
+
+def epoch_file_band_mhz(h5_path):
+    """(lo, hi) MHz coverage of a fine h5 from its header. None on error."""
+    try:
+        import h5py
+        with h5py.File(h5_path, 'r') as f:
+            attrs = f['data'].attrs
+            fch1 = float(attrs['fch1'])
+            nchans = int(attrs['nchans'])
+            foff = float(attrs['foff'])
+        lo = min(fch1, fch1 + nchans * foff)
+        hi = max(fch1, fch1 + nchans * foff)
+        return (lo, hi)
+    except Exception:
+        return None
+
+
+def compute_epoch_overlap(target, epoch_labels):
+    """Shared frequency coverage (lo, hi) MHz across epochs of a target.
+
+    Uses one representative file per epoch (first pair's ON file), reading
+    the band from the h5 header. Returns None if the epochs share no
+    coverage (or files are missing)."""
+    epochs = _discover_epochs(target)
+    ranges = []
+    for label in epoch_labels:
+        info = epochs.get(label)
+        if not info:
+            continue
+        if info.get('gbt_pairs'):
+            fname = info['gbt_pairs'][0][0]
+        elif info.get('seqs'):
+            fname = f"Parkes_{info['mjd_int']}_{info['seqs'][0][0]}_{target}_S_fine.h5"
+        else:
+            continue
+        path = find_h5(fname)
+        if not path:
+            continue
+        band = epoch_file_band_mhz(path)
+        if band:
+            ranges.append(band)
+    if not ranges:
+        return None
+    lo = max(r[0] for r in ranges)
+    hi = min(r[1] for r in ranges)
+    return (lo, hi) if hi > lo else None
+
+
+def clip_window_to_overlap(target, epoch_labels, freq_center, width):
+    """Intersect the requested window with the epochs' shared coverage.
+
+    Returns (center, width, overlap) with the window adjusted (shrunk or
+    shifted) to the overlap, or (None, None, overlap) when there is no
+    usable intersection."""
+    ov = compute_epoch_overlap(target, epoch_labels)
+    if ov is None:
+        return None, None, None
+    w_lo = max(freq_center - width / 2, ov[0])
+    w_hi = min(freq_center + width / 2, ov[1])
+    if w_hi <= w_lo:
+        return None, None, ov
+    return ((w_lo + w_hi) / 2.0, w_hi - w_lo, ov)
 
 
 def find_peaks(spectrum, grid, n_sigma=5, min_channels=3):
@@ -591,6 +703,13 @@ def process_single_chunk(target, freq_center, width, epoch_labels,
     f_stop_obs = freq_center + width / 2 + padding_mhz
 
     common_grid = build_common_grid(freq_center, width)
+
+    # Re-discover epochs for THIS target: the module-level EPOCHS global
+    # is from import time (PROXCEN default) and won't contain other
+    # targets' epochs (GJ447 etc.)
+    global EPOCHS
+    if epoch_labels and any(l not in EPOCHS for l in epoch_labels):
+        EPOCHS = _discover_epochs(target)
 
     epoch_spectra = []
     used_epochs = []

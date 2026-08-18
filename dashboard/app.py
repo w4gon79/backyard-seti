@@ -3454,10 +3454,39 @@ def api_stack_run():
     if len(epochs) < 2:
         return jsonify({'error': 'Need at least 2 epochs for stacking'}), 400
 
-    # Full band: use the overlap range across epochs
+    # Auto-detect telescope from selected epochs (GBT guppi vs Parkes _S/_R)
+    # and clip the window to the epochs' shared frequency coverage (mixed
+    # GBT L/S sessions overlap only partially; stacking outside the overlap
+    # is meaningless).
+    try:
+        from incoherent_stack import (get_available_epochs,
+                                      clip_window_to_overlap,
+                                      compute_epoch_overlap)
+        _avail = get_available_epochs(target)
+        _tels = {_avail[l]['telescope'] for l in epochs if l in _avail}
+        if len(_tels) == 1 and 'GBT' in _tels:
+            telescope = 'gbt'
+    except Exception:
+        pass
+
     if width == 0 or width is None:
-        freq_center = 3034.0
-        width = 580.0
+        # Full band = everything the selected epochs SHARE
+        try:
+            ov = compute_epoch_overlap(target, epochs)
+        except Exception:
+            ov = None
+        if ov is None:
+            return jsonify({'error': 'Selected epochs share no frequency coverage; cannot stack full band.'}), 400
+        freq_center = (ov[0] + ov[1]) / 2.0
+        width = ov[1] - ov[0]
+    else:
+        try:
+            fc2, w2, ov = clip_window_to_overlap(target, epochs, freq_center, width)
+        except Exception:
+            fc2, w2, ov = freq_center, width, None
+        if fc2 is None:
+            return jsonify({'error': f'Requested window does not intersect the epochs\' shared coverage {ov} MHz.'}), 400
+        freq_center, width = fc2, w2
 
     job_id = str(_uuid.uuid4())[:8]
 
