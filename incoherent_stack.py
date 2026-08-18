@@ -455,7 +455,20 @@ def process_epoch(epoch_label, epoch_info, target_ra, target_dec,
         if len(off_freqs) != len(on_freqs) or not np.allclose(off_freqs, on_freqs, rtol=1e-12):
             off_power = np.interp(on_freqs, off_freqs, off_power)
         
-        residual = on_power - off_power  # kills steady RFI
+        # Normalize each spectrum by its own median BEFORE subtracting.
+        # Parkes ON/OFF = same star, bandpasses cancel on plain subtraction.
+        # GBT ABACAD ON/OFF = DIFFERENT stars with wildly different flux and
+        # receiver states (measured 14x DC offset between epochs, residual
+        # medians in the billions): plain subtraction leaves bandpass garbage
+        # that dominates everything (200 fake SNR-400 peaks, 2026-08-18).
+        # Dividing by per-spectrum medians cancels the DC/bandpass offset
+        # and makes residuals comparable across telescopes and epochs.
+        on_med = np.median(on_power)
+        off_med = np.median(off_power)
+        if on_med != 0 and off_med != 0:
+            residual = (on_power / on_med) - (off_power / off_med)
+        else:
+            residual = on_power - off_power  # kills steady RFI (legacy path)
         residuals.append((on_freqs, residual))
         print(f"    Residual: mean={np.mean(residual):.2e}, std={np.std(residual):.2e}")
     
