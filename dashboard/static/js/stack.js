@@ -623,13 +623,32 @@ function renderInteractiveSpectrum(data) {
         margin: { l: 60, r: 20, t: 30, b: 50 },
         showlegend: true,
         legend: { x: 0.02, y: 0.98, bgcolor: 'rgba(13,27,42,0.8)' },
-        hovermode: 'closest'
+        hovermode: 'closest',
+        dragmode: 'select'
     };
 
     Plotly.newPlot(plotDiv, traces, layout, {
         displayModeBar: true,
         responsive: true,
         modeBarButtonsToRemove: ['lasso2d', 'autoScale2d']
+    });
+
+    // Click-drag → RFI zone: box-select a frequency range, get a prefilled
+    // zone dialog. Delegates to rfi_zones.js (loaded after this file).
+    plotDiv.on('plotly_selected', function(evt) {
+        if (!evt || !evt.range || !evt.range.x) {
+            Plotly.relayout(plotDiv, 'dragmode', 'select');
+            return;
+        }
+        var x = evt.range.x;
+        var fs = Math.min(x[0], x[1]), fe = Math.max(x[0], x[1]);
+        if (fe - fs < 0.001) return;  // ignore degenerate drags
+        if (typeof openZoneFromPlot === 'function') {
+            openZoneFromPlot(fs, fe);
+        }
+        // Reset to select mode for the next drag (Plotly stays in zoom
+        // after a selection unless we clear it).
+        Plotly.relayout(plotDiv, 'dragmode', 'select');
     });
 }
 

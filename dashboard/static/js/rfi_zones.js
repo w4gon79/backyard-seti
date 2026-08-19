@@ -64,6 +64,79 @@ async function deleteRfiZone(scope, fStart, fStop) {
     }
 }
 
+// ─── Zone-from-plot dialog ──────────────────────────────────────
+// Called by stack.js plotly_selected: box-drag a frequency range on the
+// stack spectrum, get a prefilled add-zone dialog.
+function openZoneFromPlot(fStart, fStop) {
+    closeZoneDialog();
+    var ov = document.createElement('div');
+    ov.id = 'rfi-zone-dialog-overlay';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);' +
+        'z-index:10000;display:flex;align-items:center;justify-content:center;';
+    var dlg = document.createElement('div');
+    dlg.className = 'rfi-zone-dialog';
+    var epochOpts = '';
+    var epCbs = document.querySelectorAll('#stack-epochs-list input[type="checkbox"][data-epoch]');
+    for (var i = 0; i < epCbs.length; i++) {
+        var lbl = epCbs[i].getAttribute('data-epoch') || '';
+        if (/^\d{5}$/.test(lbl)) {
+            epochOpts += '<option value="' + lbl + '">' + lbl + ' (this epoch only)</option>';
+        }
+    }
+    dlg.innerHTML =
+        '<div class="rfi-zone-dialog-title">🚫 Zone this range?</div>' +
+        '<div class="rfi-zone-dialog-freq">' + fStart.toFixed(4) + ' – ' + fStop.toFixed(4) + ' MHz (' +
+            (fStop - fStart).toFixed(3) + ' MHz wide)</div>' +
+        '<label class="rfi-zone-dialog-label">Scope</label>' +
+        '<select id="rfi-zd-scope" class="rfi-zone-dialog-input">' +
+            '<option value="gbt/L" selected>gbt/L (all GBT L-band epochs)</option>' +
+            '<option value="parkes/L">parkes/L (all Parkes L-band)</option>' +
+            epochOpts +
+        '</select>' +
+        '<label class="rfi-zone-dialog-label">Reason</label>' +
+        '<input id="rfi-zd-reason" class="rfi-zone-dialog-input" type="text" ' +
+            'placeholder="what lives here? (required)">' +
+        '<div class="rfi-zone-dialog-btns">' +
+            '<button id="rfi-zd-cancel" class="btn-small">Cancel</button>' +
+            '<button id="rfi-zd-ok" class="btn-small" style="background:#43a047;color:#fff;">+ Zone It</button>' +
+        '</div>';
+    ov.appendChild(dlg);
+    document.body.appendChild(ov);
+    ov.addEventListener('click', function(e) { if (e.target === ov) closeZoneDialog(); });
+    document.getElementById('rfi-zd-cancel').onclick = closeZoneDialog;
+    document.getElementById('rfi-zd-reason').focus();
+    document.getElementById('rfi-zd-ok').onclick = async function() {
+        var scope = document.getElementById('rfi-zd-scope').value;
+        var reason = document.getElementById('rfi-zd-reason').value.trim();
+        if (!reason) {
+            document.getElementById('rfi-zd-reason').style.borderColor = '#ef5350';
+            document.getElementById('rfi-zd-reason').focus();
+            return;
+        }
+        try {
+            var r = await fetch('/api/rfi/zones', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ scope: scope, f_start: fStart,
+                                       f_stop: fStop, reason: reason })
+            });
+            var d = await r.json();
+            if (d.error) { alert('Add failed: ' + d.error); return; }
+            closeZoneDialog();
+            loadRfiZones();
+        } catch (e) { alert('Add failed: ' + e.message); }
+    };
+}
+
+function closeZoneDialog() {
+    var ov = document.getElementById('rfi-zone-dialog-overlay');
+    if (ov) ov.parentNode.removeChild(ov);
+}
+
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') closeZoneDialog();
+});
+
 async function addRfiZoneFromForm() {
     var scope = (document.getElementById('rfi-zone-scope').value || '').trim();
     var fs = parseFloat(document.getElementById('rfi-zone-fstart').value);

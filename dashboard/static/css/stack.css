@@ -1094,3 +1094,11 @@
 .rfi-zone-empty { color: #546e7a; font-size: 0.8em; padding: 6px 0; }
 .rfi-zone-add-form { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
 .rfi-zone-add-form input { width: 100%; box-sizing: border-box; font-size: 0.85em; padding: 4px 6px; }
+
+/* --- Zone-from-plot dialog --- */
+.rfi-zone-dialog { background: #16283c; border: 1px solid #2c4a68; border-radius: 8px; padding: 18px; width: 340px; max-width: 90vw; color: #c8c8e0; font-size: 0.9em; box-shadow: 0 8px 32px rgba(0,0,0,0.5); }
+.rfi-zone-dialog-title { font-weight: 700; font-size: 1.05em; margin-bottom: 6px; }
+.rfi-zone-dialog-freq { color: #4fc3f7; font-weight: 600; margin-bottom: 12px; }
+.rfi-zone-dialog-label { display: block; font-size: 0.8em; color: #90a4ae; margin: 8px 0 3px; }
+.rfi-zone-dialog-input { width: 100%; box-sizing: border-box; padding: 6px 8px; background: #0d1b2a; color: #c8c8e0; border: 1px solid #2c4a68; border-radius: 4px; font-size: 0.9em; }
+.rfi-zone-dialog-btns { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
