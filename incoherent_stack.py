@@ -414,6 +414,13 @@ def process_epoch(epoch_label, epoch_info, target_ra, target_dec,
     if off_control:
         if not is_gbt:
             return None
+        if progress_callback:
+            progress_callback({
+                'phase': 'file_load',
+                'epoch': epoch_label,
+                'file': 'OFF-control stack (companion-vs-companion)',
+                'type': 'CTRL',
+            })
         _offs = [p[1] for p in epoch_info['gbt_pairs']]
         run_pairs = [(_offs[i], _offs[i + 1]) for i in range(len(_offs) - 1)]
         if not run_pairs:
@@ -824,21 +831,23 @@ def process_single_chunk(target, freq_center, width, epoch_labels,
             if _cspec is not None and np.isfinite(_cspec).any():
                 control_specs.append((_label, _cspec))
         if control_specs:
+            # Compute each control spectrum's stats ONCE (median/MAD of a
+            # 46M-bin array per peak was the 2026-08-18 6-10x slowdown).
+            ctrl_stats = []
+            for _lbl, _cspec in control_specs:
+                _cf = _cspec[np.isfinite(_cspec)]
+                if _cf.size == 0:
+                    continue
+                _med = float(np.median(_cf))
+                _sig = float(1.4826 * np.median(np.abs(_cf - _med)))
+                if _sig > 0:
+                    ctrl_stats.append((_cspec, _med, _sig))
             for pk in peaks:
                 _idx = int(np.argmin(np.abs(common_grid - pk['freq_mhz'])))
                 _worst = 0.0
-                for _lbl, _cspec in control_specs:
-                    _cf = _cspec[np.isfinite(_cspec)]
-                    if _cf.size == 0:
-                        continue
-                    _med = float(np.median(_cf))
-                    _mad = float(np.median(np.abs(_cf - _med)))
-                    _sig = float(1.4826 * _mad)
-                    if _sig <= 0:
-                        continue
+                for _cspec, _med, _sig in ctrl_stats:
                     _val = float(_cspec[_idx]) if _idx < len(_cspec) else 0.0
-                    _snr = (_val - _med) / _sig
-                    _worst = max(_worst, _snr)
+                    _worst = max(_worst, (_val - _med) / _sig)
                 pk['off_control_snr'] = round(_worst, 1)
                 if _worst > 5.0:
                     pk['off_control_veto'] = True
