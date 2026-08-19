@@ -3300,15 +3300,24 @@ def api_db_chart(scan_id):
                     f'SELECT freq, snr FROM hits WHERE rowid % {step} = 0 '
                     f'AND {where} AND on_off = ? LIMIT 8000',
                     params + [cls]).fetchall()
-                # Supplement with top-500 by SNR within the filter: the uniform
-                # rowid sample can miss rare bright hits entirely (e.g. the
-                # 100-1000 SNR band in a 1.1M-hit scan), which made hover
-                # values look capped.
-                top = conn.execute(
-                    f'SELECT freq, snr FROM hits WHERE {where} AND on_off = ? '
-                    f'ORDER BY snr DESC LIMIT 500',
-                    params + [cls]).fetchall()
-                merged = list(rows) + [t for t in top if t not in rows]
+                # Supplement with SNR-stratified strata: the uniform
+                # rowid sample can miss rare bright hits entirely, and a
+                # single top-500 stratum leaves a visible sampling gap in
+                # mid-SNR bands (e.g. 65-470 in GPS bands of a 1.1M-hit
+                # scan). Take top-250 by SNR within each log decade above
+                # 10, merged and deduped with the uniform sample.
+                seen = set(rows)
+                merged = list(rows)
+                for decade in range(1, 7):  # 10^1 .. 10^6
+                    d_lo, d_hi = 10 ** decade, 10 ** (decade + 1)
+                    stratum = conn.execute(
+                        f'SELECT freq, snr FROM hits WHERE {where} AND on_off = ? '
+                        f'AND snr >= ? AND snr < ? ORDER BY snr DESC LIMIT 250',
+                        params + [cls, d_lo, d_hi]).fetchall()
+                    for t in stratum:
+                        if t not in seen:
+                            seen.add(t)
+                            merged.append(t)
                 scatter[cls] = {'freq': [r[0] for r in merged],
                                 'snr': [r[1] for r in merged]}
         finally:
