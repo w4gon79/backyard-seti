@@ -28,12 +28,13 @@ function renderRfiZones(zones) {
         var isBand = scope.indexOf('/') !== -1;
         zones[scope].forEach(function(z) {
             total++;
-            html += '<div class="rfi-zone-row">' +
+            html += '<div class="rfi-zone-row" title="' +
+                (z.reason || '').replace(/"/g, '&quot;') + '">' +
                 '<span class="rfi-zone-scope ' + (isBand ? 'rfi-scope-band' : 'rfi-scope-epoch') + '">' +
                     scope + '</span>' +
                 '<span class="rfi-zone-freq">' +
                     z.f_start.toFixed(3) + '–' + z.f_stop.toFixed(3) + ' MHz</span>' +
-                '<button class="rfi-zone-del" title="' + (z.reason || '') + '"' +
+                '<button class="rfi-zone-del" title="delete zone"' +
                     ' data-scope="' + scope + '" data-fs="' + z.f_start + '" data-fe="' + z.f_stop + '">✕</button>' +
                 '</div>';
         });
