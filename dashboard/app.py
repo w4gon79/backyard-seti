@@ -3297,7 +3297,7 @@ def api_db_chart(scan_id):
                     params + [cls]).fetchone()[0]
                 step = max(1, cnt // 8000)
                 rows = conn.execute(
-                    f'SELECT freq, snr FROM hits WHERE rowid % {step} = 0 '
+                    f'SELECT freq, snr, drift_rate FROM hits WHERE rowid % {step} = 0 '
                     f'AND {where} AND on_off = ? LIMIT 8000',
                     params + [cls]).fetchall()
                 # Supplement with SNR-stratified strata: the uniform
@@ -3318,7 +3318,7 @@ def api_db_chart(scan_id):
                         continue
                     step = max(1, dcnt // 250)
                     stratum = conn.execute(
-                        f'SELECT freq, snr FROM hits WHERE rowid % {step} = 0 '
+                        f'SELECT freq, snr, drift_rate FROM hits WHERE rowid % {step} = 0 '
                         f'AND {where} AND on_off = ? AND snr >= ? AND snr < ? LIMIT 250',
                         params + [cls, d_lo, d_hi]).fetchall()
                     for t in stratum:
@@ -3326,7 +3326,8 @@ def api_db_chart(scan_id):
                             seen.add(t)
                             merged.append(t)
                 scatter[cls] = {'freq': [r[0] for r in merged],
-                                'snr': [r[1] for r in merged]}
+                                'snr': [r[1] for r in merged],
+                                'drift': [r[2] if r[2] is not None else 0 for r in merged]}
         finally:
             conn.close()
 

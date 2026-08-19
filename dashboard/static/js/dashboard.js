@@ -1870,7 +1870,8 @@ function renderHitChart() {
             if (s && s.freq && s.freq.length) {
                 traces.push({ x: s.freq, y: s.snr, mode: 'markers', type: 'scatter',
                     name: name + ' (sample)', marker: { color: color, size: 4, opacity: 0.45 },
-                    hovertemplate: '%{x:.6f} MHz<br>SNR: %{y:.1f}<extra></extra>' });
+                    text: s.drift ? s.drift.map(function(d) { return 'Drift: ' + (d || 0).toFixed(4) + ' Hz/s'; }) : undefined,
+                    hovertemplate: '%{x:.6f} MHz<br>SNR: %{y:.1f}<br>%{text}<extra></extra>' });
             }
         }
         addScatter('ON', '#66bb6a', 'ON');
