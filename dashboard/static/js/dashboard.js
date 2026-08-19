@@ -1688,6 +1688,39 @@ function applyFilters() {
     resultsPage = 0;
     renderHitTable();
     loadChartData(true);
+    fetchFilteredTableHits();
+}
+
+// Server-side table fetch honoring the dropdown + SNR filters. The initial
+// table load is top-500 by SNR, so client-side Max SNR filtering empties it
+// (all 500 are monster-SNR hits). Refetch the filtered set from the DB so
+// the table shows the same population the chart does.
+var _tableReq = 0;
+function fetchFilteredTableHits() {
+    if (!currentScanId || !allHitsScanId) return;
+    clearTimeout(window._tableDebounce);
+    window._tableDebounce = setTimeout(function() {
+        var p = chartFilterParams();
+        var reqId = ++_tableReq;
+        fetch('/api/db/scans/' + encodeURIComponent(currentScanId) + '/hits?limit=500&offset=0&order=snr%20DESC&' + p)
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (reqId !== _tableReq || data.error) return;
+                allHits = (data.hits || []).map(function(h) {
+                    return {
+                        drift_rate: h.drift_rate, snr: h.snr, freq: h.freq,
+                        channel: h.channel, sub_band: h.sub_band,
+                        file: h.source_file, _source: h.source_file,
+                        on_off: h.on_off, barycentric_freq: h.barycentric_freq,
+                    };
+                });
+                allHitsTotal = data.total || allHits.length;
+                resultsPage = 0;
+                renderHitTable();
+                renderHitsPagination();
+            })
+            .catch(function() {});
+    }, 300);
 }
 
 // Full-density chart data: fetches histogram + stratified sample from the

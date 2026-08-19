@@ -3300,8 +3300,17 @@ def api_db_chart(scan_id):
                     f'SELECT freq, snr FROM hits WHERE rowid % {step} = 0 '
                     f'AND {where} AND on_off = ? LIMIT 8000',
                     params + [cls]).fetchall()
-                scatter[cls] = {'freq': [r[0] for r in rows],
-                                'snr': [r[1] for r in rows]}
+                # Supplement with top-500 by SNR within the filter: the uniform
+                # rowid sample can miss rare bright hits entirely (e.g. the
+                # 100-1000 SNR band in a 1.1M-hit scan), which made hover
+                # values look capped.
+                top = conn.execute(
+                    f'SELECT freq, snr FROM hits WHERE {where} AND on_off = ? '
+                    f'ORDER BY snr DESC LIMIT 500',
+                    params + [cls]).fetchall()
+                merged = list(rows) + [t for t in top if t not in rows]
+                scatter[cls] = {'freq': [r[0] for r in merged],
+                                'snr': [r[1] for r in merged]}
         finally:
             conn.close()
 
