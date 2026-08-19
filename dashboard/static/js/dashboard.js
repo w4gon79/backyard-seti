@@ -1809,8 +1809,10 @@ function renderHitChart() {
 
     // Full-density path: histogram (all hits) + stratified scatter from
     // the chart endpoint. Falls back to the table-page scatter below when
-    // unavailable (legacy scan mode / endpoint error).
-    if (chartData && currentScanId) {
+    // unavailable (legacy scan mode / endpoint error / Candidates filter,
+    // which plots the rejection candidate set like the table does).
+    var _filterVal = (document.getElementById('results-filter') || {}).value;
+    if (chartData && currentScanId && _filterVal !== 'candidates') {
         var traces = [];
         if (chartData.bins && chartData.bins.length) {
             var bx = [], bon = [], boff = [], bany = [];
