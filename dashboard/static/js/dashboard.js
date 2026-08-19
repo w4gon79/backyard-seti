@@ -1716,6 +1716,11 @@ function fetchFilteredTableHits() {
                 });
                 allHitsTotal = data.total || allHits.length;
                 resultsPage = 0;
+                // Bust the getFilteredHits cache: its key is built from
+                // filter values + allHits.length, which is 500 both before
+                // and after this refetch, so the stale (empty) filtered
+                // result would otherwise be served again.
+                window._filteredHitsCacheKey = null;
                 renderHitTable();
                 renderHitsPagination();
             })
