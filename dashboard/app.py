@@ -3301,18 +3301,25 @@ def api_db_chart(scan_id):
                     f'AND {where} AND on_off = ? LIMIT 8000',
                     params + [cls]).fetchall()
                 # Supplement with SNR-stratified strata: the uniform
-                # rowid sample can miss rare bright hits entirely, and a
-                # single top-500 stratum leaves a visible sampling gap in
-                # mid-SNR bands (e.g. 65-470 in GPS bands of a 1.1M-hit
-                # scan). Take top-250 by SNR within each log decade above
-                # 10, merged and deduped with the uniform sample.
+                # rowid sample can miss rare bright hits entirely. Sample
+                # UNIFORMLY (every-Nth-row) within each log SNR decade,
+                # capped per decade: taking top-N by SNR instead clumps all
+                # samples at the decade's upper edge, drawing artificial
+                # horizontal stripes in the scatter (~100, ~600+).
                 seen = set(rows)
                 merged = list(rows)
                 for decade in range(1, 7):  # 10^1 .. 10^6
                     d_lo, d_hi = 10 ** decade, 10 ** (decade + 1)
+                    dcnt = conn.execute(
+                        f'SELECT COUNT(*) FROM hits WHERE {where} AND on_off = ? '
+                        f'AND snr >= ? AND snr < ?',
+                        params + [cls, d_lo, d_hi]).fetchone()[0]
+                    if not dcnt:
+                        continue
+                    step = max(1, dcnt // 250)
                     stratum = conn.execute(
-                        f'SELECT freq, snr FROM hits WHERE {where} AND on_off = ? '
-                        f'AND snr >= ? AND snr < ? ORDER BY snr DESC LIMIT 250',
+                        f'SELECT freq, snr FROM hits WHERE rowid % {step} = 0 '
+                        f'AND {where} AND on_off = ? AND snr >= ? AND snr < ? LIMIT 250',
                         params + [cls, d_lo, d_hi]).fetchall()
                     for t in stratum:
                         if t not in seen:
