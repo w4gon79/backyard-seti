@@ -321,22 +321,34 @@ def update_barycentric_freqs(scan_id, hit_updates, db_path=None):
     
     hit_updates: list of dicts with: freq (observed), barycentric_freq, source_file
     Uses freq + source_file as a composite key to find the right hit row.
+    source_file matching tolerates the optional '.h5' suffix: some import
+    paths store 'x.gpuspec.0000' and others 'x.gpuspec.0000.h5' for the
+    same file (GBT combined vs per-file JSONs), so we try both forms.
+    Returns the number of rows actually updated.
     """
     conn = get_db(db_path)
+    updated = 0
     try:
         BATCH = 10000
         for i in range(0, len(hit_updates), BATCH):
             batch = hit_updates[i:i + BATCH]
+            before = conn.total_changes
             conn.executemany('''
                 UPDATE hits SET barycentric_freq = ?
-                WHERE scan_id = ? AND source_file = ? AND freq = ?
+                WHERE scan_id = ? AND freq = ?
+                  AND (source_file = ?
+                       OR source_file = rtrim(?, '.h5')
+                       OR source_file = ? || '.h5')
             ''', [
-                (h['barycentric_freq'], scan_id,
+                (h['barycentric_freq'], scan_id, h['freq'],
                  h.get('source_file', h.get('file', '')),
-                 h['freq'])
+                 h.get('source_file', h.get('file', '')),
+                 h.get('source_file', h.get('file', '')))
                 for h in batch
             ])
+            updated += conn.total_changes - before
             conn.commit()
+        return updated
     finally:
         conn.close()
 

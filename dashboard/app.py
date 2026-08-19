@@ -2432,8 +2432,13 @@ def api_barycentric_correct():
                             'source_file': sf,
                         })
             if bary_updates:
-                update_barycentric_freqs(scan_id, bary_updates)
-                bary_stats = {'bary_updated': len(bary_updates)}
+                n_updated = update_barycentric_freqs(scan_id, bary_updates)
+                bary_stats = {'bary_updated': n_updated,
+                              'bary_attempted': len(bary_updates)}
+                if n_updated < len(bary_updates):
+                    bary_stats['warning'] = (
+                        f'only {n_updated} of {len(bary_updates)} hit rows '
+                        'matched (source_file/freq key mismatch)')
                 if vel is not None:
                     update_scan_barycentric(
                         scan_id, vel, mjd_val, ra_hours, dec_deg, telescope)
