@@ -81,11 +81,37 @@
 
                 <button id="stack-run-btn" class="btn-primary btn-run" title="Start the incoherent stack job. Runs in the background. Progress is shown below.">▶ Run Stack</button>
 
-                <div id="stack-progress-wrapper" class="stack-progress-wrapper" style="display:none;">
+                <div class="stack-progress-wrapper" id="stack-progress-wrapper" style="display:none;">
                     <div class="progress-bar">
                         <div id="stack-progress-fill" class="progress-fill" style="width:0%;"></div>
                     </div>
                     <div id="stack-status-text" class="stack-status-text">Idle</div>
+                </div>
+
+                <!-- RFI Zones manager -->
+                <div class="control-group rfi-zones-group">
+                    <label title="Persistent RFI zones masked from stacks and fine-res runs. Telescope/band scopes (e.g. gbt/L) apply to every epoch from that site+band; epoch scopes (MJD) apply to one session only.">
+                        🚫 RFI Zones <span class="tooltip-icon">ⓘ</span>
+                        <span id="rfi-zone-count" class="epoch-count"></span>
+                    </label>
+                    <div id="rfi-zones-list" class="rfi-zones-list"></div>
+                    <div class="rfi-zone-add-form">
+                        <div class="control-row">
+                            <div class="control-group">
+                                <input type="text" id="rfi-zone-scope" placeholder="scope: gbt/L or 57532" title="gbt/L applies to all GBT L-band epochs; a number applies to that MJD epoch only">
+                            </div>
+                        </div>
+                        <div class="control-row">
+                            <div class="control-group">
+                                <input type="number" id="rfi-zone-fstart" placeholder="f_start MHz" step="0.001">
+                            </div>
+                            <div class="control-group">
+                                <input type="number" id="rfi-zone-fstop" placeholder="f_stop MHz" step="0.001">
+                            </div>
+                        </div>
+                        <input type="text" id="rfi-zone-reason" placeholder="reason (required)">
+                        <button id="rfi-zone-add-btn" class="btn-small">+ Add Zone</button>
+                    </div>
                 </div>
 
             </div>
@@ -295,5 +321,6 @@
 </div>
 
 <script src="/static/js/stack.js?v=45"></script>
+<script src="/static/js/rfi_zones.js?v=1"></script>
 </body>
 </html>

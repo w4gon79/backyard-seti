@@ -40,6 +40,9 @@ document.addEventListener('DOMContentLoaded', function() {
     // Event handlers
     document.getElementById('stack-run-btn').onclick = runStack;
     document.getElementById('stack-refresh-history').onclick = loadHistory;
+    var rfiAddBtn = document.getElementById('rfi-zone-add-btn');
+    if (rfiAddBtn) rfiAddBtn.onclick = addRfiZoneFromForm;
+    if (typeof loadRfiZones === 'function') loadRfiZones();
     document.getElementById('waterfall-close').onclick = closeWaterfallModal;
     document.getElementById('waterfall-modal').addEventListener('click', function(e) {
         if (e.target === this) closeWaterfallModal();

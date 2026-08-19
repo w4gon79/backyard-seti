@@ -1080,3 +1080,17 @@
     .modal-content { padding: 12px; width: 95%; max-height: 85vh; }
     #waterfall-plot { height: 280px !important; }
 }
+
+/* --- RFI Zones manager --- */
+.rfi-zones-group { margin-top: 14px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 10px; }
+.rfi-zones-list { max-height: 220px; overflow-y: auto; margin-top: 6px; }
+.rfi-zone-row { display: flex; align-items: center; gap: 6px; padding: 3px 0; font-size: 0.8em; border-bottom: 1px solid rgba(255,255,255,0.04); }
+.rfi-zone-scope { font-weight: 600; min-width: 62px; }
+.rfi-scope-band { color: #ffb74d; }
+.rfi-scope-epoch { color: #4fc3f7; }
+.rfi-zone-freq { color: #b0bec5; flex: 1; }
+.rfi-zone-del { background: none; border: none; color: #ef5350; cursor: pointer; padding: 0 4px; font-size: 1em; }
+.rfi-zone-del:hover { color: #ff8a80; }
+.rfi-zone-empty { color: #546e7a; font-size: 0.8em; padding: 6px 0; }
+.rfi-zone-add-form { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+.rfi-zone-add-form input { width: 100%; box-sizing: border-box; font-size: 0.85em; padding: 4px 6px; }

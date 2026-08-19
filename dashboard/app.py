@@ -3238,6 +3238,10 @@ def api_db_chart(scan_id):
         if on_off not in ('ON', 'OFF'):
             on_off = None
 
+        # Display frame: prefer barycentric_freq when populated so charts
+        # and tables show corrected frequencies as soon as bary correction
+        # has been imported. Falls back to observed freq automatically.
+        freq_col = 'COALESCE(barycentric_freq, freq)'
         where = 'scan_id = ? AND (rfi_zoned IS NULL OR rfi_zoned != 1)'
         params = [scan_id]
         if on_off:
@@ -3252,15 +3256,15 @@ def api_db_chart(scan_id):
         if drift_max > 0:
             where += ' AND ABS(drift_rate) <= ?'; params.append(drift_max)
         if freq_min is not None:
-            where += ' AND freq >= ?'; params.append(freq_min)
+            where += f' AND {freq_col} >= ?'; params.append(freq_min)
         if freq_max is not None:
-            where += ' AND freq <= ?'; params.append(freq_max)
+            where += f' AND {freq_col} <= ?'; params.append(freq_max)
 
         conn = sqlite3.connect(DB_PATH)
         try:
             # Band bounds from matching rows (for bin edges)
             row = conn.execute(
-                f'SELECT MIN(freq), MAX(freq), COUNT(*) FROM hits WHERE {where}',
+                f'SELECT MIN({freq_col}), MAX({freq_col}), COUNT(*) FROM hits WHERE {where}',
                 params).fetchone()
             f_lo, f_hi, total = row
             if not total:
@@ -3273,7 +3277,7 @@ def api_db_chart(scan_id):
             width = (f_hi - f_lo) / n_bins
 
             def hist(on_off):
-                q = (f'SELECT CAST((freq - ?) / ? AS INTEGER) AS b, COUNT(*) FROM hits '
+                q = (f'SELECT CAST(({freq_col} - ?) / ? AS INTEGER) AS b, COUNT(*) FROM hits '
                      f'WHERE {where} AND on_off = ? GROUP BY b')
                 out = {}
                 for b, n in conn.execute(q, [f_lo, width] + params + [on_off]):
@@ -3297,7 +3301,7 @@ def api_db_chart(scan_id):
                     params + [cls]).fetchone()[0]
                 step = max(1, cnt // 8000)
                 rows = conn.execute(
-                    f'SELECT freq, snr, drift_rate FROM hits WHERE rowid % {step} = 0 '
+                    f'SELECT {freq_col} AS freq, snr, drift_rate FROM hits WHERE rowid % {step} = 0 '
                     f'AND {where} AND on_off = ? LIMIT 8000',
                     params + [cls]).fetchall()
                 # Supplement with SNR-stratified strata: the uniform
@@ -3318,7 +3322,7 @@ def api_db_chart(scan_id):
                         continue
                     step = max(1, dcnt // 250)
                     stratum = conn.execute(
-                        f'SELECT freq, snr, drift_rate FROM hits WHERE rowid % {step} = 0 '
+                        f'SELECT {freq_col} AS freq, snr, drift_rate FROM hits WHERE rowid % {step} = 0 '
                         f'AND {where} AND on_off = ? AND snr >= ? AND snr < ? LIMIT 250',
                         params + [cls, d_lo, d_hi]).fetchall()
                     for t in stratum:
@@ -3328,10 +3332,16 @@ def api_db_chart(scan_id):
                 scatter[cls] = {'freq': [r[0] for r in merged],
                                 'snr': [r[1] for r in merged],
                                 'drift': [r[2] if r[2] is not None else 0 for r in merged]}
+
+            bary_row = conn.execute(
+                'SELECT bary_corrected FROM scans WHERE scan_id = ?',
+                (scan_id,)).fetchone()
+            bary_corrected = bool(bary_row[0]) if bary_row else False
         finally:
             conn.close()
 
         return jsonify({'total': total, 'f_lo': f_lo, 'f_hi': f_hi,
+                        'bary_corrected': bary_corrected,
                         'bin_width': round(width, 5), 'bins': bins,
                         'on': scatter['ON'], 'off': scatter['OFF']})
     except Exception as e:
@@ -4360,6 +4370,65 @@ def api_stack_delete(job_id):
     return jsonify({'success': True, 'job_id': job_id})
 
 
+# ─── API: RFI Zone Management ────────────────────────────────────────
+
+@app.route('/api/rfi/zones')
+def api_rfi_zones_list():
+    """All zones: {scope_key: [{f_start, f_stop, reason}], ...}."""
+    try:
+        import rfi_zones
+        return jsonify({'zones': rfi_zones.all_zones()})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/rfi/zones', methods=['POST'])
+def api_rfi_zones_add():
+    """Add a zone. Body: {scope, f_start, f_stop, reason}.
+
+    scope is either an epoch label ('57532') or 'telescope/band' ('gbt/L').
+    """
+    try:
+        import rfi_zones
+        data = request.get_json(force=True)
+        scope = str(data.get('scope', '')).strip()
+        f_start = float(data.get('f_start'))
+        f_stop = float(data.get('f_stop'))
+        reason = str(data.get('reason', '')).strip()
+        if not scope:
+            return jsonify({'error': 'scope required (epoch label or tel/band)'}), 400
+        if f_start > f_stop:
+            f_start, f_stop = f_stop, f_start
+        if f_stop - f_start <= 0:
+            return jsonify({'error': 'zero-width zone'}), 400
+        if not reason:
+            return jsonify({'error': 'reason required'}), 400
+        zones = rfi_zones.add_zone(scope, f_start, f_stop, reason)
+        return jsonify({'ok': True, 'scope': scope, 'zones': zones})
+    except (TypeError, ValueError) as e:
+        return jsonify({'error': f'bad values: {e}'}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/rfi/zones', methods=['DELETE'])
+def api_rfi_zones_delete():
+    """Delete a zone. Query: ?scope=gbt/L&f_start=1918.0&f_stop=1925.0."""
+    try:
+        import rfi_zones
+        scope = request.args.get('scope', '')
+        f_start = float(request.args.get('f_start'))
+        f_stop = float(request.args.get('f_stop'))
+        if not scope:
+            return jsonify({'error': 'scope required'}), 400
+        zones = rfi_zones.delete_zone(scope, f_start, f_stop)
+        return jsonify({'ok': True, 'scope': scope, 'zones': zones})
+    except (TypeError, ValueError) as e:
+        return jsonify({'error': f'bad values: {e}'}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/stack/history')
 def api_stack_history():
     """List past stack jobs from SQLite."""
@@ -4444,16 +4513,36 @@ def api_stack_classify(job_id):
         # RFI zones for this job's epochs (observed frame).
         # Stack peak freqs are near-observed frame (zones masked pre-bary),
         # so direct comparison with a small tolerance is acceptable.
+        # Scope: per-epoch + telescope/band zones (e.g. gbt/L). The
+        # telescope/band comes from the job's first GBT source file, or
+        # falls back to parkes/<epoch> for legacy Parkes jobs.
         epoch_zone_list = []
         if rfi_zones is not None:
             try:
                 ep_info = json.loads(row['epoch_info_json'] or '[]')
             except (ValueError, TypeError):
                 ep_info = []
+            # Derive telescope/band once from this target's actual
+            # source files (via scans -> hits), most reliable signal.
+            _tel = _band = None
+            if scan_ids:
+                _sfrow = conn.execute(
+                    'SELECT source_file FROM hits WHERE scan_id = ? '
+                    'AND source_file IS NOT NULL LIMIT 1',
+                    (scan_ids[0],)).fetchone()
+                _sf = _sfrow[0] if _sfrow else None
+                if _sf:
+                    _tel, _band = rfi_zones.telescope_band_for_source_file(_sf)
+                    if _tel == 'parkes' and _sf.startswith('Parkes_'):
+                        _band = _sf.split('_')[1]
             for ep in ep_info:
                 label = str(ep.get('label', '')) if isinstance(ep, dict) else str(ep)
                 if label:
-                    epoch_zone_list.extend(rfi_zones.epoch_zones(label))
+                    epoch_zone_list.extend(
+                        rfi_zones.zones_for(label, _tel, _band))
+            if not epoch_zone_list and _tel and _band:
+                # No epoch entries at all: still apply band zones
+                epoch_zone_list = rfi_zones.band_zones(_tel, _band)
 
         # Classify each peak
         classifications = []
@@ -4477,7 +4566,7 @@ def api_stack_classify(job_id):
                 off_row = conn.execute(
                     f"SELECT COUNT(*) as cnt, MAX(snr) as max_snr FROM hits "
                     f"WHERE scan_id IN ({placeholders}) AND on_off = 'OFF' "
-                    f"AND barycentric_freq BETWEEN ? AND ?",
+                    f"AND COALESCE(barycentric_freq, freq) BETWEEN ? AND ?",
                     scan_ids + [freq - off_tol_mhz, freq + off_tol_mhz]
                 ).fetchone()
                 off_count = off_row['cnt'] if off_row else 0
@@ -4490,7 +4579,7 @@ def api_stack_classify(job_id):
                 presence_row = conn.execute(
                     f"SELECT COUNT(DISTINCT scan_id) as cnt FROM hits "
                     f"WHERE scan_id IN ({placeholders}) AND on_off = 'ON' "
-                    f"AND barycentric_freq BETWEEN ? AND ?",
+                    f"AND COALESCE(barycentric_freq, freq) BETWEEN ? AND ?",
                     scan_ids + [freq - on_tol_mhz, freq + on_tol_mhz]
                 ).fetchone()
                 epoch_presence = presence_row['cnt'] if presence_row else 0

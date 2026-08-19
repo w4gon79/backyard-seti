@@ -528,9 +528,15 @@ def process_epoch(epoch_label, epoch_info, target_ra, target_dec,
     
     interpolated = np.interp(common_grid, bary_freqs_sorted, avg_residual_sorted).astype(np.float32)
 
-    # Per-epoch RFI zones (observed frame) mapped through this epoch's
+    # RFI zones (observed frame) mapped through this epoch's
     # barycentric correction. Masked bins vote NaN in nanmean downstream.
-    _zones = rfi_zones.epoch_zones(epoch_label) if rfi_zones is not None else []
+    # Scope: per-epoch zones PLUS telescope+band zones (e.g. gbt/L),
+    # derived from the source filename.
+    _tel, _band = rfi_zones.telescope_band_for_source_file(
+        epoch_info.get('gbt_pairs', [[first_on]])[0][0]
+        if is_gbt else first_on)
+    _zones = (rfi_zones.zones_for(epoch_label, _tel, _band)
+              if rfi_zones is not None else [])
     if _zones:
         _m = np.zeros(len(common_grid), dtype=bool)
         for _z in _zones:

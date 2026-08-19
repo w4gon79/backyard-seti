@@ -258,7 +258,7 @@ def update_scan_barycentric(scan_id, velocity, mjd, ra_hours, dec_deg, telescope
 # ─── Hit Operations ──────────────────────────────────────────────────
 
 def _hit_zoned(h):
-    """1 if this hit's frequency falls inside a per-epoch RFI zone."""
+    """1 if this hit's frequency falls inside an RFI zone (epoch + band)."""
     try:
         import sys
         try:
@@ -269,10 +269,14 @@ def _hit_zoned(h):
             import rfi_zones
         sf = h.get('source_file', h.get('file', '')) or ''
         parts = os.path.basename(str(sf)).split('_')
-        if len(parts) > 1 and parts[0] == 'Parkes':
-            f = h.get('freq')
-            if f is not None:
-                return 1 if rfi_zones.in_zone(float(f), parts[1]) else 0
+        tel, band = rfi_zones.telescope_band_for_source_file(sf)
+        if tel == 'parkes':
+            tel, band = 'parkes', parts[1] if len(parts) > 1 else None
+        f = h.get('freq')
+        if f is not None and (tel or len(parts) > 1):
+            ep = parts[1] if (tel == 'parkes' and len(parts) > 1) else parts[2] if '_guppi_' in str(sf) else None
+            if ep:
+                return 1 if rfi_zones.in_zone(float(f), ep, tel, band) else 0
     except Exception:
         pass
     return 0

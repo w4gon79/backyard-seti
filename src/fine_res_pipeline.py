@@ -282,11 +282,16 @@ def process_file(filepath, out_dir, sub_band_chans=8192, overlap_chans=512,
     for i, (f_start, f_stop, ch_start, ch_stop) in enumerate(sub_bands):
         if i < start_sub_band:
             continue
-        # Skip sub-bands fully covered by per-epoch RFI zones
+        # Skip sub-bands fully covered by RFI zones (epoch + telescope/band)
         if rfi_zones is not None:
             try:
-                _ep = os.path.basename(filepath).split('_')[1]
-                if rfi_zones.coverage_fraction(f_start, f_stop, _ep) >= 0.99:
+                _base = os.path.basename(filepath)
+                _parts = _base.split('_')
+                _ep = _parts[1]
+                _tel, _band = rfi_zones.telescope_band_for_source_file(_base)
+                if _tel == 'parkes':
+                    _band = _ep if len(_parts) > 1 else None
+                if rfi_zones.coverage_fraction(f_start, f_stop, _ep, _tel, _band) >= 0.99:
                     if verbose:
                         print(f"\n  [{i+1}/{len(sub_bands)}] {f_start:.4f}-{f_stop:.4f} "
                               f"MHz: RFI zone, skipped")
