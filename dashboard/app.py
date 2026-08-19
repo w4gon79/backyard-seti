@@ -3407,8 +3407,13 @@ def api_stack_epochs():
     for label, info in sorted(epochs.items()):
         scan = scan_by_mjd.get(info['mjd_int'])
         seqs = info.get('seqs') or []
-        first_on = (f"Parkes_{label}_{seqs[0][0]}_{target}_S_fine.h5"
-                    if seqs else None)
+        gbt_pairs = info.get('gbt_pairs') or []
+        if gbt_pairs:
+            # GBT: pairs are (on_fname, off_fname) - use real names
+            first_on = gbt_pairs[0][0]
+        else:
+            first_on = (f"Parkes_{label}_{seqs[0][0]}_{target}_S_fine.h5"
+                        if seqs else None)
         result.append({
             'label': label,
             'mjd_int': info['mjd_int'],
@@ -4553,7 +4558,8 @@ def api_stack_stacked_waterfall(job_id):
     # Get epoch definitions and coordinates
     sys.path.insert(0, SETI_ROOT)
     sys.path.insert(0, os.path.join(SETI_ROOT, 'src'))
-    from incoherent_stack import EPOCHS, find_h5
+    from incoherent_stack import find_h5, get_available_epochs
+    epochs_map = get_available_epochs(target)
     from barycentric_correct import (compute_barycentric_velocity,
                                      extract_mjd_from_filename,
                                      resolve_target_coords)
@@ -4577,24 +4583,31 @@ def api_stack_stacked_waterfall(job_id):
     tsamp = 18.25
 
     for ep_label in epochs:
-        ep_def = EPOCHS.get(ep_label)
+        ep_def = epochs_map.get(ep_label)
         if not ep_def:
             continue
 
         mjd_int = ep_def['mjd_int']
-        seqs = ep_def['seqs']
 
-        # Barycentric correction for this epoch
-        first_on = f"Parkes_{mjd_int}_{seqs[0][0]}_{target}_S_fine.h5"
-        mjd = extract_mjd_from_filename(first_on)
-        v_bary = compute_barycentric_velocity(mjd, target_ra, target_dec, 'parkes')
+        # GBT epochs carry real (on_fname, off_fname) pairs; Parkes epochs
+        # carry (on_seq, off_seq) built into Parkes filenames. Telescope
+        # must match for the barycentric correction (gbt vs parkes).
+        gbt_pairs = ep_def.get('gbt_pairs')
+        if gbt_pairs:
+            on_file, off_file = gbt_pairs[0]
+            mjd = extract_mjd_from_filename(on_file)
+            v_bary = compute_barycentric_velocity(mjd, target_ra, target_dec, 'gbt')
+        else:
+            seqs = ep_def['seqs']
+            on_seq, off_seq = seqs[0]
+            on_file = f"Parkes_{mjd_int}_{on_seq}_{target}_S_fine.h5"
+            off_file = f"Parkes_{mjd_int}_{off_seq}_{target}_R_fine.h5"
+            mjd = extract_mjd_from_filename(on_file)
+            v_bary = compute_barycentric_velocity(mjd, target_ra, target_dec, 'parkes')
         c = 299792458.0
         corr = 1.0 - v_bary / c
 
         # Load ON and OFF using the efficient hdf5_reader
-        on_seq, off_seq = seqs[0]
-        on_file = f"Parkes_{mjd_int}_{on_seq}_{target}_S_fine.h5"
-        off_file = f"Parkes_{mjd_int}_{off_seq}_{target}_R_fine.h5"
         on_path = find_h5(on_file)
         off_path = find_h5(off_file)
         if not on_path or not off_path:
