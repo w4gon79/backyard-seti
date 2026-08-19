@@ -1701,7 +1701,9 @@ function chartFilterParams() {
     var driftMax = parseFloat(document.getElementById('results-drift-max').value);
     var freqMin = parseFloat(document.getElementById('results-freq-min').value);
     var freqMax = parseFloat(document.getElementById('results-freq-max').value);
+    var filter = document.getElementById('results-filter').value;
     var p = new URLSearchParams();
+    if (filter === 'on' || filter === 'off') p.set('on_off', filter.toUpperCase());
     if (!isNaN(snrMin) && snrMin > 0) p.set('min_snr', snrMin);
     if (!isNaN(snrMax) && snrMax > 0) p.set('max_snr', snrMax);
     if (!isNaN(driftMin) && driftMin > 0) p.set('drift_min', driftMin);

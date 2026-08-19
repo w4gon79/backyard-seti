@@ -3234,9 +3234,15 @@ def api_db_chart(scan_id):
         drift_max = request.args.get('drift_max', default=0, type=float)
         freq_min = request.args.get('freq_min', default=None, type=float)
         freq_max = request.args.get('freq_max', default=None, type=float)
+        on_off = request.args.get('on_off', default=None, type=str)
+        if on_off not in ('ON', 'OFF'):
+            on_off = None
 
         where = 'scan_id = ? AND (rfi_zoned IS NULL OR rfi_zoned != 1)'
         params = [scan_id]
+        if on_off:
+            where += ' AND on_off = ?'
+            params.append(on_off)
         if min_snr > 0:
             where += ' AND snr >= ?'; params.append(min_snr)
         if max_snr > 0:
