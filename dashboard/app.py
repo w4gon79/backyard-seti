@@ -4280,11 +4280,15 @@ def api_stack_classify(job_id):
     """
     try:
         from db import get_db
+        try:
+            import rfi_zones
+        except ImportError:
+            rfi_zones = None
         conn = get_db()
 
-        # Load the stack job's peaks
+        # Load the stack job's peaks AND epoch labels (for RFI zone lookup)
         row = conn.execute(
-            'SELECT peaks_json, target FROM stack_jobs WHERE job_id = ?', (job_id,)
+            'SELECT peaks_json, target, epoch_info_json FROM stack_jobs WHERE job_id = ?', (job_id,)
         ).fetchone()
         if not row:
             conn.close()
@@ -4310,11 +4314,33 @@ def api_stack_classify(job_id):
         off_tol_mhz = 0.01
         on_tol_mhz = 0.005
 
+        # RFI zones for this job's epochs (observed frame).
+        # Stack peak freqs are near-observed frame (zones masked pre-bary),
+        # so direct comparison with a small tolerance is acceptable.
+        epoch_zone_list = []
+        if rfi_zones is not None:
+            try:
+                ep_info = json.loads(row['epoch_info_json'] or '[]')
+            except (ValueError, TypeError):
+                ep_info = []
+            for ep in ep_info:
+                label = str(ep.get('label', '')) if isinstance(ep, dict) else str(ep)
+                if label:
+                    epoch_zone_list.extend(rfi_zones.epoch_zones(label))
+
         # Classify each peak
         classifications = []
         for p in peaks:
             freq = p.get('freq_mhz', 0)
             width = p.get('width_chans', 0)
+
+            # RFI zone check FIRST: any peak inside a zoned window is RFI,
+            # regardless of other scoring.
+            zoned_reason = None
+            for z in epoch_zone_list:
+                if z.get('f_start', 1e9) - 0.05 <= freq <= z.get('f_stop', -1e9) + 0.05:
+                    zoned_reason = f"RFI zone {z.get('f_start')}-{z.get('f_stop')} MHz"
+                    break
 
             # Check OFF contamination: count OFF hits within ±off_tol
             off_count = 0
@@ -4392,7 +4418,10 @@ def api_stack_classify(job_id):
             off_control_veto = bool(p.get('off_control_veto'))
 
             # Assign class
-            if off_control_veto:
+            if zoned_reason:
+                cls = 'rfi'
+                reasons.append(zoned_reason)
+            elif off_control_veto:
                 cls = 'rfi'
                 reasons.append('OFF-control veto: in companion-only stack '
                                f"(SNR {p.get('off_control_snr', '?')})")
