@@ -18,7 +18,7 @@ from datetime import datetime
 # GBT grammar: (spliced_)blcNN_guppi_MJD_SEQ_TARGET_SCAN.PRODUCT.TIER.h5
 _GBT_FNAME_PAT = re.compile(
     r'(?:spliced_)?blc\d+_guppi_(\d+)_(\d+)_([A-Za-z0-9+\-.]+?)_(\d+)'
-    r'\.(rawspec|gpuspec)\.(\d+)\.h5$')
+    r'(?:\.rawspec|\.gpuspec)\.(\d+)(\.h5)?$', re.IGNORECASE)
 
 # Database path
 SETI_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -750,10 +750,30 @@ def import_scan_from_json(scan_dir, db_path=None):
     # Check for combined_corrected.json (has all hits + barycentric data)
     combined_path = os.path.join(scan_dir, 'barycentric', 'combined_corrected.json')
     if os.path.isfile(combined_path):
-        # Import from combined (has barycentric data already)
+        # Import from combined (has barycentric data already).
+        # Apply the same GBT ABACAD classification as the per-file branch:
+        # the corrected JSONs carry no on_off field, so without this the
+        # whole scan imports as OFF.
         with open(combined_path) as f:
             combined = json.load(f)
         hits = combined.get('hits', [])
+        scan_target_upper = str(meta.get('target', '')).upper()
+        _on_cnt = 0
+        for h in hits:
+            sf = h.get('file', h.get('source_file', '')) or ''
+            if '_S_' in sf:
+                h['on_off'] = 'ON'
+            elif '_R_' in sf:
+                h['on_off'] = 'OFF'
+            elif 'guppi_' in sf:
+                _m = _GBT_FNAME_PAT.search(os.path.basename(sf))
+                _tok = _m.group(3).upper() if _m else ''
+                h['on_off'] = 'ON' if (_tok and _tok == scan_target_upper) else 'OFF'
+            else:
+                h['on_off'] = 'OFF'
+            if h['on_off'] == 'ON':
+                _on_cnt += 1
+            h['source_file'] = sf
         bulk_insert_hits(scan_id, hits, db_path)
 
         # Update scan barycentric info
