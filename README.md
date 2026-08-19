@@ -195,6 +195,45 @@ resolves to the same place as GJ447.
    The one Parkes-only step: **Epoch Audit** (it derives its noise floor
    from blank-sky ON/OFF residuals; skip it for GBT).
 
+## RFI Zones
+
+Persistent, known-bad frequency ranges that the pipeline masks automatically.
+Zones live in `data/rfi_zones.json` and come in two scopes:
+
+- **Telescope/band zones** (e.g. `gbt/L`) - persistent site emitters that
+  appear in EVERY epoch from that telescope and band (radar, satellite
+  downlinks, instrument birdies like the UPCS emitter at 1921.4 MHz).
+  Write once, protected forever.
+- **Epoch zones** (e.g. `57532`, an MJD) - junk specific to one observing
+  session, like a one-off gain plateau.
+
+Every consumer honors both scopes automatically: the incoherent stack masks
+zoned bins (they vote NaN), the fine-res pipeline skips fully-zoned
+sub-bands, DB import flags hits inside zones (`rfi_zoned=1`), and stack
+peak classification demotes zoned peaks to RFI before scoring. The scope
+is derived from the source filename (the blc node digits in GBT filenames
+encode the band), so nothing needs to be set per run.
+
+**Managing zones (Stack page):** the RFI Zones panel on the left of
+`/stack` lists every zone with its scope color-coded (orange =
+telelescope/band, blue = single epoch; hover a row for its reason).
+Add zones with the form (scope + frequency range + reason, all required),
+delete with the ✕ button.
+
+**Click-drag zoning:** on any rendered stack plot, drag a box across the
+frequency range you want zoned. A dialog appears with the range prefilled;
+pick a scope (band scopes plus the currently loaded epochs), type a reason,
+click **+ Zone It**. Exit box-select mode via the modebar's zoom/pan icons
+or double-click the plot.
+
+**Automatic zoning (Parkes only):** the Epoch Audit (see Track A step 2)
+auto-writes epoch zones for unambiguous ON/OFF excursions. GBT epochs rely
+on manual zones and the telescope/band layer.
+
+Note: stack-plot frequencies are barycentric while zones apply in the
+observed frame; the difference (~150 kHz at typical GBT velocities) is
+negligible for narrow zones.
+
 ### Shared finishing steps (both tracks)
 
 4. **Barycentric correction.** In the Barycentric panel pick the target
@@ -337,7 +376,12 @@ check staging, the per-target archive, and the legacy flat dir automatically.
 The Flask dashboard at `http://localhost:8070` provides:
 
 - **Main page** (`/`) - Sky map, target search, scan controls, hit browser with
-  waterfall inspection, ON/OFF rejection, barycentric correction, cross-epoch search
+  waterfall inspection, ON/OFF rejection, barycentric correction, cross-epoch search.
+  The Results panel charts hits (ON/OFF/Candidates filter, Max SNR cap for monster
+  RFI, drift rate in hover) and shows a green **BARY-CORRECTED** badge when the
+  selected scan's frequencies are in the barycentric frame (observed frame otherwise).
+  See the Barycentric Corrected tab for the per-hit observed-vs-bary frequency
+  comparison table with deltas.
 - **Target Search + GBT Sessions** (main page) - Exact-match search of the BL
   archive: prefix hits from other targets are hidden automatically (see "The
   prefix-match trap"). Parkes files download per file with ON/OFF visible in the
@@ -350,7 +394,8 @@ The Flask dashboard at `http://localhost:8070` provides:
 - **Incoherent Stack** (`/stack`) - Phase 2C power spectrum stacking with
   frequency window selection, epoch multi-select, background job runner, progress
   tracking, peak detection table, and waterfall follow-up. Registry-driven target
-  selection; epochs show cadence validation + scan status.
+  selection; epochs show cadence validation + scan status. Includes the RFI Zones
+  manager panel and click-drag zoning on the stack plot (see **RFI Zones** above).
 - **Target Registry + BL Catalog** (main page) - Add targets (SIMBAD-resolved,
   BL availability checked via variant/cross-ID cascade), browse every BL target's
   fine-res availability (one-time background sweep, cached in `bl_catalog`),
