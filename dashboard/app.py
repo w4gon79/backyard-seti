@@ -3188,6 +3188,7 @@ def api_db_hits(scan_id):
     try:
         from db import get_hits, count_hits
         min_snr = request.args.get('min_snr', default=0, type=float)
+        max_snr = request.args.get('max_snr', default=0, type=float)
         on_off = request.args.get('on_off', default=None, type=str)
         if on_off and on_off not in ('ON', 'OFF'):
             on_off = None
@@ -3195,9 +3196,9 @@ def api_db_hits(scan_id):
         offset = request.args.get('offset', default=0, type=int)
         order = request.args.get('order', default='snr DESC', type=str)
 
-        hits = get_hits(scan_id, min_snr=min_snr, on_off=on_off,
+        hits = get_hits(scan_id, min_snr=min_snr, max_snr=max_snr, on_off=on_off,
                         limit=limit, offset=offset, order_by=order)
-        total = count_hits(scan_id, min_snr=min_snr, on_off=on_off)
+        total = count_hits(scan_id, min_snr=min_snr, max_snr=max_snr, on_off=on_off)
 
         return jsonify({
             'scan_id': scan_id,
@@ -3207,6 +3208,100 @@ def api_db_hits(scan_id):
             'offset': offset,
             'count': len(hits),
         })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/db/scans/<scan_id>/chart')
+def api_db_chart(scan_id):
+    """Full-density chart data: histogram + stratified scatter sample.
+
+    Unlike the paginated hits endpoint (top-N by SNR), this returns data
+    representative of ALL hits matching the filters:
+      - histogram: SQL-aggregated counts per frequency bin, ON and OFF
+      - scatter: every-Nth-row sample (freq-stratified), capped
+    Filters: min_snr, max_snr, drift_min, drift_max (abs Hz/s),
+    freq_min, freq_max (MHz), on_off.
+    """
+    if not re.match(r'^[A-Za-z0-9_-]+$', scan_id):
+        return jsonify({'error': 'Invalid scan_id'}), 400
+    try:
+        import sqlite3
+        from db import DB_PATH
+        min_snr = request.args.get('min_snr', default=0, type=float)
+        max_snr = request.args.get('max_snr', default=0, type=float)
+        drift_min = request.args.get('drift_min', default=0, type=float)
+        drift_max = request.args.get('drift_max', default=0, type=float)
+        freq_min = request.args.get('freq_min', default=None, type=float)
+        freq_max = request.args.get('freq_max', default=None, type=float)
+
+        where = 'scan_id = ? AND (rfi_zoned IS NULL OR rfi_zoned != 1)'
+        params = [scan_id]
+        if min_snr > 0:
+            where += ' AND snr >= ?'; params.append(min_snr)
+        if max_snr > 0:
+            where += ' AND snr <= ?'; params.append(max_snr)
+        if drift_min > 0:
+            where += ' AND ABS(drift_rate) >= ?'; params.append(drift_min)
+        if drift_max > 0:
+            where += ' AND ABS(drift_rate) <= ?'; params.append(drift_max)
+        if freq_min is not None:
+            where += ' AND freq >= ?'; params.append(freq_min)
+        if freq_max is not None:
+            where += ' AND freq <= ?'; params.append(freq_max)
+
+        conn = sqlite3.connect(DB_PATH)
+        try:
+            # Band bounds from matching rows (for bin edges)
+            row = conn.execute(
+                f'SELECT MIN(freq), MAX(freq), COUNT(*) FROM hits WHERE {where}',
+                params).fetchone()
+            f_lo, f_hi, total = row
+            if not total:
+                return jsonify({'total': 0, 'bins': [], 'on': {'freq': [], 'snr': []},
+                                'off': {'freq': [], 'snr': []}})
+            f_lo, f_hi = float(f_lo), float(f_hi)
+            if f_hi <= f_lo:
+                f_hi = f_lo + 1.0
+            n_bins = 400
+            width = (f_hi - f_lo) / n_bins
+
+            def hist(on_off):
+                q = (f'SELECT CAST((freq - ?) / ? AS INTEGER) AS b, COUNT(*) FROM hits '
+                     f'WHERE {where} AND on_off = ? GROUP BY b')
+                out = {}
+                for b, n in conn.execute(q, [f_lo, width] + params + [on_off]):
+                    out[b] = n
+                return out
+
+            hist_on, hist_off = hist('ON'), hist('OFF')
+            bins = []
+            for i in range(n_bins):
+                c_on = hist_on.get(i, 0)
+                c_off = hist_off.get(i, 0)
+                if c_on or c_off:
+                    bins.append({'c': round(f_lo + (i + 0.5) * width, 4),
+                                 'on': c_on, 'off': c_off})
+
+            # Stratified scatter: every Nth rowid, capped at 8k per class
+            scatter = {}
+            for cls in ('ON', 'OFF'):
+                cnt = conn.execute(
+                    f'SELECT COUNT(*) FROM hits WHERE {where} AND on_off = ?',
+                    params + [cls]).fetchone()[0]
+                step = max(1, cnt // 8000)
+                rows = conn.execute(
+                    f'SELECT freq, snr FROM hits WHERE rowid % {step} = 0 '
+                    f'AND {where} AND on_off = ? LIMIT 8000',
+                    params + [cls]).fetchall()
+                scatter[cls] = {'freq': [r[0] for r in rows],
+                                'snr': [r[1] for r in rows]}
+        finally:
+            conn.close()
+
+        return jsonify({'total': total, 'f_lo': f_lo, 'f_hi': f_hi,
+                        'bin_width': round(width, 5), 'bins': bins,
+                        'on': scatter['ON'], 'off': scatter['OFF']})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

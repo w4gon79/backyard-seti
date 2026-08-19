@@ -79,6 +79,7 @@ document.getElementById('btn-archive-scan').onclick = archiveCurrentScan;
         _filterDebounce = setTimeout(applyFilters, 300);
     }
     document.getElementById('results-snr-min').oninput = debouncedFilter;
+        document.getElementById('results-snr-max').oninput = debouncedFilter;
     document.getElementById('results-drift-min').oninput = debouncedFilter;
     document.getElementById('results-drift-max').oninput = debouncedFilter;
     document.getElementById('results-freq-min').oninput = debouncedFilter;
@@ -1499,7 +1500,7 @@ async function loadScanResults(scanId) {
         }
         
         renderHitTable();
-        renderHitChart();
+        loadChartData(true);
         renderHitsPagination();
     } catch(e) {
         console.error('Error loading scan results:', e);
@@ -1642,13 +1643,14 @@ async function loadResults() {
 function getFilteredHits() {
     var filter = document.getElementById('results-filter').value;
     var snrMin = parseFloat(document.getElementById('results-snr-min').value);
+    var snrMax = parseFloat(document.getElementById('results-snr-max').value);
     var driftMin = parseFloat(document.getElementById('results-drift-min').value);
     var driftMax = parseFloat(document.getElementById('results-drift-max').value);
     var freqMin = parseFloat(document.getElementById('results-freq-min').value);
     var freqMax = parseFloat(document.getElementById('results-freq-max').value);
 
     // Fix 6: Build cache key from filter params + sort + data source. Only re-sort if changed.
-    var cacheKey = filter + '|' + snrMin + '|' + driftMin + '|' + driftMax + '|' + freqMin + '|' + freqMax + '|' + resultsSort.col + '|' + resultsSort.dir + '|' + allHits.length + '|' + rejectionCandidates.length;
+    var cacheKey = filter + '|' + snrMin + '|' + snrMax + '|' + driftMin + '|' + driftMax + '|' + freqMin + '|' + freqMax + '|' + resultsSort.col + '|' + resultsSort.dir + '|' + allHits.length + '|' + rejectionCandidates.length;
     if (window._filteredHitsCache && window._filteredHitsCacheKey === cacheKey) {
         return window._filteredHitsCache;
     }
@@ -1659,6 +1661,7 @@ function getFilteredHits() {
     else if (filter === 'candidates') hits = rejectionCandidates.slice();
 
     if (!isNaN(snrMin)) hits = hits.filter(function(h) { return (h.snr || 0) >= snrMin; });
+    if (!isNaN(snrMax)) hits = hits.filter(function(h) { return (h.snr || 0) <= snrMax; });
     if (!isNaN(driftMin)) hits = hits.filter(function(h) { return Math.abs(h.drift_rate || 0) >= driftMin; });
     if (!isNaN(driftMax)) hits = hits.filter(function(h) { return Math.abs(h.drift_rate || 0) <= driftMax; });
     if (!isNaN(freqMin)) hits = hits.filter(function(h) { return (h.freq || 0) >= freqMin; });
@@ -1684,7 +1687,45 @@ function getFilteredHits() {
 function applyFilters() {
     resultsPage = 0;
     renderHitTable();
-    renderHitChart();
+    loadChartData(true);
+}
+
+// Full-density chart data: fetches histogram + stratified sample from the
+// chart endpoint covering ALL hits (not just the top-500 table page).
+var chartData = null;
+var _chartReq = 0;
+function chartFilterParams() {
+    var snrMin = parseFloat(document.getElementById('results-snr-min').value);
+    var snrMax = parseFloat(document.getElementById('results-snr-max').value);
+    var driftMin = parseFloat(document.getElementById('results-drift-min').value);
+    var driftMax = parseFloat(document.getElementById('results-drift-max').value);
+    var freqMin = parseFloat(document.getElementById('results-freq-min').value);
+    var freqMax = parseFloat(document.getElementById('results-freq-max').value);
+    var p = new URLSearchParams();
+    if (!isNaN(snrMin) && snrMin > 0) p.set('min_snr', snrMin);
+    if (!isNaN(snrMax) && snrMax > 0) p.set('max_snr', snrMax);
+    if (!isNaN(driftMin) && driftMin > 0) p.set('drift_min', driftMin);
+    if (!isNaN(driftMax) && driftMax > 0) p.set('drift_max', driftMax);
+    if (!isNaN(freqMin)) p.set('freq_min', freqMin);
+    if (!isNaN(freqMax)) p.set('freq_max', freqMax);
+    return p.toString();
+}
+async function loadChartData(immediate) {
+    if (!currentScanId || !allHitsScanId) { chartData = null; renderHitChart(); return; }
+    clearTimeout(window._chartDebounce);
+    var run = function() {
+        var reqId = ++_chartReq;
+        fetch('/api/db/scans/' + encodeURIComponent(currentScanId) + '/chart?' + chartFilterParams())
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                if (reqId !== _chartReq) return;  // stale response
+                chartData = (d && !d.error) ? d : null;
+                renderHitChart();
+            })
+            .catch(function() { chartData = null; renderHitChart(); });
+    };
+    if (immediate) run();
+    else window._chartDebounce = setTimeout(run, 300);
 }
 
 function toggleSort(col) {
@@ -1763,6 +1804,52 @@ function renderHitChart() {
     var chartDiv = document.getElementById('hit-chart');
     // Always clear previous content (including stale empty-state messages)
     chartDiv.innerHTML = '';
+
+    // Full-density path: histogram (all hits) + stratified scatter from
+    // the chart endpoint. Falls back to the table-page scatter below when
+    // unavailable (legacy scan mode / endpoint error).
+    if (chartData && currentScanId) {
+        var traces = [];
+        if (chartData.bins && chartData.bins.length) {
+            var bx = [], bon = [], boff = [], bany = [];
+            for (var i = 0; i < chartData.bins.length; i++) {
+                var b = chartData.bins[i];
+                bx.push(b.c); bon.push(b.on); boff.push(b.off); bany.push(b.on || b.off);
+            }
+            traces.push({ x: bx, y: bon, mode: 'lines', type: 'scatter', name: 'ON density',
+                line: { color: 'rgba(102,187,106,0.35)', width: 1, shape: 'hvh' },
+                hovertemplate: '%{x:.2f} MHz<br>ON hits/bin: %{y}<extra></extra>', yaxis: 'y2' });
+            traces.push({ x: bx, y: boff, mode: 'lines', type: 'scatter', name: 'OFF density',
+                line: { color: 'rgba(239,83,80,0.35)', width: 1, shape: 'hvh' },
+                hovertemplate: '%{x:.2f} MHz<br>OFF hits/bin: %{y}<extra></extra>', yaxis: 'y2' });
+        }
+        function addScatter(cls, color, name) {
+            var s = chartData[cls.toLowerCase()];
+            if (s && s.freq && s.freq.length) {
+                traces.push({ x: s.freq, y: s.snr, mode: 'markers', type: 'scatter',
+                    name: name + ' (sample)', marker: { color: color, size: 4, opacity: 0.45 },
+                    hovertemplate: '%{x:.6f} MHz<br>SNR: %{y:.1f}<extra></extra>' });
+            }
+        }
+        addScatter('ON', '#66bb6a', 'ON');
+        addScatter('OFF', '#ef5350', 'OFF');
+        if (traces.length === 0) {
+            chartDiv.innerHTML = '<p style="text-align:center;color:#546e7a;padding:40px;">No hits match the current filter.</p>';
+            return;
+        }
+        Plotly.newPlot(chartDiv, traces, {
+            paper_bgcolor: 'transparent', plot_bgcolor: '#0a0a1a',
+            font: { color: '#c8c8e0', size: 11 },
+            xaxis: { title: 'Frequency (MHz)', gridcolor: '#1e3a5f' },
+            yaxis: { title: 'SNR', gridcolor: '#1e3a5f', type: 'log' },
+            yaxis2: { title: 'Hits/bin', overlaying: 'y', side: 'right',
+                gridcolor: 'rgba(30,58,95,0.3)', showgrid: false },
+            margin: { l: 50, r: 55, t: 10, b: 40 }, height: 250,
+            legend: { orientation: 'h', y: 1.12 },
+        }, { displayModeBar: false, responsive: true });
+        return;
+    }
+
     if (allHits.length === 0) {
         chartDiv.innerHTML = '<p style="text-align:center;color:#546e7a;padding:40px;">No hits to plot yet.</p>';
         return;

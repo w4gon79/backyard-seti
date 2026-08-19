@@ -337,11 +337,12 @@ def update_barycentric_freqs(scan_id, hit_updates, db_path=None):
         conn.close()
 
 
-def get_hits(scan_id, min_snr=0, on_off=None, limit=100, offset=0,
+def get_hits(scan_id, min_snr=0, max_snr=0, on_off=None, limit=100, offset=0,
              order_by='snr DESC', include_zoned=False, db_path=None):
     """Query hits with optional filters. Returns list of dicts.
     
     include_zoned=False (default) hides hits flagged rfi_zoned=1 from review.
+    max_snr>0 caps SNR (exclude monster RFI blips from charts/tables).
     """
     conn = get_db(db_path)
     try:
@@ -352,6 +353,9 @@ def get_hits(scan_id, min_snr=0, on_off=None, limit=100, offset=0,
         if min_snr > 0:
             query += ' AND snr >= ?'
             params.append(min_snr)
+        if max_snr > 0:
+            query += ' AND snr <= ?'
+            params.append(max_snr)
         if on_off:
             query += ' AND on_off = ?'
             params.append(on_off)
@@ -372,7 +376,7 @@ def get_hits(scan_id, min_snr=0, on_off=None, limit=100, offset=0,
         conn.close()
 
 
-def count_hits(scan_id, min_snr=0, on_off=None, include_zoned=False, db_path=None):
+def count_hits(scan_id, min_snr=0, max_snr=0, on_off=None, include_zoned=False, db_path=None):
     """Count hits with optional filters. Zoned hits hidden unless include_zoned."""
     conn = get_db(db_path)
     try:
@@ -383,6 +387,9 @@ def count_hits(scan_id, min_snr=0, on_off=None, include_zoned=False, db_path=Non
         if min_snr > 0:
             query += ' AND snr >= ?'
             params.append(min_snr)
+        if max_snr > 0:
+            query += ' AND snr <= ?'
+            params.append(max_snr)
         if on_off:
             query += ' AND on_off = ?'
             params.append(on_off)
