@@ -5055,7 +5055,7 @@ def api_two_layer_run():
                         for _hit in (_combined.get('hits', []) or [])[:50]:
                             _sf = _hit.get('source_file', '')
                             # Parkes: Parkes_<MJD>_...; GBT: ..._guppi_<MJD>_...
-                            _m = re.search(r'(?:^|guppi_)(\d{5})_', _sf)
+                            _m = re.search(r'(?:^|Parkes_|guppi_)(\d{5})_', _sf)
                             if _m:
                                 _mjd = _m.group(1)
                                 if _mjd in epochs_avail and _mjd not in available_epoch_labels:
