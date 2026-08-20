@@ -1812,8 +1812,22 @@ def api_download():
     
     os.makedirs(target_dir, exist_ok=True)
     target_path = os.path.join(target_dir, filename)
+
+    # HEAD the source so partial files (killed downloads, dashboard
+    # restarts) are detected by wrong size and replaced instead of
+    # short-circuiting as 'exists'. Best-effort: on HEAD failure fall
+    # back to old behavior.
+    expected_size = None
+    try:
+        import urllib.request as _ur
+        _hr = _ur.Request(url, headers={'User-Agent': 'BackyardSETI/1.0'},
+                          method='HEAD')
+        with _ur.urlopen(_hr, timeout=15) as _hresp:
+            expected_size = int(_hresp.headers.get('Content-Length', 0) or 0) or None
+    except Exception:
+        pass
     
-    res = _enqueue_download(url, filename, target_dir)
+    res = _enqueue_download(url, filename, target_dir, expected_size=expected_size)
     code = 409 if res.get('status') == 'already-downloading' else 200
     return jsonify(res), code
 
