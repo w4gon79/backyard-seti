@@ -61,3 +61,6 @@ Notes.txt
 /chunked_test_*.txt
 /stack_PROXCEN_*.png
 /stack_PROXCEN_*.json
+
+ml/checkpoints/
+ml/data/

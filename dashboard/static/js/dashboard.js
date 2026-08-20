@@ -1467,7 +1467,8 @@ async function loadScanResults(scanId) {
             return {
                 drift_rate: h.drift_rate,
                 snr: h.snr,
-                freq: h.freq,
+                // Prefer barycentric frequency for display when present
+                freq: (h.barycentric_freq != null) ? h.barycentric_freq : h.freq,
                 channel: h.channel,
                 sub_band: h.sub_band,
                 file: h.source_file,
@@ -1708,7 +1709,9 @@ function fetchFilteredTableHits() {
                 if (reqId !== _tableReq || data.error) return;
                 allHits = (data.hits || []).map(function(h) {
                     return {
-                        drift_rate: h.drift_rate, snr: h.snr, freq: h.freq,
+                        drift_rate: h.drift_rate,
+                        snr: h.snr,
+                        freq: (h.barycentric_freq != null) ? h.barycentric_freq : h.freq,
                         channel: h.channel, sub_band: h.sub_band,
                         file: h.source_file, _source: h.source_file,
                         on_off: h.on_off, barycentric_freq: h.barycentric_freq,
@@ -1750,8 +1753,25 @@ function chartFilterParams() {
     if (!isNaN(freqMax)) p.set('freq_max', freqMax);
     return p.toString();
 }
+// Frame badge: shows whether the chart/table frequencies are barycentric
+// corrected or raw observed, from the scan's bary_corrected flag reported
+// by the chart endpoint.
+function updateFrameBadge() {
+    var el = document.getElementById('results-frame-badge');
+    if (!el) return;
+    if (currentScanId && chartData && chartData.bary_corrected) {
+        el.textContent = 'BARY-CORRECTED';
+        el.style.background = '#1b3a1b';
+        el.style.color = '#66bb6a';
+    } else {
+        el.textContent = 'OBSERVED';
+        el.style.background = '#263238';
+        el.style.color = '#8ab4f8';
+    }
+}
+
 async function loadChartData(immediate) {
-    if (!currentScanId || !allHitsScanId) { chartData = null; renderHitChart(); return; }
+    if (!currentScanId || !allHitsScanId) { chartData = null; renderHitChart(); updateFrameBadge(); return; }
     clearTimeout(window._chartDebounce);
     var run = function() {
         var reqId = ++_chartReq;
@@ -1760,9 +1780,10 @@ async function loadChartData(immediate) {
             .then(function(d) {
                 if (reqId !== _chartReq) return;  // stale response
                 chartData = (d && !d.error) ? d : null;
+                updateFrameBadge();
                 renderHitChart();
             })
-            .catch(function() { chartData = null; renderHitChart(); });
+            .catch(function() { chartData = null; updateFrameBadge(); renderHitChart(); });
     };
     if (immediate) run();
     else window._chartDebounce = setTimeout(run, 300);
