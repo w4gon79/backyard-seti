@@ -365,7 +365,7 @@ def build_common_grid(freq_center_mhz, width_mhz, chan_width_mhz=2.7939677e-6):
 def process_epoch(epoch_label, epoch_info, target_ra, target_dec,
                   f_start_obs, f_stop_obs, common_grid, telescope='parkes',
                   progress_callback=None, return_time_series=False,
-                  off_control=False):
+                  off_control=False, target='PROXCEN'):
     """Process one epoch: load ON/OFF pairs, subtract, correct, interpolate.
     
     Returns the stacked (averaged) residual spectrum for this epoch,
@@ -396,7 +396,7 @@ def process_epoch(epoch_label, epoch_info, target_ra, target_dec,
     if is_gbt:
         first_on = epoch_info['gbt_pairs'][0][0]
     else:
-        first_on = f"Parkes_{mjd_int}_{seqs[0][0]}_PROXCEN_S_fine.h5"
+        first_on = f"Parkes_{mjd_int}_{seqs[0][0]}_{target}_S_fine.h5"
     mjd = extract_mjd_from_filename(first_on)
     v_bary = compute_barycentric_velocity(mjd, target_ra, target_dec, telescope)
     c = 299792458.0
@@ -428,8 +428,8 @@ def process_epoch(epoch_label, epoch_info, target_ra, target_dec,
     elif is_gbt:
         run_pairs = list(seqs)  # (on_fname, off_fname) pairs
     else:
-        run_pairs = [(f"Parkes_{mjd_int}_{p[0]}_PROXCEN_S_fine.h5",
-                      f"Parkes_{mjd_int}_{p[1]}_PROXCEN_R_fine.h5")
+        run_pairs = [(f"Parkes_{mjd_int}_{p[0]}_{target}_S_fine.h5",
+                      f"Parkes_{mjd_int}_{p[1]}_{target}_R_fine.h5")
                      for p in seqs]
 
     for pair_idx, pair in enumerate(run_pairs):
@@ -572,8 +572,8 @@ def process_epoch(epoch_label, epoch_info, target_ra, target_dec,
             if is_gbt:
                 on_file, off_file = pair
             else:
-                on_file = f"Parkes_{mjd_int}_{pair[0]}_PROXCEN_S_fine.h5"
-                off_file = f"Parkes_{mjd_int}_{pair[1]}_PROXCEN_R_fine.h5"
+                on_file = f"Parkes_{mjd_int}_{pair[0]}_{target}_S_fine.h5"
+                off_file = f"Parkes_{mjd_int}_{pair[1]}_{target}_R_fine.h5"
             on_path = find_h5(on_file)
             off_path = find_h5(off_file)
             if not on_path or not off_path:
@@ -778,6 +778,7 @@ def process_single_chunk(target, freq_center, width, epoch_labels,
             label, EPOCHS[label], target_ra, target_dec,
             f_start_obs, f_stop_obs, common_grid, telescope,
             progress_callback=_epoch_cb if (_cb or progress_callback) else None,
+            target=target,
         )
         if spec is not None:
             if not np.isfinite(spec).any():
@@ -833,7 +834,7 @@ def process_single_chunk(target, freq_center, width, epoch_labels,
             _cspec = process_epoch(
                 _label, _cinfo, target_ra, target_dec,
                 f_start_obs, f_stop_obs, common_grid, telescope,
-                off_control=True)
+                off_control=True, target=target)
             if _cspec is not None and np.isfinite(_cspec).any():
                 control_specs.append((_label, _cspec))
         if control_specs:
