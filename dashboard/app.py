@@ -3413,6 +3413,33 @@ def api_db_corrected(scan_id):
         return jsonify({'error': str(e)}), 500
 
 
+def _sync_bary_freqs_to_db(scan_id, scan_dir):
+    """Self-heal: if hits rows have NULL barycentric_freq but a corrected
+    combined_corrected.json exists on disk, sync the DB from it.
+    Returns dict of stats (or None if nothing needed doing)."""
+    from db import get_db, update_barycentric_freqs
+    combined = os.path.join(scan_dir, 'barycentric', 'combined_corrected.json')
+    if not os.path.isfile(combined):
+        return None
+    conn = get_db()
+    try:
+        n_null = conn.execute(
+            'SELECT COUNT(*) FROM hits WHERE scan_id = ? '
+            'AND barycentric_freq IS NULL', (scan_id,)).fetchone()[0]
+    finally:
+        conn.close()
+    if n_null == 0:
+        return None
+    with open(combined) as f:
+        hits = json.load(f).get('hits', [])
+    updates = [{'freq': h.get('freq'),
+                'barycentric_freq': h['barycentric_freq'],
+                'source_file': h.get('source_file', h.get('file', ''))}
+               for h in hits if h.get('barycentric_freq')]
+    n = update_barycentric_freqs(scan_id, updates) if updates else 0
+    return {'null_before': n_null, 'attempted': len(updates), 'updated': n}
+
+
 @app.route('/api/db/cross-epoch', methods=['POST'])
 def api_db_cross_epoch():
     """Run SQL-based cross-epoch search, cache result to DB."""
@@ -3445,6 +3472,20 @@ def api_db_cross_epoch():
                         return jsonify(result)
 
         # Run the search
+        # Self-heal any scans whose DB rows lack barycentric_freq (e.g.
+        # correction JSON exists but the DB sync step was skipped/failed)
+        sync_notes = {}
+        for sid, sdir in ((sid, _get_scan_dir(sid)) for sid in scan_ids):
+            if not sdir:
+                continue
+            try:
+                stats = _sync_bary_freqs_to_db(sid, sdir)
+                if stats:
+                    print(f'[cross-epoch] bary self-sync {sid}: {stats}')
+                    sync_notes[sid] = stats
+            except Exception as e:
+                print(f'[cross-epoch] WARNING bary self-sync failed {sid}: {e}')
+        
         result = cross_epoch_search_sql(
             scan_ids,
             min_snr=float(min_snr),
