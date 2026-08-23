@@ -581,6 +581,10 @@ def api_scan_results(scan_id):
     
     for fpath in glob_module.glob(
         os.path.join(scan_dir, '**/*_hits.json'), recursive=True):
+        # Skip barycentric copies: same hits with corrected freqs, doubles
+        # parse+serialize cost for no benefit in the legacy view
+        if os.sep + 'barycentric' + os.sep in fpath:
+            continue
         try:
             with open(fpath) as fh:
                 data = json.load(fh)
@@ -628,6 +632,26 @@ def api_scan_results(scan_id):
         'results': results,
         'rejection': rejection,
     })
+
+
+@app.route('/api/scans/<scan_id>/rejection')
+def api_scan_rejection(scan_id):
+    """Rejection results ONLY (cheap). The full /results endpoint parses
+    every *_hits.json including the barycentric copies (~200MB for a 6-file
+    fine scan) which makes scan switching crawl; this serves just the
+    small rejection_results.json."""
+    scan_dir = _get_scan_dir(scan_id)
+    if not scan_dir:
+        return jsonify({'error': f'Scan not found: {scan_id}'}), 404
+    reject_path = os.path.join(scan_dir, 'rejection', 'rejection_results.json')
+    rejection = None
+    if os.path.isfile(reject_path):
+        try:
+            with open(reject_path) as f:
+                rejection = json.load(f)
+        except Exception:
+            pass
+    return jsonify({'rejection': rejection})
 
 
 def _epoch_label_from_files(files):

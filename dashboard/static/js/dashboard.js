@@ -1484,9 +1484,12 @@ async function loadScanResults(scanId) {
         allHitsOffset = 0;
         allHitsLimit = 500;
         
-        // Load rejection results from legacy endpoint (still JSON-based)
+        // Load rejection results via the cheap rejection-only endpoint.
+        // (The old full /results call parsed every *_hits.json incl.
+        // barycentric copies, ~200MB for a 6-file scan, which made scan
+        // switching hang.)
         try {
-            var rresp = await fetch('/api/scans/' + encodeURIComponent(scanId) + '/results');
+            var rresp = await fetch('/api/scans/' + encodeURIComponent(scanId) + '/rejection');
             var rdata = await rresp.json();
             if (rdata.rejection && rdata.rejection.candidates) {
                 rejectionCandidates = rdata.rejection.candidates;
