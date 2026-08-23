@@ -3380,6 +3380,22 @@ def api_db_chart(scan_id):
                 'SELECT bary_corrected FROM scans WHERE scan_id = ?',
                 (scan_id,)).fetchone()
             bary_corrected = bool(bary_row[0]) if bary_row else False
+            
+            # Self-heal: if DB says not corrected but disk has corrected JSON,
+            # flip the flag. Lightweight check (file existence only, no parse)
+            # so we don't block the chart response on a 170MB JSON parse.
+            # Velocity/ra/dec are backfilled lazily by the correction endpoint.
+            if not bary_corrected:
+                scan_dir = _get_scan_dir(scan_id)
+                if scan_dir and os.path.isfile(
+                        os.path.join(scan_dir, 'barycentric',
+                                     'combined_corrected.json')):
+                    conn.execute(
+                        'UPDATE scans SET bary_corrected=1 '
+                        'WHERE scan_id=?', (scan_id,))
+                    conn.commit()
+                    bary_corrected = True
+                    print(f'[chart] bary self-heal flag for {scan_id}')
         finally:
             conn.close()
 
