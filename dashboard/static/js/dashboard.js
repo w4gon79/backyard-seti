@@ -2776,7 +2776,7 @@ async function runCrossEpoch() {
     try {
         // Use fast SQLite DB endpoint with extended timeout
         var controller = new AbortController();
-        var timeoutId = setTimeout(function() { controller.abort(); }, 120000);
+        var timeoutId = setTimeout(function() { controller.abort(); }, 300000);
 
         var resp = await fetch('/api/db/cross-epoch', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -2803,7 +2803,16 @@ async function runCrossEpoch() {
         loadCrossEpochHistory();
     } catch(e) {
         if (e.name === 'AbortError') {
-            alert('Cross-epoch search timed out. Try increasing min_snr or reducing tolerance to speed up the query.');
+            // Inline status instead of alert: search can legitimately take minutes
+            // right after a big import (bary self-sync + cold cache), not a failure.
+            var tbody = document.getElementById('crossepoch-tbody');
+            if (tbody) {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:20px;color:#ff8a65;">'
+                    + 'Search still running after 5 minutes (server may be busy with a recent import).<br>'
+                    + 'It usually finishes server-side even if this page stops waiting; check the run history dropdown in a minute.<br>'
+                    + 'If it keeps happening: raise min_snr or lower tolerance to shrink the query.'
+                    + '</td></tr>';
+            }
         } else {
             alert('Error: ' + e.message);
         }
