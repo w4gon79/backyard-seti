@@ -1053,6 +1053,37 @@ def api_scan_start():
     """Start a pipeline scan. Runs in background thread."""
     if scan_state['active']:
         return jsonify({'error': 'Scan already running'}), 409
+
+    # Pipeline-level guard: a fine_res_pipeline process may be running
+    # outside dashboard control (zombie from a previous session, manual
+    # CLI start). Two pipelines collide on turbo_seti HDF5 files (Win32
+    # error 33, seen 2026-08-24). Same lock file the pipeline itself uses.
+    _lock_path = os.path.join(RESULTS_DIR, '.pipeline.lock')
+    if os.path.exists(_lock_path):
+        try:
+            with open(_lock_path) as f:
+                old_pid = int(f.read().strip() or '0')
+        except Exception:
+            old_pid = 0
+        alive = False
+        if old_pid:
+            try:
+                import ctypes
+                h = ctypes.windll.kernel32.OpenProcess(0x1000, False, old_pid)
+                if h:
+                    ctypes.windll.kernel32.CloseHandle(h)
+                    alive = True
+            except Exception:
+                alive = True
+        if alive:
+            return jsonify({'error': f'A fine_res_pipeline process (PID {old_pid}) is already running '
+                                     f'outside Mission Control. Stop it first '
+                                     f'(taskkill /PID {old_pid} /F) or it will corrupt scan output.'}), 409
+        try:
+            os.remove(_lock_path)  # stale lock from dead process
+        except OSError:
+            pass
+
     
     params = request.json or {}
     target = params.get('target', 'PROXCEN')

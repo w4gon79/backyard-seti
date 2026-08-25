@@ -449,6 +449,49 @@ def main():
 
     os.makedirs(args.out, exist_ok=True)
 
+    # ?? Global single-instance lock ??
+    # Two pipelines running at once collide on turbo_seti HDF5 files
+    # (Win32 error 33 'unable to lock file', seen 2026-08-24 when a
+    # zombie from 16:55 overlapped a fresh 20:23 start). Lock lives at
+    # <repo_root>/results/.pipeline.lock regardless of --out so ALL
+    # pipeline invocations share it. Stale locks (dead PID) reclaim.
+    import atexit
+    _lock_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        'results', '.pipeline.lock')
+    os.makedirs(os.path.dirname(_lock_path), exist_ok=True)
+
+    def _pid_alive(pid):
+        try:
+            import ctypes
+            kernel32 = ctypes.windll.kernel32
+            handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+            if not handle:
+                return False
+            kernel32.CloseHandle(handle)
+            return True
+        except Exception:
+            return True  # cannot determine; assume alive (conservative)
+
+    if os.path.exists(_lock_path):
+        old_pid = 0
+        try:
+            with open(_lock_path) as f:
+                old_pid = int((f.read().strip() or '0'))
+        except Exception:
+            old_pid = 0
+        if old_pid and old_pid != os.getpid() and _pid_alive(old_pid):
+            print(f"ERROR: another fine_res_pipeline is already running (PID {old_pid}).")
+            print("       Two pipelines collide on turbo_seti HDF5 files (Win32 error 33).")
+            print(f"       Stop it first (Mission Control > Stop, or: taskkill /PID {old_pid} /F)")
+            sys.exit(2)
+        print(f"NOTE: reclaiming stale pipeline lock (PID {old_pid} not running)")
+
+    with open(_lock_path, 'w') as f:
+        f.write(str(os.getpid()))
+    atexit.register(lambda: os.path.exists(_lock_path) and os.remove(_lock_path))
+
+
     files = []
     if args.file:
         files = args.file
