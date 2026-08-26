@@ -688,9 +688,15 @@ html, body {
 .mc-right-top-row, .mc-panel {
     min-width: 0;
 }
-#freq-map-canvas, #spectrum-canvas, #starmap-canvas {
+#freq-map-canvas, #spectrum-canvas {
     max-width: 100%;
     height: auto;
+}
+/* starmap keeps its CSS-fixed height (185px desktop, set per breakpoint):
+   its panel row is sized for canvas + coords readout, and height:auto
+   made it grow and push the coords off the panel bottom (2026-08-26) */
+#starmap-canvas {
+    max-width: 100%;
 }
 .mc-panel-body {
     min-width: 0;
