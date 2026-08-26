@@ -554,7 +554,8 @@ def correct_scan(scan_dir, ra_hours=None, dec_deg=None, telescope='parkes',
 # ─── Cross-Epoch Comparison ───────────────────────────────────────────
 
 def cross_epoch_match(scan_dirs, freq_tolerance_hz=10, min_epochs=2, min_snr=0,
-                      freq_min_mhz=None, freq_max_mhz=None):
+                      freq_min_mhz=None, freq_max_mhz=None,
+                      allow_ongoing_scans=False):
     """
     Find barycentric frequencies present in ON frames across multiple epochs
     but absent from OFF frames.
@@ -590,6 +591,11 @@ def cross_epoch_match(scan_dirs, freq_tolerance_hz=10, min_epochs=2, min_snr=0,
         Since turboSETI's SNR threshold is a simple cutoff on the detection
         statistic, post-filtering existing results is equivalent to re-running
         turboSETI at the higher threshold. No re-scan needed.
+    allow_ongoing_scans : bool
+        If False (default), scan directories containing a checkpoint.json
+        (i.e. a scan still in progress) are skipped entirely rather than
+        bary-corrected on the fly. Patched 2026-08-26 after an on-the-fly
+        correct_scan() wrote barycentric files into a mid-scan epoch.
 
     Returns
     -------
@@ -613,6 +619,16 @@ def cross_epoch_match(scan_dirs, freq_tolerance_hz=10, min_epochs=2, min_snr=0,
         scan_dir = os.path.abspath(scan_dir)
         bary_dir = os.path.join(scan_dir, 'barycentric')
         
+        # Guard (patched 2026-08-26): never touch a scan that is still
+        # running. A checkpoint.json in the scan dir means the fine-res scan
+        # has not completed; on-the-fly correcting it writes barycentric
+        # files built from partial hits, which then masquerade as a fully
+        # corrected epoch in every downstream epoch-discovery listing.
+        if not allow_ongoing_scans and os.path.isfile(os.path.join(scan_dir, 'checkpoint.json')):
+            print(f"  cross_epoch_match: skipping {os.path.basename(scan_dir)} "
+                  f"(scan in progress: checkpoint.json present)")
+            continue
+
         # Prefer pre-computed combined file
         combined_path = os.path.join(bary_dir, 'combined_corrected.json')
         if os.path.isfile(combined_path):
