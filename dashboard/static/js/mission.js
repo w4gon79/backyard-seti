@@ -161,6 +161,24 @@ async function updateStarmapTarget(targetName) {
     STARMAP_STARS = t.stars;
     STARMAP_CENTER_RA = t.ra;
     STARMAP_CENTER_DEC = t.dec;
+
+    // Real star field (2026-08-26): if this target has no curated neighbors,
+    // load the pre-generated Gaia catalog (static/stars/{KEY}.json, built by
+    // tmp_gaia_stars.py: 250 stars to G<10.5 within 12 deg). The target star
+    // itself is usually fainter than the catalog cutoff, so prepend it.
+    if (t.stars.length < 5) {
+        try {
+            const sresp = await fetch('/static/stars/' + encodeURIComponent(key) + '.json');
+            if (sresp.ok) {
+                const cat = await sresp.json();
+                if (cat && Array.isArray(cat.stars) && cat.stars.length > 0) {
+                    t.stars = [{ra: t.ra, dec: t.dec, mag: 11, name: t.name, isTarget: true}]
+                              .concat(cat.stars);
+                    STARMAP_STARS = t.stars;
+                }
+            }
+        } catch (e) { /* keep single-star view */ }
+    }
     // Update coordinate readout
     const raH = Math.floor(STARMAP_CENTER_RA / 15);
     const raM = Math.floor((STARMAP_CENTER_RA / 15 - raH) * 60);
