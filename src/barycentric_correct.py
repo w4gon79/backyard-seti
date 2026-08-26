@@ -695,6 +695,7 @@ def cross_epoch_match(scan_dirs, freq_tolerance_hz=10, min_epochs=2, min_snr=0,
                 all_off_hits[key].append({
                     'epoch_id': epoch_id,
                     'freq_bary': freq,
+                    'freq_obs': hit.get('freq', 0),
                     'drift_rate': hit.get('drift_rate', 0),
                     'snr': hit.get('snr', 0),
                     'source_file': hit.get('source_file', ''),
@@ -702,6 +703,7 @@ def cross_epoch_match(scan_dirs, freq_tolerance_hz=10, min_epochs=2, min_snr=0,
 
     # Find candidate frequencies: present in ON across >= min_epochs, absent in OFF
     candidates = []
+    rejected = []   # vetoed candidates with reasons (patched 2026-08-26)
     total_freqs_checked = 0
     freqs_ge2 = 0            # unique ON freqs seen in 2+ epochs
     freqs_ge_min = 0         # unique ON freqs meeting the min_epochs filter
@@ -718,14 +720,72 @@ def cross_epoch_match(scan_dirs, freq_tolerance_hz=10, min_epochs=2, min_snr=0,
             continue
         freqs_ge_min += 1
 
-        # Check OFF frames at this frequency (and adjacent buckets for safety)
-        off_count = 0
-        for check_bucket in range(bucket - 1, bucket + 2):
-            if check_bucket in all_off_hits:
-                off_count += len(all_off_hits[check_bucket])
+        # --- OFF veto (patched 2026-08-26) ---
+        # Original +/-1-bucket (~10 Hz) check missed drifting RFI: after
+        # per-file barycentric correction, a drifting terrestrial emitter's
+        # OFF hits land hundreds of Hz from the ON bucket (seen on GJ1061:
+        # OFF 300-560 Hz off, including one at the EXACT observed freq of
+        # the ON hit). Two-part veto now:
+        #   (a) wide barycentric window (+/-2 kHz default)
+        #   (b) observed-frame match: RFI is fixed in topocentric freq, so
+        #       any OFF hit within 500 Hz of an ON hit's observed freq vetoes.
+        veto_reasons = []
+        veto_bary_hz = max(freq_tolerance_hz * 3, 2000)
+        bucket_pad = int(veto_bary_hz / freq_tolerance_hz)
+        off_hits_near = []
+        for check_bucket in range(bucket - bucket_pad, bucket + bucket_pad + 1):
+            off_hits_near.extend(all_off_hits.get(check_bucket, []))
+        if off_hits_near:
+            veto_reasons.append(
+                'OFF hits within %.1f kHz bary window: %s' % (
+                    veto_bary_hz / 1000.0,
+                    '; '.join('%.6f MHz snr %.0f' % (oh['freq_bary'], oh['snr'])
+                              for oh in off_hits_near[:3])))
 
-        if off_count > 0:
-            continue  # Present in OFF frame -> likely RFI
+        # Observed-frame veto (fixed topocentric frequency = RFI)
+        obs_pad_mhz = 0.0005
+        obs_match = None
+        on_obs_all = [h.get('freq_obs', 0) for h in on_hits_list]
+        for off_bucket_hits in all_off_hits.values():
+            for oh in off_bucket_hits:
+                fo = oh.get('freq_obs', 0)
+                if not fo:
+                    continue
+                for on_fo in on_obs_all:
+                    if on_fo and abs(fo - on_fo) < obs_pad_mhz:
+                        obs_match = (fo, on_fo)
+                        break
+                if obs_match:
+                    break
+            if obs_match:
+                break
+        if obs_match:
+            veto_reasons.append(
+                'OFF hit at same OBSERVED freq: %.6f vs ON %.6f MHz'
+                % obs_match)
+
+        # --- Drift consistency check (patched 2026-08-26) ---
+        # A transmitter fixed to the target star shows consistent barycentric
+        # drift across epochs. Wildly different mean rates = independent
+        # terrestrial emitters that coincidentally bary-aligned.
+        epoch_drifts = {}
+        for h in on_hits_list:
+            epoch_drifts.setdefault(h['epoch_id'], []).append(h['drift_rate'])
+        mean_drifts = [float(np.mean(v)) for v in epoch_drifts.values()]
+        drift_spread = (max(mean_drifts) - min(mean_drifts)) if len(mean_drifts) >= 2 else 0.0
+        if drift_spread > 2.0:
+            veto_reasons.append(
+                'drift rates inconsistent across epochs: %s Hz/s (spread %.2f)'
+                % ([round(m, 3) for m in mean_drifts], drift_spread))
+
+        if veto_reasons:
+            rejected.append({
+                'barycentric_freq_mhz': round(np.mean([h['freq_bary'] for h in on_hits_list]), 8),
+                'epoch_count': n_epochs,
+                'max_snr': max(h['snr'] for h in on_hits_list),
+                'veto_reasons': veto_reasons,
+            })
+            continue  # Vetoed -> likely RFI
 
         # This is a candidate!
         # Aggregate stats across epochs
@@ -740,6 +800,7 @@ def cross_epoch_match(scan_dirs, freq_tolerance_hz=10, min_epochs=2, min_snr=0,
             'observed_freqs_mhz': [round(f, 6) for f in freqs_obs],
             'mean_drift_rate': round(np.mean(drift_rates), 6),
             'drift_rates': [round(d, 6) for d in drift_rates],
+            'drift_spread_hz_s': round(drift_spread, 4),
             'max_snr': max(snrs),
             'snrs': [round(s, 2) for s in snrs],
             'on_count': len(on_hits_list),
@@ -776,6 +837,7 @@ def cross_epoch_match(scan_dirs, freq_tolerance_hz=10, min_epochs=2, min_snr=0,
 
     return {
         'candidates': candidates,
+        'rejected': rejected,
         'summary': {
             'total_scans': len(scan_dirs),
             'total_epochs': len(epoch_info),
@@ -784,6 +846,7 @@ def cross_epoch_match(scan_dirs, freq_tolerance_hz=10, min_epochs=2, min_snr=0,
             'freqs_ge2_epochs': freqs_ge2,
             'freqs_meeting_min_epochs': freqs_ge_min,
             'total_candidates': len(candidates),
+            'total_rejected': len(rejected),
             'freq_tolerance_hz': freq_tolerance_hz,
         'freq_min_mhz': freq_min_mhz,
         'freq_max_mhz': freq_max_mhz,
