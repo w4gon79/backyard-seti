@@ -69,44 +69,26 @@ document.addEventListener('DOMContentLoaded', () => {
 // ─── Target Sky Map (celestial star map) ────────────────────────────
 let starmapCanvas, starmapCtx;
 
-// Target coordinate database (matches barycentric_correct.py TARGET_COORDS)
+// Target coordinate database (matches barycentric_correct.py TARGET_COORDS).
+// 2026-08-26: hand-curated star lists REMOVED per Joel - every target now
+// loads its real star field from the Gaia catalogs (static/stars/*.json).
+// Until the fetch lands, the map shows only the target crosshair.
 const TARGET_SKY = {
     'PROXCEN': {
         ra: 217.429, dec: -62.681, name: 'PROXIMA CENTAURI',
-        stars: [
-            {ra: 217.429, dec: -62.681, mag: 11.1, name: 'PROXIMA', isTarget: true},
-            {ra: 219.902, dec: -60.834, mag: 0.3,  name: '\u03b1 CEN'},
-            {ra: 210.956, dec: -60.373, mag: 0.61, name: 'HADAR'},
-            {ra: 216.767, dec: -50.716, mag: 2.60, name: '\u03b4 CEN'},
-            {ra: 213.917, dec: -53.466, mag: 3.13, name: '\u03bc CEN'},
-            {ra: 210.458, dec: -64.700, mag: 3.90, name: 'i CEN'},
-            {ra: 219.485, dec: -66.180, mag: 4.25, name: 'n CEN'},
-        ],
+        stars: [{ra: 217.429, dec: -62.681, mag: 11.1, name: 'PROXIMA', isTarget: true}],
     },
     'TAU_CETI': {
         ra: 25.937, dec: -15.937, name: 'TAU CETI',
-        stars: [
-            {ra: 25.937, dec: -15.937, mag: 3.50, name: '\u03c4 CET', isTarget: true},
-            {ra: 22.271, dec: -17.654, mag: 4.29, name: '\u03b4 CET'},
-            {ra: 30.625, dec: -12.349, mag: 4.08, name: '\u03b5 CET'},
-            {ra: 19.066, dec: -21.059, mag: 2.53, name: '\u03b6 CET'},
-            {ra: 27.083, dec: -10.315, mag: 5.35, name: 'Y CET'},
-        ],
+        stars: [{ra: 25.937, dec: -15.937, mag: 3.50, name: '\u03c4 CET', isTarget: true}],
     },
     'KIC_8462852': {
         ra: 301.564, dec: 44.456, name: 'TABBY\'S STAR',
-        stars: [
-            {ra: 301.564, dec: 44.456, mag: 11.7, name: 'KIC8462852', isTarget: true},
-            {ra: 303.046, dec: 44.498, mag: 7.5,  name: 'BD+44 3724'},
-            {ra: 300.233, dec: 44.156, mag: 8.3,  name: 'TYC 3162-1002'},
-        ],
+        stars: [{ra: 301.564, dec: 44.456, mag: 11.7, name: 'KIC8462852', isTarget: true}],
     },
     'WOLOG': {
         ra: 289.083, dec: 37.145, name: 'WOLF 359',
-        stars: [
-            {ra: 289.083, dec: 37.145, mag: 13.5, name: 'WOLF 359', isTarget: true},
-            {ra: 286.604, dec: 38.308, mag: 3.5,  name: '\u03b2 LEO'},
-        ],
+        stars: [{ra: 289.083, dec: 37.145, mag: 13.5, name: 'WOLF 359', isTarget: true}],
     },
 };
 
