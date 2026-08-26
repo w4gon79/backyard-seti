@@ -92,11 +92,13 @@ const TARGET_SKY = {
     },
 };
 
-// Default to Proxima, will be updated by polling
-let currentTargetKey = 'PROXCEN';
-let STARMAP_STARS = TARGET_SKY[currentTargetKey].stars;
-let STARMAP_CENTER_RA  = TARGET_SKY[currentTargetKey].ra;
-let STARMAP_CENTER_DEC = TARGET_SKY[currentTargetKey].dec;
+// Initial state: no target yet. The map stays blank (grid only) until the
+// first poll delivers the real scan target (2026-08-26; was hardcoded
+// PROXCEN which flashed the wrong target on page load).
+let currentTargetKey = null;
+let STARMAP_STARS = [];
+let STARMAP_CENTER_RA = 0;
+let STARMAP_CENTER_DEC = 0;
 const STARMAP_RANGE_RA   = 15;
 const STARMAP_RANGE_DEC  = 15;
 
@@ -234,6 +236,16 @@ function drawStarmap() {
     // Clear
     ctx.fillStyle = '#000400';
     ctx.fillRect(0, 0, w, h);
+
+    // Awaiting-target state: no scan target known yet -> blank sky + hint
+    // (2026-08-26; was hardcoded PROXCEN on load)
+    if (!currentTargetKey) {
+        ctx.fillStyle = 'rgba(0,170,51,0.5)';
+        ctx.font = "9px 'Share Tech Mono', Consolas, monospace";
+        ctx.textAlign = 'center';
+        ctx.fillText('AWAITING TARGET', w / 2, h / 2);
+        return;
+    }
 
     const padL = 24, padR = 8, padT = 8, padB = 20;
     const plotW = w - padL - padR;
