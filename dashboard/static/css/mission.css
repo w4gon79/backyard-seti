@@ -249,7 +249,7 @@ html, body {
 /* ─── Middle section (2-column grid) ───────────────────────────────── */
 .mc-middle {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);  /* minmax(0): canvases can't force track wider than viewport (mobile fix 2026-08-26) */
     gap: 6px;
     min-height: 0;
     overflow: hidden;
@@ -676,9 +676,30 @@ html, body {
 
 /* ─── Responsive ─────────────────────────────────────────────────── */
 
+/* Mobile fix (2026-08-26): canvas intrinsic pixel widths force grid
+   tracks to 640px inside a 390px viewport (1fr = minmax(auto,1fr) has a
+   min-content floor). Constrain canvases + panels; minmax(0,1fr) above.
+   The min-content floor propagates up EVERY grid level, so every
+   container in the chain needs min-width:0, not just the tracks. */
+#mission-control {
+    grid-template-columns: minmax(0, 1fr);
+}
+.mc-middle, .mc-left-column, .mc-right-column,
+.mc-right-top-row, .mc-panel {
+    min-width: 0;
+}
+#freq-map-canvas, #spectrum-canvas, #starmap-canvas {
+    max-width: 100%;
+    height: auto;
+}
+.mc-panel-body {
+    min-width: 0;
+    overflow: hidden;
+}
+
 @media (max-width: 1200px) {
     .mc-middle {
-        grid-template-columns: 1fr;
+        grid-template-columns: minmax(0, 1fr);
     }
     .mc-left-column {
         grid-template-rows: 140px 1fr;
