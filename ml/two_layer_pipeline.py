@@ -232,7 +232,11 @@ def targeted_stack(candidate_freq, stack_width_mhz, epoch_labels, target='PROXCE
     freq_center = candidate_freq
     
     # Process each epoch
-    padding_mhz = 0.1
+    # Padding must cover the barycentric shift between observed and
+    # corrected frames (up to ~ +/-30 km/s = 1e-4 * f, ~0.15 MHz at 3 GHz)
+    # plus stack width. The old fixed 0.1 MHz silently clamped GJ1061's
+    # 0.152 MHz shift, flattening whole epochs to edge constants (sigma=0).
+    padding_mhz = max(0.1, freq_center * 3e-4)
     f_start_obs = freq_center - stack_width_mhz / 2 - padding_mhz
     f_stop_obs = freq_center + stack_width_mhz / 2 + padding_mhz
     
@@ -251,6 +255,7 @@ def targeted_stack(candidate_freq, stack_width_mhz, epoch_labels, target='PROXCE
             label, epochs_map[label], target_ra, target_dec,
             f_start_obs, f_stop_obs, common_grid, telescope,
             return_time_series=True,
+            target=target,
         )
         
         if spec is not None:
