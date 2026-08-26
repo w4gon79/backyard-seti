@@ -1,0 +1,3 @@
+https://bldata.berkeley.edu/pipeline/AGBT17B_999_15/holding/spliced_blc2021222324252627_guppi_57992_25881_HIP2_0002.gpuspec.0000.h5
+https://bldata.berkeley.edu/pipeline/AGBT17B_999_15/holding/spliced_blc2021222324252627_guppi_57992_26543_HIP2_0004.gpuspec.0000.h5
+https://bldata.berkeley.edu/pipeline/AGBT17B_999_15/holding/spliced_blc2021222324252627_guppi_57992_27203_HIP2_0006.gpuspec.0000.h5
