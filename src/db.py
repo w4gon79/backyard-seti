@@ -619,9 +619,11 @@ def cross_epoch_search_sql(scan_ids, min_snr=0, tolerance_hz=10, min_epochs=2, d
         freqs_ge_min = sum(1 for s in on_bucket_scans.values()
                            if len(s) >= min_epochs)
 
-        # Get OFF buckets
+        # Get OFF hits (patched 2026-08-26): fetch full records, not just
+        # buckets, so the wide-bary and observed-frame vetoes below can use
+        # them. Mirrors the veto logic in barycentric_correct.cross_epoch_match.
         off_query = f'''
-            SELECT DISTINCT CAST(ROUND(barycentric_freq * {grid_resolution}) AS INTEGER) as bucket
+            SELECT barycentric_freq, freq as obs_freq, snr
             FROM hits
             WHERE scan_id IN ({placeholders})
               AND on_off = 'OFF'
@@ -631,12 +633,30 @@ def cross_epoch_search_sql(scan_ids, min_snr=0, tolerance_hz=10, min_epochs=2, d
         if min_snr > 0:
             off_query += f' AND snr >= {min_snr}'
 
+        off_rows = conn.execute(off_query, scan_ids).fetchall()
+        off_bary = np.array([r['barycentric_freq'] for r in off_rows], dtype=float)
+        off_obs = np.array([r['obs_freq'] or 0 for r in off_rows], dtype=float)
+        off_snr = np.array([r['snr'] or 0 for r in off_rows], dtype=float)
+
+        # Wide bary window veto (+/-2 kHz default, >= 3x tolerance):
+        # drifting RFI's OFF hits land hundreds of Hz from the ON bucket
+        # after per-file barycentric correction; the old +/-1-bucket check
+        # missed them (seen on GJ1061 3062.631 MHz).
+        veto_bary_hz = max(tolerance_hz * 3, 2000)
+        bucket_pad = int(veto_bary_hz / tolerance_hz)
         off_buckets = set()
-        for row in conn.execute(off_query, scan_ids):
-            off_buckets.add(row['bucket'])
-            # Also add adjacent buckets (matching the Python algorithm)
-            off_buckets.add(row['bucket'] - 1)
-            off_buckets.add(row['bucket'] + 1)
+        off_bucket_raw = set()
+        for r in off_rows:
+            b = int(round(r['barycentric_freq'] * grid_resolution))
+            off_bucket_raw.add(b)
+        for b in off_bucket_raw:
+            for d in range(-bucket_pad, bucket_pad + 1):
+                off_buckets.add(b + d)
+
+        # Observed-frame veto data: RFI is fixed in topocentric frequency
+        off_obs_valid = off_obs[off_obs > 0]
+
+        rejected = []
 
         # Step 2: Group ON hits by bucket, count distinct scans
         bucket_data = {}  # bucket -> {scan_ids: set, hits: []}
@@ -651,7 +671,7 @@ def cross_epoch_search_sql(scan_ids, min_snr=0, tolerance_hz=10, min_epochs=2, d
 
         # Step 3: Filter by min_epochs and build candidates
         candidates = []
-        total_freqs_checked = len(bucket_data) + len(off_buckets)  # approximate
+        total_freqs_checked = len(bucket_data) + len(off_bucket_raw)  # approximate
 
         for bucket, data in bucket_data.items():
             n_epochs = len(data['scan_ids'])
@@ -659,6 +679,60 @@ def cross_epoch_search_sql(scan_ids, min_snr=0, tolerance_hz=10, min_epochs=2, d
                 continue
 
             hits = data['hits']
+            veto_reasons = []
+
+            # (a) wide bary window already applied via off_buckets set;
+            #     if we got here the bucket survived it. Report near-misses:
+            #     OFF hits within the wide window of the candidate mean freq.
+            mean_bary = float(np.mean([h['barycentric_freq'] or 0 for h in hits]))
+            if len(off_bary):
+                d = np.abs(off_bary - mean_bary)
+                near = np.where(d < veto_bary_hz * 1e-6)[0]
+                # bucket survival + near check should agree; near is the
+                # authoritative continuous-frequency version
+                if len(near):
+                    veto_reasons.append(
+                        'OFF hits within %.1f kHz bary window: %s' % (
+                            veto_bary_hz / 1000.0,
+                            '; '.join('%.6f MHz snr %.0f' % (off_bary[i], off_snr[i])
+                                      for i in near[:3])))
+
+            # (b) observed-frame veto: any OFF hit within 500 Hz of an ON
+            #     hit's topocentric frequency = fixed terrestrial emitter.
+            obs_match = None
+            if len(off_obs_valid):
+                for h in hits:
+                    fo = h['obs_freq'] or 0
+                    if not fo:
+                        continue
+                    if np.min(np.abs(off_obs_valid - fo)) < 0.0005:
+                        obs_match = (float(np.min(np.abs(off_obs_valid - fo))), float(fo))
+                        break
+            if obs_match:
+                veto_reasons.append(
+                    'OFF hit at same OBSERVED freq (within 500 Hz of ON %.6f MHz)'
+                    % obs_match[1])
+
+            # (c) drift consistency: per-epoch mean drift spread > 2 Hz/s =
+            #     independent emitters coincidentally bary-aligned.
+            epoch_drifts = {}
+            for h in hits:
+                epoch_drifts.setdefault(h['scan_id'], []).append(h['drift_rate'] or 0)
+            mean_drifts = [float(np.mean(v)) for v in epoch_drifts.values()]
+            drift_spread = (max(mean_drifts) - min(mean_drifts)) if len(mean_drifts) >= 2 else 0.0
+            if drift_spread > 2.0:
+                veto_reasons.append(
+                    'drift rates inconsistent across epochs: %s Hz/s (spread %.2f)'
+                    % ([round(m, 3) for m in mean_drifts], drift_spread))
+
+            if veto_reasons:
+                rejected.append({
+                    'barycentric_freq_mhz': round(mean_bary, 8),
+                    'epoch_count': n_epochs,
+                    'max_snr': float(max(h['snr'] or 0 for h in hits)),
+                    'veto_reasons': veto_reasons,
+                })
+                continue
             drift_rates = [h['drift_rate'] or 0 for h in hits]
             snrs = [h['snr'] or 0 for h in hits]
             freqs_bary = [h['barycentric_freq'] or 0 for h in hits]
@@ -670,6 +744,7 @@ def cross_epoch_search_sql(scan_ids, min_snr=0, tolerance_hz=10, min_epochs=2, d
                 'observed_freqs_mhz': [round(float(f), 6) for f in freqs_obs],
                 'mean_drift_rate': round(float(np.mean(drift_rates)), 6),
                 'drift_rates': [round(float(d), 6) for d in drift_rates],
+                'drift_spread_hz_s': round(drift_spread, 4),
                 'max_snr': float(max(snrs)) if snrs else 0,
                 'snrs': [round(float(s), 2) for s in snrs],
                 'on_count': len(hits),
