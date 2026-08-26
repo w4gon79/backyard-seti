@@ -172,9 +172,15 @@ async function updateStarmapTarget(targetName) {
             if (sresp.ok) {
                 const cat = await sresp.json();
                 if (cat && Array.isArray(cat.stars) && cat.stars.length > 0) {
-                    t.stars = [{ra: t.ra, dec: t.dec, mag: 11, name: t.name, isTarget: true}]
-                              .concat(cat.stars);
-                    STARMAP_STARS = t.stars;
+                    // Only stars brighter than mag 8: the full G<10.5 catalog
+                    // (250 stars) is visual clutter at panel size, and every
+                    // faint dot made the map unreadable (2026-08-26).
+                    const field = cat.stars.filter(function(s) { return s.mag < 8; }).slice(0, 120);
+                    if (field.length > 0) {
+                        t.stars = [{ra: t.ra, dec: t.dec, mag: 11, name: t.name, isTarget: true}]
+                                  .concat(field);
+                        STARMAP_STARS = t.stars;
+                    }
                 }
             }
         } catch (e) { /* keep single-star view */ }
@@ -380,11 +386,17 @@ function drawStarmap() {
             ctx.textAlign = 'left';
             ctx.fillText('[' + star.name + ']', x + armLen + 2, y + 3);
         } else {
-            // Star label
-            ctx.fillStyle = 'rgba(0,170,51,0.55)';
-            ctx.font = "7px 'Share Tech Mono', Consolas, monospace";
-            ctx.textAlign = 'left';
-            ctx.fillText(star.name, x + radius + 2, y + 2);
+            // Star label: only naked-eye stars (mag < 3.5). With the Gaia
+            // catalogs every faint star carried a 'Gaia DR3 ...' designation
+            // and the panel became unreadable text soup (2026-08-26).
+            if (star.mag < 3.5 && star.name) {
+                let nm = star.name;
+                if (nm.indexOf('Gaia DR3') === 0) nm = nm.replace('Gaia DR3 ', 'G');
+                ctx.fillStyle = 'rgba(0,170,51,0.55)';
+                ctx.font = "7px 'Share Tech Mono', Consolas, monospace";
+                ctx.textAlign = 'left';
+                ctx.fillText(nm, x + radius + 2, y + 2);
+            }
         }
     }
 }
