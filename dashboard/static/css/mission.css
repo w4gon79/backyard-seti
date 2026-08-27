@@ -651,9 +651,8 @@ html, body {
     display: block;
     width: 100%;
     max-width: 220px;
-    /* 190px: taller now that TELEMETRY is compacted (3-col stats); keep the
-       coords readout unclipped (verified via CDP geometry) */
-    height: 190px;
+    /* 175px per Joel (190 was too much after TELEMETRY compaction) */
+    height: 175px;
     flex: 0 0 auto;
 }
 
