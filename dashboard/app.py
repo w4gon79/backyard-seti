@@ -134,6 +134,7 @@ def extract_target_name(filename):
 # Track running scans
 scan_state = {
     'active': False,
+    'stop_requested': False,   # set by /api/scan/stop; finally block skips DB import
     'pid': None,
     'progress': {},
     'log_lines': [],
@@ -1170,6 +1171,7 @@ def api_scan_start():
     
     def run_scan():
         scan_state['active'] = True
+        scan_state['stop_requested'] = False
         scan_state['log_lines'] = []
         scan_state['active_scan_id'] = scan_id
         scan_state['scan_start_time'] = time.time()
@@ -1284,6 +1286,22 @@ def api_scan_start():
         finally:
             scan_state['active'] = False
             scan_state['pid'] = None
+            if scan_state.pop('stop_requested', False):
+                # User-stopped scan: mark interrupted, do NOT import to DB.
+                # (2026-08-27: stopped scans previously auto-imported as
+                # 'complete' with partial hits, polluting cross-epoch.)
+                try:
+                    _dir = os.path.join(RESULTS_DIR, scan_id)
+                    _meta = _load_scan_meta(_dir) or {}
+                    _meta['status'] = 'interrupted'
+                    _meta['interrupted_at'] = datetime.now().isoformat(timespec='seconds')
+                    with open(os.path.join(_dir, 'scan_meta.json'), 'w') as f:
+                        json.dump(_meta, f, indent=2)
+                    scan_state['log_lines'].append('Scan interrupted by user - not imported to DB (resumable)')
+                except Exception as e:
+                    scan_state['log_lines'].append(f'WARN: mark-interrupted failed: {e}')
+                scan_state['active_scan_id'] = None
+                return
             # Complete the scan: update scan_meta.json
             elapsed = time.time() - scan_state.get('scan_start_time', time.time())
             try:
@@ -1314,6 +1332,7 @@ def api_scan_stop():
     if scan_state['pid']:
         try:
             import signal
+            scan_state['stop_requested'] = True
             os.kill(scan_state['pid'], signal.SIGTERM)
             scan_state['active'] = False
             return jsonify({'status': 'stopped'})
@@ -1403,6 +1422,7 @@ def api_scan_resume():
 
     def run_scan():
         scan_state['active'] = True
+        scan_state['stop_requested'] = False
         scan_state['log_lines'] = []
         scan_state['active_scan_id'] = scan_id
         scan_state['scan_start_time'] = time.time()
@@ -1533,6 +1553,20 @@ def api_scan_resume():
         finally:
             scan_state['active'] = False
             scan_state['pid'] = None
+            if scan_state.pop('stop_requested', False):
+                # User-stopped scan: mark interrupted, do NOT import to DB.
+                try:
+                    _dir = os.path.join(RESULTS_DIR, scan_id)
+                    _meta = _load_scan_meta(_dir) or {}
+                    _meta['status'] = 'interrupted'
+                    _meta['interrupted_at'] = datetime.now().isoformat(timespec='seconds')
+                    with open(os.path.join(_dir, 'scan_meta.json'), 'w') as f:
+                        json.dump(_meta, f, indent=2)
+                    scan_state['log_lines'].append('Scan interrupted by user - not imported to DB (resumable)')
+                except Exception as e:
+                    scan_state['log_lines'].append(f'WARN: mark-interrupted failed: {e}')
+                scan_state['active_scan_id'] = None
+                return
             elapsed = time.time() - scan_state.get('scan_start_time', time.time())
             try:
                 _complete_scan_meta(scan_id, elapsed)
