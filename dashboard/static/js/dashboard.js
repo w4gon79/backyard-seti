@@ -939,16 +939,40 @@ function refreshSkyMapMarkers() {
     updateSkyMapInfo();
 }
 
-async function fetchFileHeader(path) {
-    try {
-        var resp = await fetch('/api/header?file=' + encodeURIComponent(path));
-        var data = await resp.json();
-        if (!data.error) {
-            fileHeaderCache[path] = data;
-            refreshFileDetailPanel();
-            refreshSkyMapMarkers();
-        }
-    } catch(e) {}
+// Header fetch queue: max 4 concurrent /api/header requests.
+// Unthrottled per-file fetches flooded Chrome's socket pool
+// (ERR_INSUFFICIENT_RESOURCES) when many files were selected at once,
+// which then starved ALL other fetches on the page (scan start included).
+var _hdrQueue = [];
+var _hdrActive = 0;
+var _hdrQueued = {};
+
+function fetchFileHeader(path) {
+    if (fileHeaderCache[path] || _hdrQueued[path]) return;
+    _hdrQueued[path] = true;
+    _hdrQueue.push(path);
+    _pumpHdrQueue();
+}
+
+async function _pumpHdrQueue() {
+    while (_hdrActive < 4 && _hdrQueue.length > 0) {
+        var path = _hdrQueue.shift();
+        _hdrActive++;
+        try {
+            var resp = await fetch('/api/header?file=' + encodeURIComponent(path));
+            var data = await resp.json();
+            if (!data.error) {
+                fileHeaderCache[path] = data;
+                refreshFileDetailPanel();
+            }
+        } catch (e) { /* give up quietly; cache stays empty */ }
+        delete _hdrQueued[path];
+        _hdrActive--;
+    }
+    // single marker refresh when the whole batch settles (no per-file storms)
+    if (_hdrQueue.length === 0 && _hdrActive === 0) {
+        refreshSkyMapMarkers();
+    }
 }
 
 function selectAllFiles() {
