@@ -203,12 +203,14 @@ def _discover_epochs(target='PROXCEN'):
         # Clean up: remove the files list, keep seqs
         del info['files']
 
-    # Merge with hardcoded epochs for PROXCEN (hardcoded wins if discovery missed pairs)
+    # Hardcoded epoch data is a pair RESCUE only: it may fill in seq
+    # pairs for an epoch whose files exist on disk but whose S/R pairing
+    # came up short. It must NEVER inject epochs that were not discovered
+    # on disk: a fresh install (empty data/fine) has to show an empty
+    # target list, not four orphan PROXCEN epochs (2026-08-27).
     if target.upper() == 'PROXCEN':
         for mjd, info in _HARDCODED_EPOCHS.items():
-            if mjd not in epochs:
-                epochs[mjd] = info
-            elif not epochs[mjd]['seqs']:
+            if mjd in epochs and not epochs[mjd]['seqs']:
                 epochs[mjd]['seqs'] = info['seqs']
 
     return dict(sorted(epochs.items()))
