@@ -495,6 +495,23 @@ html, body {
 .stat-cell .stat-value.amber  { color: var(--amber); text-shadow: var(--glow-amber); }
 .stat-cell .stat-value.red    { color: var(--red); text-shadow: var(--glow-red); }
 .stat-cell .stat-value.blue   { color: var(--phos-bright); text-shadow: var(--glow-mid); }
+
+/* Telemetry fills its panel: stretch the stats grid and cells evenly over
+   all available height (2026-08-27; blank space below the last row when the
+   panel got the 1fr column row). */
+.mc-telemetry .mc-panel-body {
+    display: flex;
+    flex-direction: column;
+}
+.mc-telemetry .mc-stats {
+    flex: 1;
+    grid-auto-rows: 1fr;
+    align-content: stretch;
+    height: 100%;
+}
+.mc-telemetry .stat-cell {
+    justify-content: center;
+}
 .stat-cell .stat-value.dim    { color: var(--phos-dim); }
 
 .stat-cell .stat-sub {
