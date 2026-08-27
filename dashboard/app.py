@@ -5649,6 +5649,42 @@ except Exception as _db_err:
 if __name__ == '__main__':
     import numpy as np  # needed by header endpoint
 
+    # Single-instance guard: PID lock file prevents duplicate dashboards
+    # (stale zombies caused the 2026-08-27 triple-process bug)
+    import atexit
+    _LOCK_FILE = os.path.join(DATA_DIR, 'dashboard.lock')
+
+    def _pid_alive(pid):
+        try:
+            import psutil
+            return psutil.pid_exists(pid)
+        except ImportError:
+            import ctypes
+            kernel32 = ctypes.windll.kernel32
+            handle = kernel32.OpenProcess(0x1000, 0, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+            if not handle:
+                return False
+            kernel32.CloseHandle(handle)
+            return True
+
+    if os.path.exists(_LOCK_FILE):
+        try:
+            with open(_LOCK_FILE) as _f:
+                _old_pid = int(_f.read().strip())
+        except (ValueError, OSError):
+            _old_pid = None
+        if _old_pid and _old_pid != os.getpid() and _pid_alive(_old_pid):
+            print(f'[FATAL] Another dashboard instance is running (PID {_old_pid}). '
+                  f'Kill it or delete {_LOCK_FILE}. Exiting.')
+            import sys
+            sys.exit(1)
+        print(f'[LOCK] Stale lock (PID {_old_pid} not running), reclaiming.')
+    os.makedirs(DATA_DIR, exist_ok=True)
+    with open(_LOCK_FILE, 'w') as _f:
+        _f.write(str(os.getpid()))
+    atexit.register(lambda: os.path.exists(_LOCK_FILE) and os.remove(_LOCK_FILE))
+    print(f'[LOCK] Single-instance lock acquired (PID {os.getpid()})')
+
     # Orphan recovery: mark any running stack jobs as interrupted
     # (scan subprocess may still be running, but the dashboard lost its handle)
     try:
