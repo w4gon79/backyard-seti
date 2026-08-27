@@ -3002,7 +3002,7 @@ async function deleteCrossEpochRun() {
         try {
             var resp = await fetch('/api/db/cross-epoch/' + val, { method: 'DELETE' });
             var data = await resp.json();
-            if (data.error) { alert(data.error); return; }
+            if (!resp.ok || data.error) { alert('Delete failed (HTTP ' + resp.status + '): ' + (data.error || 'unknown error')); return; }
             loadCrossEpochHistory();
         } catch(e) {
             alert('Delete failed: ' + e.message);

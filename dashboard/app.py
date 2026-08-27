@@ -47,6 +47,9 @@ app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 def add_utf8_headers(response):
     if response.mimetype == 'application/json' or response.mimetype == 'text/plain':
         response.headers['Content-Type'] = response.mimetype + '; charset=utf-8'
+        # API JSON must never be browser-cached (stale history lists after deletes)
+        if request.path.startswith('/api/') and request.method == 'GET':
+            response.headers['Cache-Control'] = 'no-store'
     return response
 
 # Configuration
