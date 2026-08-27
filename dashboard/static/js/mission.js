@@ -488,39 +488,73 @@ function drawFreqMap() {
     const total = mcState.subBandsTotal || 1;
     const done = mcState.subBandsDone;
     const current = mcState.currentSubBand;
-    const subBandWidth = barW / total;
 
-    // GBT h5 files run DESCENDING: sub-band 0 is the HIGH-frequency end.
-    // The fill is indexed by sub-band; the amber marker is placed by real
-    // frequency. Without mirroring, fill and marker sit on opposite ends.
+    // Fill by REAL frequency windows (2026-08-27 fix). sub_bands_total is
+    // PER-FILE, but the bar spans the whole multi-file scan window: mapping
+    // sub-band INDEX across the full bar compressed a single node's fill
+    // into the wrong part of the bar while the amber marker (placed by real
+    // frequency) was correct, so the two disagreed by hundreds of MHz on
+    // multi-node GBT epochs. Derive the current file's band edges from the
+    // current sub-band window instead.
     const descending = (mcState.currentFreqStart || 0) > (mcState.currentFreqStop || 0);
-    const segX = (i) => descending
-        ? padX + (total - 1 - i) * subBandWidth
-        : padX + i * subBandWidth;
+    const subW = Math.abs((mcState.currentFreqStart || 0) - (mcState.currentFreqStop || 0));
+    const fx = (f) => padX + ((f - fStart) / fRange) * barW;
+    const drawSeg = (lo, hi, fillStyle, topStyle) => {
+        const x1 = Math.max(padX, fx(Math.min(lo, hi)));
+        const x2 = Math.min(padX + barW, fx(Math.max(lo, hi)));
+        if (x2 <= x1) return;
+        ctx.fillStyle = fillStyle;
+        ctx.fillRect(x1, barY, x2 - x1, barH);
+        if (topStyle) { ctx.fillStyle = topStyle; ctx.fillRect(x1, barY, x2 - x1, 2); }
+    };
 
-    // Draw each sub-band segment
-    for (let i = 0; i < total; i++) {
-        const x = segX(i);
-        const segW = Math.max(subBandWidth - 1, 0.5);
-
-        if (i < done) {
-            // Completed: medium green fill
-            ctx.fillStyle = 'rgba(0,170,51,0.35)';
-            ctx.fillRect(x, barY, segW, barH);
-            ctx.fillStyle = 'rgba(51,255,51,0.5)';
-            ctx.fillRect(x, barY, segW, 2);
-        } else if (i === current && mcState.active) {
-            // Current: bright pulsing green
-            const pulse = 0.3 + 0.3 * Math.sin(Date.now() * 0.005);
-            ctx.fillStyle = `rgba(51,255,51,${pulse})`;
-            ctx.fillRect(x, barY, segW, barH);
-            ctx.strokeStyle = `rgba(51,255,51,${0.5 + pulse * 0.5})`;
-            ctx.lineWidth = 1;
-            ctx.strokeRect(x + 0.5, barY + 0.5, segW - 1, barH - 1);
+    let fileLo = null, fileHi = null, curLo = null, curHi = null;
+    if (subW > 0 && total > 0) {
+        if (descending) {
+            fileHi = (mcState.currentFreqStart || 0) + (current + 1) * subW;
+            fileLo = fileHi - total * subW;
         } else {
-            // Pending: dark green
-            ctx.fillStyle = 'rgba(0,51,17,0.5)';
-            ctx.fillRect(x, barY, segW, barH);
+            fileLo = (mcState.currentFreqStart || 0) - current * subW;
+            fileHi = fileLo + total * subW;
+        }
+        curLo = Math.min(mcState.currentFreqStart || 0, mcState.currentFreqStop || 0);
+        curHi = Math.max(mcState.currentFreqStart || 0, mcState.currentFreqStop || 0);
+    }
+
+    if (fileLo !== null) {
+        // Completed sub-bands: from this file's start edge to the current window
+        if (descending) drawSeg(curHi, fileHi, 'rgba(0,170,51,0.35)', 'rgba(51,255,51,0.5)');
+        else drawSeg(fileLo, curLo, 'rgba(0,170,51,0.35)', 'rgba(51,255,51,0.5)');
+        // Current sub-band: bright pulsing green
+        if (mcState.active) {
+            const pulse = 0.3 + 0.3 * Math.sin(Date.now() * 0.005);
+            drawSeg(curLo, curHi, `rgba(51,255,51,${pulse.toFixed(3)})`, null);
+        }
+        // Pending: dark green over the remainder of this file's band
+        if (descending) drawSeg(fileLo, curLo, 'rgba(0,51,17,0.5)', null);
+        else drawSeg(curHi, fileHi, 'rgba(0,51,17,0.5)', null);
+    } else {
+        // Fallback (no sub-band window info yet): index-based legacy fill
+        const subBandWidth = barW / total;
+        const segX = (i) => descending
+            ? padX + (total - 1 - i) * subBandWidth
+            : padX + i * subBandWidth;
+        for (let i = 0; i < total; i++) {
+            const x = segX(i);
+            const segW = Math.max(subBandWidth - 1, 0.5);
+            if (i < done) {
+                ctx.fillStyle = 'rgba(0,170,51,0.35)';
+                ctx.fillRect(x, barY, segW, barH);
+                ctx.fillStyle = 'rgba(51,255,51,0.5)';
+                ctx.fillRect(x, barY, segW, 2);
+            } else if (i === current && mcState.active) {
+                const pulse = 0.3 + 0.3 * Math.sin(Date.now() * 0.005);
+                ctx.fillStyle = `rgba(51,255,51,${pulse})`;
+                ctx.fillRect(x, barY, segW, barH);
+            } else {
+                ctx.fillStyle = 'rgba(0,51,17,0.5)';
+                ctx.fillRect(x, barY, segW, barH);
+            }
         }
     }
 
