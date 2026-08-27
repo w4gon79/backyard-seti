@@ -146,13 +146,14 @@ async function updateStarmapTarget(targetName) {
     STARMAP_CENTER_RA = t.ra;
     STARMAP_CENTER_DEC = t.dec;
 
-    // Real star field (2026-08-26): if this target has no curated neighbors,
-    // load the pre-generated Gaia catalog (static/stars/{KEY}.json, built by
-    // tmp_gaia_stars.py: 250 stars to G<10.5 within 12 deg). The target star
-    // itself is usually fainter than the catalog cutoff, so prepend it.
+    // Real star field: DYNAMIC Gaia fetch (2026-08-27). The backend serves
+    // a cached catalog if one exists and otherwise queries Gaia DR3 live
+    // around the target's coordinates and caches the result. Any target any
+    // user scans gets a real star field; no per-target curation, ever.
     if (t.stars.length < 5) {
         try {
-            const sresp = await fetch('/static/stars/' + encodeURIComponent(key) + '.json');
+            const sresp = await fetch('/api/stars/' + encodeURIComponent(key)
+                                      + '?ra=' + t.ra + '&dec=' + t.dec);
             if (sresp.ok) {
                 const cat = await sresp.json();
                 if (cat && Array.isArray(cat.stars) && cat.stars.length > 0) {
@@ -256,7 +257,11 @@ function drawStarmap() {
     // increases leftward. We'll use standard rectangular: RA right = higher.
     // (For a small field this orientation doesn't matter much.)
     function raToX(ra) {
-        return padL + ((ra - (STARMAP_CENTER_RA - STARMAP_RANGE_RA)) / (2 * STARMAP_RANGE_RA)) * plotW;
+        // Wrap-aware (2026-08-27): fields near RA 0h (e.g. M31 at 0.71h) span
+        // the 0/360 boundary. Linear mapping clamped stars at RA 350-360 to
+        // far off-panel, leaving the left half of the FOV empty.
+        const delta = ((ra - STARMAP_CENTER_RA + 540) % 360) - 180;
+        return padL + ((delta + STARMAP_RANGE_RA) / (2 * STARMAP_RANGE_RA)) * plotW;
     }
     function decToY(dec) {
         // Dec increases upward (lower Y = higher Dec)
@@ -269,10 +274,10 @@ function drawStarmap() {
     ctx.font = "7px 'Share Tech Mono', Consolas, monospace";
     ctx.fillStyle = 'rgba(0, 102, 34, 0.4)';
 
-    // Vertical grid lines (RA)
-    const raStart = Math.ceil((STARMAP_CENTER_RA - STARMAP_RANGE_RA) / 5) * 5;
-    const raEnd   = Math.floor((STARMAP_CENTER_RA + STARMAP_RANGE_RA) / 5) * 5;
-    for (let ra = raStart; ra <= raEnd; ra += 5) {
+    // Vertical grid lines (RA) — step in wrapped offset space so lines
+    // render continuously across the 0/360 boundary
+    for (let d = -STARMAP_RANGE_RA; d <= STARMAP_RANGE_RA + 0.01; d += 5) {
+        const ra = (((STARMAP_CENTER_RA + d) % 360) + 360) % 360;
         const x = raToX(ra);
         if (x < padL || x > padL + plotW) continue;
         ctx.beginPath();

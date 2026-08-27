@@ -1325,6 +1325,65 @@ def api_scan_start():
     return jsonify({'status': 'started', 'scan_id': scan_id, 'pid': scan_state.get('pid')})
 
 
+@app.route('/api/stars/<key>')
+def api_stars(key):
+    """Star-field catalog for the Mission Control starmap.
+
+    Serves the cached static/stars/<KEY>.json if present; otherwise runs a
+    LIVE Gaia DR3 cone query (G<6.5, 20 deg radius, 300 brightest) around
+    the requested coordinates, caches it to disk, and returns it. Fully
+    dynamic: any target any user scans gets a real field, no curation.
+    """
+    import urllib.request as _ur
+    import urllib.parse as _up
+    key = str(key).upper().strip()
+    cache_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              'static', 'stars', key + '.json')
+    if os.path.isfile(cache_path):
+        try:
+            with open(cache_path) as f:
+                return jsonify(json.load(f))
+        except (OSError, ValueError):
+            pass  # fall through to live lookup
+    ra = request.args.get('ra', type=float)
+    dec = request.args.get('dec', type=float)
+    if ra is None or dec is None or not (-360 <= ra <= 360) or not (-90 <= dec <= 90):
+        return jsonify({'error': 'pass ?ra=&dec= (degrees) for live Gaia lookup'}), 400
+    adql = (
+        f"SELECT TOP 300 source_id, ra, dec, phot_g_mean_mag "
+        f"FROM gaiadr3.gaia_source "
+        f"WHERE 1=CONTAINS(POINT('ICRS', ra, dec), CIRCLE('ICRS', "
+        f"{ra:.5f}, {dec:.5f}, 20)) "
+        f"AND phot_g_mean_mag < 6.5 AND phot_g_mean_mag IS NOT NULL "
+        f"ORDER BY phot_g_mean_mag ASC")
+    params = _up.urlencode({'REQUEST': 'doQuery', 'LANG': 'ADQL',
+                            'FORMAT': 'json', 'QUERY': adql})
+    try:
+        with _ur.urlopen('https://gea.esac.esa.int/tap-server/tap/sync?' + params,
+                         timeout=45) as r:
+            data = json.load(r)
+    except Exception as e:
+        return jsonify({'error': f'Gaia TAP query failed: {e}'}), 502
+    cols = [c['name'] for c in data.get('metadata', [])]
+    if not cols:
+        return jsonify({'error': 'Gaia returned no columns'}), 502
+    i_sid, i_ra, i_dec, i_mag = (cols.index('source_id'), cols.index('ra'),
+                                 cols.index('dec'), cols.index('phot_g_mean_mag'))
+    stars = [{'ra': float(row[i_ra]), 'dec': float(row[i_dec]),
+              'mag': float(row[i_mag]), 'name': f'Gaia DR3 {row[i_sid]}'}
+             for row in data.get('data', [])]
+    if not stars:
+        return jsonify({'stars': [], 'target': key, 'live': True})
+    cat = {'target': key, 'center_ra': ra, 'center_dec': dec, 'stars': stars}
+    try:
+        os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+        with open(cache_path, 'w') as f:
+            json.dump(cat, f)
+    except OSError as e:
+        print(f'[stars] cache write failed for {key}: {e}')
+    return jsonify(cat)
+
+
 @app.route('/api/scan/stop', methods=['POST'])
 def api_scan_stop():
     """Stop a running scan."""
