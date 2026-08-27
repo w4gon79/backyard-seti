@@ -2916,7 +2916,11 @@ def api_targets_simbad():
     if not name:
         return jsonify({'error': 'name required'}), 400
     from target_registry import simbad_search
-    return jsonify({'results': simbad_search(name)})
+    try:
+        return jsonify({'results': simbad_search(name)})
+    except RuntimeError as e:
+        # Network/TAP failure is NOT 'no match' (2026-08-26 fix)
+        return jsonify({'error': str(e)}), 502
 
 
 @app.route('/api/registry/<name>/blcheck', methods=['POST'])

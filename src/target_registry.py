@@ -17,6 +17,7 @@ import os
 import re
 import sqlite3
 import sys
+import time as _time
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
@@ -238,6 +239,20 @@ def _simbad_candidates(raw):
             cands.append(s)
 
     toks = raw.split()
+    # Messier / NGC normalization (2026-08-26): SIMBAD idents use spaced
+    # forms ('M 31', main_id 'M  31'), so 'M31' must try those variants or
+    # a single failed exact-id query strands the user with no match.
+    m_ngc = re.fullmatch(r'[Nn][Gg][Cc]\s*(\d{1,4})', raw)
+    m_mes = re.fullmatch(r'[Mm]\s*(\d{1,3})', raw)
+    if m_ngc:
+        n = int(m_ngc.group(1))
+        for v in (f'NGC {n}', f'NGC  {n}', f'NGC{n}'):
+            add(v)
+    elif m_mes:
+        n = int(m_mes.group(1))
+        for v in (f'M {n}', f'M  {n}', f'MESSIER {n:03d}', f'MESSIER{n:03d}',
+                  f'MESSIER {n}', f'M{n:03d}'):
+            add(v)
     if len(toks) >= 2:
         first = toks[0].lower()
         greeks = _GREEK_PREFIX.get(first)
@@ -264,20 +279,29 @@ def _simbad_candidates(raw):
     return cands
 
 
-def _tap_rows(query):
-    """Run a SIMBAD TAP sync query, return data rows ([] on error)."""
+def _tap_rows(query, retries=3):
+    """Run a SIMBAD TAP sync query, return data rows.
+    Retries transient failures; RAISES RuntimeError on final failure so
+    callers can tell 'query failed' apart from 'no such object'
+    (2026-08-26: previously returned [] on error, which surfaced to users
+    as the misleading 'No SIMBAD match')."""
     url = SIMBAD_TAP + '?' + urllib.parse.urlencode(
         {'request': 'doQuery', 'lang': 'adql', 'format': 'json',
          'query': query})
-    req = urllib.request.Request(url,
-                                 headers={'User-Agent': 'BackyardSETI/1.0'})
-    try:
-        with urllib.request.urlopen(req, timeout=25) as r:
-            data = json.loads(r.read().decode())
-        return data.get('data', [])
-    except Exception as e:
-        print(f'[registry] SIMBAD TAP failed: {e}')
-        return []
+    last_err = None
+    for attempt in range(retries):
+        if attempt:
+            _time.sleep(2 * attempt)
+        req = urllib.request.Request(url,
+                                     headers={'User-Agent': 'BackyardSETI/1.0'})
+        try:
+            with urllib.request.urlopen(req, timeout=25) as r:
+                data = json.loads(r.read().decode())
+            return data.get('data', [])
+        except Exception as e:
+            last_err = e
+            print(f'[registry] SIMBAD TAP attempt {attempt + 1}/{retries} failed: {e}')
+    raise RuntimeError(f'SIMBAD query failed after {retries} attempts: {last_err}')
 
 
 def simbad_search(name, limit=5):
@@ -311,13 +335,19 @@ def simbad_search(name, limit=5):
         if out:
             return out[:limit]
 
-    # Last resort: substring on ident (works for proper names)
+    # Last resort: substring on ident (works for proper names).
+    # 2026-08-26: pattern had a mandatory trailing space ('%name %') which
+    # missed most idents; plain contains now.
     for pat in (raw, raw.capitalize()):
         esc = pat.replace("'", "''")
         q = ("SELECT TOP {n} b.main_id, b.ra, b.dec FROM basic b "
              "JOIN ident i ON i.oidref = b.oid "
              "WHERE i.id LIKE '%{p} %'").format(n=limit, p=esc)
-        for main_id, ra, dec in _tap_rows(q):
+        try:
+            rows = _tap_rows(q)
+        except RuntimeError:
+            break  # network dead; don't retry substring variants
+        for main_id, ra, dec in rows:
             if ra is None or dec is None or main_id in seen:
                 continue
             seen.add(main_id)
