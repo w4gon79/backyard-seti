@@ -4682,6 +4682,32 @@ def api_stack_classify(job_id):
         off_tol_mhz = 0.01
         on_tol_mhz = 0.005
 
+        # Batch-preload all hits for this target's scans ONCE, then match
+        # peaks in memory with bisect. The old per-peak SQL (2 queries x
+        # 200 peaks against a COALESCE range that defeats every index)
+        # took ~1s per query on the 13.8M-row hits table = ~7 min per
+        # classify call, which hung the async badge loader (2026-08-27).
+        import bisect as _bs
+        on_hits = []   # sorted (freq, scan_idx)
+        off_hits = []  # sorted (freq, snr)
+        if scan_ids:
+            _ph = ','.join('?' * len(scan_ids))
+            _sidx = {sid: i for i, sid in enumerate(scan_ids)}
+            for r in conn.execute(
+                    f"SELECT scan_id, on_off, COALESCE(barycentric_freq, freq) AS f, snr "
+                    f"FROM hits WHERE scan_id IN ({_ph})", scan_ids):
+                _f = r['f']
+                if _f is None:
+                    continue
+                if r['on_off'] == 'ON':
+                    on_hits.append((float(_f), _sidx.get(r['scan_id'], -1)))
+                else:
+                    off_hits.append((float(_f), float(r['snr'] or 0)))
+            on_hits.sort()
+            off_hits.sort()
+        on_f = [h[0] for h in on_hits]
+        off_f = [h[0] for h in off_hits]
+
         # RFI zones for this job's epochs (observed frame).
         # Stack peak freqs are near-observed frame (zones masked pre-bary),
         # so direct comparison with a small tolerance is acceptable.
@@ -4731,30 +4757,22 @@ def api_stack_classify(job_id):
                     break
 
             # Check OFF contamination: count OFF hits within ±off_tol
+            # (in-memory bisect over the preloaded arrays)
             off_count = 0
             off_max_snr = 0
-            if scan_ids:
-                placeholders = ','.join('?' * len(scan_ids))
-                off_row = conn.execute(
-                    f"SELECT COUNT(*) as cnt, MAX(snr) as max_snr FROM hits "
-                    f"WHERE scan_id IN ({placeholders}) AND on_off = 'OFF' "
-                    f"AND COALESCE(barycentric_freq, freq) BETWEEN ? AND ?",
-                    scan_ids + [freq - off_tol_mhz, freq + off_tol_mhz]
-                ).fetchone()
-                off_count = off_row['cnt'] if off_row else 0
-                off_max_snr = off_row['max_snr'] if off_row and off_row['max_snr'] else 0
+            if off_hits:
+                _lo = _bs.bisect_left(off_f, freq - off_tol_mhz)
+                _hi = _bs.bisect_right(off_f, freq + off_tol_mhz)
+                off_count = _hi - _lo
+                off_max_snr = max((off_hits[i][1] for i in range(_lo, _hi)),
+                                  default=0)
 
-            # Check multi-epoch presence: how many distinct scans have ON hits near this freq?
+            # Check multi-epoch presence: distinct scans with ON hits near freq
             epoch_presence = 0
-            if scan_ids:
-                placeholders = ','.join('?' * len(scan_ids))
-                presence_row = conn.execute(
-                    f"SELECT COUNT(DISTINCT scan_id) as cnt FROM hits "
-                    f"WHERE scan_id IN ({placeholders}) AND on_off = 'ON' "
-                    f"AND COALESCE(barycentric_freq, freq) BETWEEN ? AND ?",
-                    scan_ids + [freq - on_tol_mhz, freq + on_tol_mhz]
-                ).fetchone()
-                epoch_presence = presence_row['cnt'] if presence_row else 0
+            if on_hits:
+                _lo = _bs.bisect_left(on_f, freq - on_tol_mhz)
+                _hi = _bs.bisect_right(on_f, freq + on_tol_mhz)
+                epoch_presence = len({on_hits[i][1] for i in range(_lo, _hi)})
 
             # Classification logic
             score = 0
