@@ -89,9 +89,23 @@ targets have sequence numbers adjacent to yours in the same session MJD.
 
 Each GBT scan is split across ~26 compute nodes, one 187.5 MHz sub-band file
 each (~3.8 GB), together covering 1.1-11.9 GHz (~100 GB per scan). You can
-**cherry-pick sub-bands**: L-band (1.1-2.0 GHz) is just 4 files (~15 GB) per
-scan, selected by the API's `center_freq` field (1220, 1408, 1595, 1783 MHz).
+**cherry-pick sub-bands**: L-band (1.1-2.0 GHz) is typically 4-6 files per
+scan depending on how many nodes were recording that session (MJD 58832
+had 6: blc71-76 at centers 1033/1220/1408/1595/1783/1970 MHz), selected by
+the API's `center_freq` field. File-count arithmetic: scans x nodes = files
+(3 A-scans x 6 nodes = 18 target files for a 58832-style session).
 For serious RFI work include the companion scans' same sub-bands too.
+
+**Bands differ between epochs - check before planning cross-epoch.** BL
+swaps GBT receivers between sessions, so epochs of the same target are
+usually in entirely different bands. MESSIER031: X (7.8-11.2 GHz),
+L (1.1-2.0), S (2.4 spliced), C (4.0-8.2) across its four epochs - zero
+shared coverage, so cross-epoch matching cannot produce candidates and the
+analysis value is within-epoch (A-scans vs ABACAD companions, OFF-control
+mode). Parkes epochs of a target share the same band, which is why
+cross-epoch works there. Before expecting cross-epoch hits from a GBT
+target, compare each session's center_freq list (dashboard session browser
+shows in-band counts per band selection).
 
 **Downloading from the dashboard:** search the target (e.g. `GJ447` for
 Ross 128). When the results contain GBT files, a **"GBT data detected"**
