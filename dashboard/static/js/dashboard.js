@@ -2191,28 +2191,35 @@ async function deleteFile(path, name) {
 }
 
 function autoFillBandRange() {
-    // Try to read the band range from the first selected file's header
-    var bandFound = false;
-    for (var path in fileHeaderCache) {
+    // Union of the band ranges across ALL SELECTED files' headers.
+    // Old version grabbed the first cached header and returned: for a
+    // multi-node GBT selection (blc71-76, each a different 187.5 MHz
+    // chunk of the 1.1 GHz receiver band) that showed only one node's
+    // band and would have excluded the rest if used as the scan window.
+    var fMin = null, fMax = null, any = false;
+    var paths = [];
+    selectedFiles.forEach(function(p) { paths.push(p); });
+    if (paths.length === 0) { for (var p in fileHeaderCache) paths.push(p); }
+    paths.forEach(function(path) {
         var h = fileHeaderCache[path];
-        if (h && h.header) {
-            var fch1 = h.header.fch1;
-            var nchans = h.header.nchans;
-            var foff = h.header.foff;
-            if (typeof fch1 === 'number' && typeof nchans === 'number' && typeof foff === 'number') {
-                var fEnd = fch1 + nchans * foff;
-                var fMin = Math.min(fch1, fEnd);
-                var fMax = Math.max(fch1, fEnd);
-                document.getElementById('ctrl-f-start').value = fMin.toFixed(1);
-                document.getElementById('ctrl-f-stop').value = fMax.toFixed(1);
-                bandFound = true;
-                return;
-            }
-        }
+        if (!h || !h.header) return;
+        var fch1 = h.header.fch1, nchans = h.header.nchans, foff = h.header.foff;
+        if (typeof fch1 !== 'number' || typeof nchans !== 'number' ||
+            typeof foff !== 'number') return;
+        var fEnd = fch1 + nchans * foff;
+        var lo = Math.min(fch1, fEnd), hi = Math.max(fch1, fEnd);
+        fMin = (fMin === null) ? lo : Math.min(fMin, lo);
+        fMax = (fMax === null) ? hi : Math.max(fMax, hi);
+        any = true;
+    });
+    if (any) {
+        document.getElementById('ctrl-f-start').value = fMin.toFixed(1);
+        document.getElementById('ctrl-f-stop').value = fMax.toFixed(1);
+    } else {
+        // Fallback: if no headers loaded, clear the fields for auto-detect
+        document.getElementById('ctrl-f-start').value = '';
+        document.getElementById('ctrl-f-stop').value = '';
     }
-    // Fallback: if no headers loaded, clear the fields for auto-detect
-    document.getElementById('ctrl-f-start').value = '';
-    document.getElementById('ctrl-f-stop').value = '';
 }
 
 function escapeHtml(text) { var d = document.createElement('div'); d.textContent = text; return d.innerHTML; }
