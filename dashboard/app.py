@@ -2575,10 +2575,18 @@ def api_barycentric_correct():
                             count_hits)
             bary_updates = []
             vel = mjd_val = None
+            n_missing = 0
             for fname in result['files_corrected']:
-                bp = os.path.join(result['barycentric_dir'],
-                                  os.path.basename(fname) + '_bary_hits.json')
+                # 2026-08-28 fix: files_corrected entries are already
+                # *_bary_hits.json paths. Appending the suffix again made
+                # every lookup miss and the backfill silently no-oped
+                # (M31: 1.44M hits stayed NULL, scan flagged corrected).
+                base = os.path.basename(fname)
+                if not base.endswith('_bary_hits.json'):
+                    base += '_bary_hits.json'
+                bp = os.path.join(result['barycentric_dir'], base)
                 if not os.path.isfile(bp):
+                    n_missing += 1
                     continue
                 with open(bp) as f:
                     bdata = json.load(f)
@@ -2607,6 +2615,10 @@ def api_barycentric_correct():
                 if vel is not None:
                     update_scan_barycentric(
                         scan_id, vel, mjd_val, ra_hours, dec_deg, telescope)
+            else:
+                bary_stats = {'bary_updated': 0, 'bary_attempted': 0,
+                              'warning': (f'no bary JSONs loaded '
+                                          f'({n_missing} missing) - DB sync skipped')}
         except Exception as e:
             import traceback
             bary_stats = {'db_sync_error': str(e),
