@@ -658,6 +658,31 @@ def api_scan_rejection(scan_id):
     return jsonify({'rejection': rejection})
 
 
+@app.route('/api/scans/<scan_id>/triage', methods=['GET', 'POST'])
+def api_scan_triage(scan_id):
+    """Single-epoch candidate triage (adapted Layer 2.5 scorecard).
+    POST runs it fresh; GET serves the cached triage_results.json.
+    Works on any scan with an ON/OFF rejection run - no extra epochs needed."""
+    scan_dir = _get_scan_dir(scan_id)
+    if not scan_dir:
+        return jsonify({'error': f'Scan not found: {scan_id}'}), 404
+    cached = os.path.join(scan_dir, 'triage', 'triage_results.json')
+    if request.method == 'GET' and os.path.isfile(cached):
+        try:
+            with open(cached) as f:
+                return jsonify(json.load(f))
+        except Exception:
+            pass
+    try:
+        from ml.single_epoch_triage import run_triage
+        result = run_triage(scan_id, scan_dir)
+        return jsonify(result), (400 if 'error' in result else 200)
+    except Exception as e:
+        import traceback
+        return jsonify({'error': str(e),
+                        'traceback': traceback.format_exc()[-400:]}), 500
+
+
 def _epoch_label_from_files(files):
     """Extract the observation epoch (BL MJD, 5-digit str) from a scan's
     fine file list. Two grammars:

@@ -85,6 +85,7 @@ document.getElementById('btn-archive-scan').onclick = archiveCurrentScan;
     document.getElementById('results-freq-min').oninput = debouncedFilter;
     document.getElementById('results-freq-max').oninput = debouncedFilter;
     document.getElementById('btn-run-rejection').onclick = runRejection;
+    document.getElementById('btn-run-triage').onclick = runTriage;
     document.getElementById('scan-selector').onchange = onScanSelected;
 
     // Barycentric init
@@ -1518,6 +1519,7 @@ async function loadScanResults(scanId) {
             if (rdata.rejection && rdata.rejection.candidates) {
                 rejectionCandidates = rdata.rejection.candidates;
                 renderRejectionSummary(rdata.rejection.summary, rdata.rejection.parameters);
+                loadCachedTriage(scanId);
             } else {
                 rejectionCandidates = [];
                 document.getElementById('rejection-summary').innerHTML =
@@ -1618,6 +1620,65 @@ function renderScanMetaDisplay(meta, results) {
     if (p.max_drift) html += '<span class="sm-sep">|</span><span>drift \u2264 ' + p.max_drift + ' Hz/s</span>';
     if (p.snr) html += '<span class="sm-sep">|</span><span>SNR \u2265 ' + p.snr + '</span>';
     display.innerHTML = html;
+}
+
+// === Single-epoch candidate triage (adapted Layer 2.5 scorecard) ===
+async function runTriage() {
+    if (!currentScanId) { alert('Select a scan first.'); return; }
+    var btn = document.getElementById('btn-run-triage');
+    var div = document.getElementById('triage-summary');
+    btn.disabled = true; btn.textContent = 'Triaging...';
+    div.innerHTML = '<p style="color:#8ab4f8;">Running candidate triage...</p>';
+    try {
+        var resp = await fetch('/api/scans/' + encodeURIComponent(currentScanId) + '/triage', {method: 'POST'});
+        var data = await resp.json();
+        if (data.error) { div.innerHTML = '<p style="color:#ef5350;">' + data.error + '</p>'; return; }
+        renderTriageResults(data);
+    } catch (e) {
+        div.innerHTML = '<p style="color:#ef5350;">Triage failed: ' + e + '</p>';
+    } finally {
+        btn.disabled = false; btn.textContent = 'Triage Candidates';
+    }
+}
+
+async function loadCachedTriage(scanId) {
+    var div = document.getElementById('triage-summary');
+    if (!div || !scanId) return;
+    try {
+        var resp = await fetch('/api/scans/' + encodeURIComponent(scanId) + '/triage');
+        if (!resp.ok) return;
+        var data = await resp.json();
+        if (data && !data.error && data.n_candidates) renderTriageResults(data);
+    } catch (e) {}
+}
+
+function renderTriageResults(data) {
+    var div = document.getElementById('triage-summary');
+    var vc = data.verdict_counts || {};
+    var fc = data.flag_counts || {};
+    var html = '<div class="rejection-stats">' +
+        '<span class="rstat"><span class="rstat-label">Candidates</span><span class="rstat-val">' + (data.n_candidates || 0).toLocaleString() + '</span></span>' +
+        '<span class="rstat"><span class="rstat-label">Interesting</span><span class="rstat-val" style="color:#66bb6a;font-weight:bold;">' + (vc.interesting || 0) + '</span></span>' +
+        '<span class="rstat"><span class="rstat-label">Suspicious</span><span class="rstat-val" style="color:#ffb74d;">' + (vc.suspicious || 0) + '</span></span>' +
+        '<span class="rstat"><span class="rstat-label">Likely RFI</span><span class="rstat-val" style="color:#ef5350;">' + (vc.likely_rfi || 0) + '</span></span></div>';
+    html += '<div style="font-size:0.82em;color:#546e7a;margin:4px 0 6px;">Flags: rfi_zone ' + (fc.rfi_zone || 0) + ', zero_drift ' + (fc.zero_drift || 0) + ', high_snr ' + (fc.high_snr || 0) + ', cluster ' + (fc.cluster || 0) + ', drift_spread ' + (fc.drift_spread || 0) + ' | bary matched ' + (data.n_bary_matched || 0) + '/' + (data.n_candidates || 0) + '</div>';
+    var top = (data.candidates || []).filter(function(c) { return c.verdict !== 'likely_rfi'; }).slice(0, 25);
+    if (top.length) {
+        html += '<div class="table-scroll-wrapper" style="max-height:220px;"><table style="width:100%;font-size:0.82em;border-collapse:collapse;">' +
+            '<thead><tr><th style="text-align:left;padding:2px 6px;">Freq (MHz)</th><th style="text-align:left;padding:2px 6px;">Bary (MHz)</th><th style="text-align:left;padding:2px 6px;">Drift</th><th style="text-align:left;padding:2px 6px;">SNR</th><th style="text-align:left;padding:2px 6px;">Score</th><th style="text-align:left;padding:2px 6px;">Flags</th></tr></thead><tbody>';
+        for (var i = 0; i < top.length; i++) {
+            var c = top[i];
+            html += '<tr><td style="padding:2px 6px;">' + (c.freq != null ? c.freq.toFixed(4) : '-') + '</td>' +
+                '<td style="padding:2px 6px;">' + (c.barycentric_freq != null ? c.barycentric_freq.toFixed(4) : '-') + '</td>' +
+                '<td style="padding:2px 6px;">' + (c.drift_rate != null ? c.drift_rate.toFixed(4) : '-') + '</td>' +
+                '<td style="padding:2px 6px;">' + c.snr + '</td><td style="padding:2px 6px;">' + c.rfi_score + '</td>' +
+                '<td style="padding:2px 6px;color:' + (c.verdict === 'interesting' ? '#66bb6a' : '#ffb74d') + ';">' + (c.flags && c.flags.length ? c.flags.join(', ') : 'clean') + '</td></tr>';
+        }
+        html += '</tbody></table></div>';
+    } else {
+        html += '<p style="color:#ef5350;">All candidates flagged likely RFI. Nothing to follow up.</p>';
+    }
+    div.innerHTML = html;
 }
 
 function renderRejectionSummary(summary, params) {

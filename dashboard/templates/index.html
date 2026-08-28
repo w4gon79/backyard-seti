@@ -305,9 +305,13 @@
                         <input type="number" id="reject-drift-tol" value="100" min="0.01" max="1000" step="1" title="Drift rate match tolerance in Hz/s. Since turbo_seti assigns slightly different drift rates to the same RFI line across files, set high (100 = frequency-only match). Lower values require both freq AND drift to match.">
                         <span class="tol-hint" title="At 100 Hz/s drift tolerance, matching is effectively frequency-only. This is recommended because the same RFI line often appears at different drift rates across ON/OFF files due to turbo_seti bin alignment.">(100 = effectively frequency-only match)</span>
                         <button id="btn-run-rejection" class="btn-primary">Run ON/OFF Rejection</button>
+                        <button id="btn-run-triage" class="btn-primary" title="Scorecard triage of rejection candidates: RFI zones, zero-drift, SNR, clustering, drift spread. No extra epochs needed.">Triage Candidates</button>
                     </div>
                     <div id="rejection-summary" class="rejection-summary">
                         <p style="color:#546e7a;">No rejection run yet. Click "Run ON/OFF Rejection" to filter RFI.</p>
+                    </div>
+                    <div id="triage-summary" class="rejection-summary">
+                        <p style="color:#546e7a;">Run rejection first, then "Triage Candidates" for the RFI scorecard.</p>
                     </div>
                 </div>
                 <div id="hit-chart"></div>
@@ -352,7 +356,7 @@
     </div>
 </div>
 
-<script src="/static/js/dashboard.js?v=92"></script>
+<script src="/static/js/dashboard.js?v=93"></script>
 <script src="/static/js/targets.js?v=3"></script>
 </body>
 </html>
