@@ -1667,7 +1667,7 @@ function renderTriageResults(data) {
         '<span class="rstat"><span class="rstat-label">Interesting</span><span class="rstat-val" style="color:#66bb6a;font-weight:bold;">' + (vc.interesting || 0) + '</span></span>' +
         '<span class="rstat"><span class="rstat-label">Suspicious</span><span class="rstat-val" style="color:#ffb74d;">' + (vc.suspicious || 0) + '</span></span>' +
         '<span class="rstat"><span class="rstat-label">Likely RFI</span><span class="rstat-val" style="color:#ef5350;">' + (vc.likely_rfi || 0) + '</span></span></div>';
-    html += '<div style="font-size:0.82em;color:#546e7a;margin:4px 0 6px;">Flags: rfi_zone ' + (fc.rfi_zone || 0) + ', zero_drift ' + (fc.zero_drift || 0) + ', high_snr ' + (fc.high_snr || 0) + ', cluster ' + (fc.cluster || 0) + ', drift_spread ' + (fc.drift_spread || 0) + ' | bary matched ' + (data.n_bary_matched || 0) + '/' + (data.n_candidates || 0) + '</div>';
+    html += '<div style="font-size:0.82em;color:#546e7a;margin:4px 0 6px;">Flags: rfi_zone ' + (fc.rfi_zone || 0) + ', zero_drift ' + (fc.zero_drift || 0) + ', high_snr ' + (fc.high_snr || 0) + ', cluster ' + (fc.cluster || 0) + ', drift_spread ' + (fc.drift_spread || 0) + ', comb ' + (fc.comb || 0) + ' | bary matched ' + (data.n_bary_matched || 0) + '/' + (data.n_candidates || 0) + '</div>';
     triageCandidates = data.candidates || [];
     triagePage = 0;
     triageSortKey = 'default';
