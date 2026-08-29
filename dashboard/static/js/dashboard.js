@@ -1723,7 +1723,12 @@ function renderTriageTable() {
         '<thead><tr>' + th('freq', 'Freq (MHz)') + th('barycentric_freq', 'Bary (MHz)') + th('drift_rate', 'Drift') + th('snr', 'SNR') + th('rfi_score', 'Score') + th('verdict', 'Verdict') + th('flags', 'Flags') + '</tr></thead><tbody>';
     for (var i = 0; i < rows.length; i++) {
         var c = rows[i];
-        html += '<tr><td style="padding:2px 6px;">' + (c.freq != null ? c.freq.toFixed(4) : '-') + '</td>' +
+        var hitJson = encodeURIComponent(JSON.stringify({
+            freq: c.freq, drift_rate: c.drift_rate, snr: c.snr,
+            source_file: c.source_file, status: 'CANDIDATE',
+            verdict: c.verdict
+        }));
+        html += '<tr class="hit-row" data-hit="' + hitJson + '" onclick="showWaterfall(this)" title="Click to view spectrum/waterfall" style="cursor:pointer;"><td style="padding:2px 6px;">' + (c.freq != null ? c.freq.toFixed(4) : '-') + '</td>' +
             '<td style="padding:2px 6px;">' + (c.barycentric_freq != null ? c.barycentric_freq.toFixed(4) : '-') + '</td>' +
             '<td style="padding:2px 6px;">' + (c.drift_rate != null ? c.drift_rate.toFixed(4) : '-') + '</td>' +
             '<td style="padding:2px 6px;">' + c.snr + '</td>' +
@@ -1735,7 +1740,8 @@ function renderTriageTable() {
     html += '<div style="margin-top:4px;font-size:0.85em;color:#b0bec5;">' +
         '<button class="btn-primary" style="padding:2px 10px;" onclick="triagePageNav(-1)"' + (triagePage === 0 ? ' disabled' : '') + '>\u25c0 Prev</button> ' +
         'Page ' + (triagePage + 1) + ' of ' + pages + ' (' + arr.length.toLocaleString() + ' candidates) ' +
-        '<button class="btn-primary" style="padding:2px 10px;" onclick="triagePageNav(1)"' + (triagePage >= pages - 1 ? ' disabled' : '') + '>Next \u25b6</button></div>';
+        '<button class="btn-primary" style="padding:2px 10px;" onclick="triagePageNav(1)"' + (triagePage >= pages - 1 ? ' disabled' : '') + '>Next \u25b6</button>' +
+        ' <span style="color:#546e7a;">(click a row for its spectrum/waterfall)</span></div>';
     holder.innerHTML = html;
 }
 
