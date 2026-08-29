@@ -1652,6 +1652,12 @@ async function loadCachedTriage(scanId) {
     } catch (e) {}
 }
 
+var triageCandidates = [];
+var triagePage = 0;
+var triagePerPage = 25;
+var triageSortKey = 'default';
+var triageSortDir = 1;
+
 function renderTriageResults(data) {
     var div = document.getElementById('triage-summary');
     var vc = data.verdict_counts || {};
@@ -1662,23 +1668,75 @@ function renderTriageResults(data) {
         '<span class="rstat"><span class="rstat-label">Suspicious</span><span class="rstat-val" style="color:#ffb74d;">' + (vc.suspicious || 0) + '</span></span>' +
         '<span class="rstat"><span class="rstat-label">Likely RFI</span><span class="rstat-val" style="color:#ef5350;">' + (vc.likely_rfi || 0) + '</span></span></div>';
     html += '<div style="font-size:0.82em;color:#546e7a;margin:4px 0 6px;">Flags: rfi_zone ' + (fc.rfi_zone || 0) + ', zero_drift ' + (fc.zero_drift || 0) + ', high_snr ' + (fc.high_snr || 0) + ', cluster ' + (fc.cluster || 0) + ', drift_spread ' + (fc.drift_spread || 0) + ' | bary matched ' + (data.n_bary_matched || 0) + '/' + (data.n_candidates || 0) + '</div>';
-    var top = (data.candidates || []).filter(function(c) { return c.verdict !== 'likely_rfi'; }).slice(0, 25);
-    if (top.length) {
-        html += '<div class="table-scroll-wrapper" style="max-height:220px;"><table style="width:100%;font-size:0.82em;border-collapse:collapse;">' +
-            '<thead><tr><th style="text-align:left;padding:2px 6px;">Freq (MHz)</th><th style="text-align:left;padding:2px 6px;">Bary (MHz)</th><th style="text-align:left;padding:2px 6px;">Drift</th><th style="text-align:left;padding:2px 6px;">SNR</th><th style="text-align:left;padding:2px 6px;">Score</th><th style="text-align:left;padding:2px 6px;">Flags</th></tr></thead><tbody>';
-        for (var i = 0; i < top.length; i++) {
-            var c = top[i];
-            html += '<tr><td style="padding:2px 6px;">' + (c.freq != null ? c.freq.toFixed(4) : '-') + '</td>' +
-                '<td style="padding:2px 6px;">' + (c.barycentric_freq != null ? c.barycentric_freq.toFixed(4) : '-') + '</td>' +
-                '<td style="padding:2px 6px;">' + (c.drift_rate != null ? c.drift_rate.toFixed(4) : '-') + '</td>' +
-                '<td style="padding:2px 6px;">' + c.snr + '</td><td style="padding:2px 6px;">' + c.rfi_score + '</td>' +
-                '<td style="padding:2px 6px;color:' + (c.verdict === 'interesting' ? '#66bb6a' : '#ffb74d') + ';">' + (c.flags && c.flags.length ? c.flags.join(', ') : 'clean') + '</td></tr>';
-        }
-        html += '</tbody></table></div>';
-    } else {
-        html += '<p style="color:#ef5350;">All candidates flagged likely RFI. Nothing to follow up.</p>';
+    triageCandidates = data.candidates || [];
+    triagePage = 0;
+    triageSortKey = 'default';
+    triageSortDir = 1;
+    div.innerHTML = html + '<div id="triage-table-holder"></div>';
+    renderTriageTable();
+}
+
+function _triageSorted() {
+    var arr = triageCandidates.slice();
+    if (triageSortKey !== 'default') {
+        var verdictOrder = {interesting: 0, suspicious: 1, likely_rfi: 2};
+        arr.sort(function(a, b) {
+            var av = a[triageSortKey], bv = b[triageSortKey];
+            if (triageSortKey === 'verdict') {
+                av = verdictOrder[av] !== undefined ? verdictOrder[av] : 3;
+                bv = verdictOrder[bv] !== undefined ? verdictOrder[bv] : 3;
+            }
+            if (av == null) av = -Infinity;
+            if (bv == null) bv = -Infinity;
+            return (av - bv) * triageSortDir;
+        });
     }
-    div.innerHTML = html;
+    return arr;
+}
+
+function sortTriage(key) {
+    if (triageSortKey === key) { triageSortDir = -triageSortDir; }
+    else { triageSortKey = key; triageSortDir = 1; }
+    triagePage = 0;
+    renderTriageTable();
+}
+
+function triagePageNav(delta) {
+    triagePage += delta;
+    renderTriageTable();
+}
+
+function renderTriageTable() {
+    var holder = document.getElementById('triage-table-holder');
+    if (!holder) return;
+    var arr = _triageSorted();
+    var pages = Math.max(1, Math.ceil(arr.length / triagePerPage));
+    if (triagePage > pages - 1) triagePage = pages - 1;
+    if (triagePage < 0) triagePage = 0;
+    var start = triagePage * triagePerPage;
+    var rows = arr.slice(start, start + triagePerPage);
+    function arrow(k) { return triageSortKey === k ? (triageSortDir > 0 ? ' \u25b2' : ' \u25bc') : ''; }
+    function th(key, label) {
+        return '<th style="text-align:left;padding:2px 6px;cursor:pointer;user-select:none;" onclick="sortTriage(\'' + key + '\')" title="Click to sort">' + label + arrow(key) + '</th>';
+    }
+    var html = '<div class="table-scroll-wrapper" style="max-height:260px;"><table style="width:100%;font-size:0.82em;border-collapse:collapse;">' +
+        '<thead><tr>' + th('freq', 'Freq (MHz)') + th('barycentric_freq', 'Bary (MHz)') + th('drift_rate', 'Drift') + th('snr', 'SNR') + th('rfi_score', 'Score') + th('verdict', 'Verdict') + th('flags', 'Flags') + '</tr></thead><tbody>';
+    for (var i = 0; i < rows.length; i++) {
+        var c = rows[i];
+        html += '<tr><td style="padding:2px 6px;">' + (c.freq != null ? c.freq.toFixed(4) : '-') + '</td>' +
+            '<td style="padding:2px 6px;">' + (c.barycentric_freq != null ? c.barycentric_freq.toFixed(4) : '-') + '</td>' +
+            '<td style="padding:2px 6px;">' + (c.drift_rate != null ? c.drift_rate.toFixed(4) : '-') + '</td>' +
+            '<td style="padding:2px 6px;">' + c.snr + '</td>' +
+            '<td style="padding:2px 6px;">' + c.rfi_score + '</td>' +
+            '<td style="padding:2px 6px;color:' + (c.verdict === 'interesting' ? '#66bb6a' : (c.verdict === 'suspicious' ? '#ffb74d' : '#ef5350')) + ';">' + c.verdict + '</td>' +
+            '<td style="padding:2px 6px;">' + (c.flags && c.flags.length ? c.flags.join(', ') : 'clean') + '</td></tr>';
+    }
+    html += '</tbody></table></div>';
+    html += '<div style="margin-top:4px;font-size:0.85em;color:#b0bec5;">' +
+        '<button class="btn-primary" style="padding:2px 10px;" onclick="triagePageNav(-1)"' + (triagePage === 0 ? ' disabled' : '') + '>\u25c0 Prev</button> ' +
+        'Page ' + (triagePage + 1) + ' of ' + pages + ' (' + arr.length.toLocaleString() + ' candidates) ' +
+        '<button class="btn-primary" style="padding:2px 10px;" onclick="triagePageNav(1)"' + (triagePage >= pages - 1 ? ' disabled' : '') + '>Next \u25b6</button></div>';
+    holder.innerHTML = html;
 }
 
 function renderRejectionSummary(summary, params) {
