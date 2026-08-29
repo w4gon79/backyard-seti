@@ -2784,6 +2784,9 @@ async function runBarycentric() {
         switchBaryTab('corrected');
         baryCorrectedPage = 1;
         loadBaryCorrectedResults(currentScanId);
+        // Refresh corrected-scan registry so the new epoch appears under its
+        // target in the Cross-Epoch list immediately (no browser refresh needed)
+        loadBarycentricTargets();
     } catch(e) {
         statusDiv.innerHTML = '<span style="color:#ef5350;">Error: ' + escapeHtml(e.message) + '</span>';
     } finally {
