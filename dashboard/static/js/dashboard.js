@@ -1522,11 +1522,13 @@ async function loadScanResults(scanId) {
                 loadCachedTriage(scanId);
             } else {
                 rejectionCandidates = [];
+                clearTriagePanel('No rejection run for this scan yet. Run ON/OFF Rejection first, then Triage.');
                 document.getElementById('rejection-summary').innerHTML =
                     '<p style="color:#546e7a;">No rejection run for this scan yet.</p>';
             }
         } catch(e2) {
             rejectionCandidates = [];
+            clearTriagePanel();
         }
         
         renderHitTable();
@@ -1641,14 +1643,30 @@ async function runTriage() {
     }
 }
 
+function clearTriagePanel(msg) {
+    var div = document.getElementById('triage-summary');
+    if (div) div.innerHTML = '<p style="color:#546e7a;">' + (msg || 'No triage run for this scan yet.') + '</p>';
+    triageCandidates = [];
+    triagePage = 0;
+    triageSortKey = 'default';
+    triageSortDir = 1;
+}
+
 async function loadCachedTriage(scanId) {
     var div = document.getElementById('triage-summary');
     if (!div || !scanId) return;
+    clearTriagePanel();
     try {
         var resp = await fetch('/api/scans/' + encodeURIComponent(scanId) + '/triage');
         if (!resp.ok) return;
         var data = await resp.json();
-        if (data && !data.error && data.n_candidates) renderTriageResults(data);
+        // Stale-response guard: user may have switched scans mid-fetch.
+        if (scanId !== currentScanId) return;
+        if (data && !data.error && data.n_candidates) {
+            renderTriageResults(data);
+        } else {
+            clearTriagePanel('No triage run for this scan yet. Run Triage Candidates.');
+        }
     } catch (e) {}
 }
 
