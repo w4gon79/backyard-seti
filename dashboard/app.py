@@ -120,7 +120,7 @@ def extract_target_name(filename):
     # GBT/blc format: look for a part that looks like a target name (uppercase letters/digits)
     for p in parts:
         upper = p.upper()
-        if upper.startswith(('HIP', 'HD', 'HR', 'KIC', 'TIC', 'TOI', 'KEPLER', 'WO', 'GJ', 'GLIESE', 'NGC', 'M', 'PROXIMA', 'PROXCEN', 'TABBY')):
+        if upper.startswith(('HIP', 'HD', 'HR', 'IC', 'KIC', 'TIC', 'TOI', 'KEPLER', 'WO', 'GJ', 'GLIESE', 'NGC', 'M', 'PROXIMA', 'PROXCEN', 'TABBY')):
             # Strip any trailing file extension artifacts
             clean = p.split('.')[0]
             return clean
@@ -2642,6 +2642,17 @@ def api_barycentric_correct():
                 if vel is not None:
                     update_scan_barycentric(
                         scan_id, vel, mjd_val, ra_hours, dec_deg, telescope)
+                # Invalidate the cached triage scorecard: it keyed bary
+                # freqs from the DB, so a pre-correction run shows 0 bary
+                # matched forever if left cached (2026-08-30, IC1613).
+                _sd = _get_scan_dir(scan_id)
+                if _sd:
+                    _tc = os.path.join(_sd, 'triage', 'triage_results.json')
+                    if os.path.isfile(_tc):
+                        try:
+                            os.remove(_tc)
+                        except OSError:
+                            pass
             else:
                 bary_stats = {'bary_updated': 0, 'bary_attempted': 0,
                               'warning': (f'no bary JSONs loaded '
