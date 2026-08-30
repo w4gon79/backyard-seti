@@ -721,6 +721,23 @@ function drawSpectrum() {
         ctx.stroke();
     }
 
+    // Adaptive power scale: 2nd-98th percentile of the visible rows.
+    // The old fixed window (82..107 dB) was tuned for Parkes PROXCEN;
+    // GBT L-band fine data sits near 81 dB flat and rendered black
+    // (2026-08-30, IC1613).
+    const _vals = [];
+    for (const rowData of rows) {
+        const d = rowData.data;
+        for (let k = 0; k < d.length; k += 7) _vals.push(d[k]);
+    }
+    let pLo = 0, pHi = 1;
+    if (_vals.length) {
+        _vals.sort((a, b) => a - b);
+        pLo = _vals[Math.floor(_vals.length * 0.02)];
+        pHi = _vals[Math.floor(_vals.length * 0.98)];
+    }
+    const pSpan = Math.max(0.05, pHi - pLo);
+
     for (let row = 0; row < nRows; row++) {
         const rowData = rows[row];
         const data = rowData.data;
@@ -733,7 +750,7 @@ function drawSpectrum() {
             const frac = px / plotW;
             const dataIdx = Math.min(nCols - 1, Math.floor(frac * nCols));
             const val = data[dataIdx];
-            const norm = (val - 82) / 25;
+            const norm = (val - pLo) / pSpan;
             const [r, g, b] = powerToColor(norm);
             ctx.fillStyle = `rgb(${r},${g},${b})`;
             ctx.fillRect(padL + px, y, 1, rowH);
