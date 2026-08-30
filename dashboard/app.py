@@ -95,6 +95,15 @@ def _resolve_data_file(filepath):
         candidates.append(os.path.join(
             ARCHIVE_ROOT, _tgt, 'fine',
             os.path.basename(filepath.replace('\\', '/'))))
+    # Bulletproof fallback: any per-target archive dir. Covers every BL
+    # name family (PSR, 3C, galactic G-coords, 2MASS, ...) without
+    # depending on extract_target_name knowing the prefix (2026-08-30).
+    _base = os.path.basename(filepath.replace('\\', '/'))
+    if os.path.isdir(ARCHIVE_ROOT):
+        for _tdir in os.listdir(ARCHIVE_ROOT):
+            _cand = os.path.join(ARCHIVE_ROOT, _tdir, 'fine', _base)
+            if os.path.isfile(_cand):
+                return _cand
     for sec_dir in DATA_DIRS_SECONDARY:
         candidates.append(os.path.join(sec_dir, filepath))
         # Also try without the 'fine/' prefix since secondary dir may already be the fine dir
@@ -120,7 +129,16 @@ def extract_target_name(filename):
     # GBT/blc format: look for a part that looks like a target name (uppercase letters/digits)
     for p in parts:
         upper = p.upper()
-        if upper.startswith(('HIP', 'HD', 'HR', 'IC', 'KIC', 'TIC', 'TOI', 'KEPLER', 'WO', 'GJ', 'GLIESE', 'NGC', 'M', 'PROXIMA', 'PROXCEN', 'TABBY')):
+        if upper.startswith((
+                # Star catalogs
+                'HIP', 'HD', 'HR', 'BD', 'GJ', 'GLIESE', 'KIC', 'KEPLER',
+                'TIC', 'TYC', 'TOI', 'LHS', 'LTT', 'NLTT', 'LP', 'SCR',
+                'WO', 'AGC', 'DEN', '2MASS', 'WISE', 'SWIFT',
+                # Deep-sky catalogs (BL catalog sweep 2026-08-30)
+                'IC', 'NGC', 'UGC', 'UGCA', 'DDO', 'ESO', 'CGCG', 'PKS',
+                'PSR', 'KK', 'KKR', 'KKH', 'KKSG', 'KDG', 'LV', 'SEGUE',
+                'MAFFEI', 'WLM', 'FRB', 'GR', 'M', 'PROXIMA', 'PROXCEN',
+                'ALPHACEN', 'TABBY')):
             # Strip any trailing file extension artifacts
             clean = p.split('.')[0]
             return clean
