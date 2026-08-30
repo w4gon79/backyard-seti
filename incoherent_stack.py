@@ -622,35 +622,84 @@ def epoch_file_band_mhz(h5_path):
         return None
 
 
+def _merge_intervals(intervals):
+    """Merge overlapping/adjacent (lo, hi) intervals into a sorted list."""
+    ivs = sorted(iv for iv in intervals if iv[1] > iv[0])
+    merged = []
+    for lo, hi in ivs:
+        if merged and lo <= merged[-1][1] + 1e-9:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], hi))
+        else:
+            merged.append((lo, hi))
+    return merged
+
+
+def _intersect_interval_sets(sets):
+    """Intersect lists of disjoint intervals. Returns a merged list."""
+    result = sets[0]
+    for nxt in sets[1:]:
+        out = []
+        i = j = 0
+        while i < len(result) and j < len(nxt):
+            lo = max(result[i][0], nxt[j][0])
+            hi = min(result[i][1], nxt[j][1])
+            if hi > lo:
+                out.append((lo, hi))
+            if result[i][1] < nxt[j][1]:
+                i += 1
+            else:
+                j += 1
+        result = out
+        if not result:
+            break
+    return result
+
+
 def compute_epoch_overlap(target, epoch_labels):
     """Shared frequency coverage (lo, hi) MHz across epochs of a target.
 
-    Uses one representative file per epoch (first pair's ON file), reading
-    the band from the h5 header. Returns None if the epochs share no
-    coverage (or files are missing)."""
+    Per epoch, unions the band of EVERY fine file (all GBT blocks / all
+    seqs), then intersects those unions across epochs. Previously this read
+    one representative file per epoch, so multi-block GBT epochs reported
+    a single 187.5 MHz block as their full band (2026-08-30, IC1613).
+    If the shared coverage is disjoint, returns the widest contiguous
+    interval. Returns None if the epochs share no coverage (or files are
+    missing)."""
     epochs = _discover_epochs(target)
-    ranges = []
+    per_epoch_sets = []
     for label in epoch_labels:
         info = epochs.get(label)
         if not info:
             continue
+        files = []
         if info.get('gbt_pairs'):
-            fname = info['gbt_pairs'][0][0]
+            files = [f for pair in info['gbt_pairs'] for f in pair]
         elif info.get('seqs'):
-            fname = f"Parkes_{info['mjd_int']}_{info['seqs'][0][0]}_{target}_S_fine.h5"
+            # Parkes: every ON (_S) and OFF (_R) fine file across all pairs
+            files = []
+            for s_seq, r_seq in info['seqs']:
+                files.append(f"Parkes_{info['mjd_int']}_{s_seq}_{target}_S_fine.h5")
+                files.append(f"Parkes_{info['mjd_int']}_{r_seq}_{target}_R_fine.h5")
         else:
             continue
-        path = find_h5(fname)
-        if not path:
-            continue
-        band = epoch_file_band_mhz(path)
-        if band:
-            ranges.append(band)
-    if not ranges:
+        bands = []
+        for fname in files:
+            path = find_h5(fname)
+            if not path:
+                continue
+            band = epoch_file_band_mhz(path)
+            if band:
+                bands.append(band)
+        if bands:
+            per_epoch_sets.append(_merge_intervals(bands))
+    if not per_epoch_sets:
         return None
-    lo = max(r[0] for r in ranges)
-    hi = min(r[1] for r in ranges)
-    return (lo, hi) if hi > lo else None
+    shared = _intersect_interval_sets(per_epoch_sets)
+    if not shared:
+        return None
+    # Widest contiguous shared interval
+    lo, hi = max(shared, key=lambda iv: iv[1] - iv[0])
+    return (lo, hi)
 
 
 def clip_window_to_overlap(target, epoch_labels, freq_center, width):
