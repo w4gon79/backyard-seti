@@ -4524,6 +4524,86 @@ def api_stack_plot(job_id):
     return jsonify({'error': 'Plot not found'}), 404
 
 
+@app.route('/api/stack/drift_scatter/<job_id>')
+def api_stack_drift_scatter(job_id):
+    """Drift-rate vs frequency scatter of ALL ON hits for the job's target.
+    Millions of points, so rendered server-side (rasterized matplotlib) and
+    cached as PNG. Pass ?refresh=1 to regenerate after new scans import."""
+    import numpy as np
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+
+    out_path = os.path.join(STACK_OUTPUT_DIR, f'drift_{job_id}.png')
+    if os.path.isfile(out_path) and not request.args.get('refresh'):
+        return send_from_directory(os.path.dirname(out_path),
+                                   os.path.basename(out_path))
+
+    # resolve target from DB (or in-memory job)
+    target = None
+    try:
+        from db import get_db
+        conn = get_db()
+        row = conn.execute(
+            'SELECT target FROM stack_jobs WHERE job_id = ?',
+            (job_id,)).fetchone()
+        if row:
+            target = row['target']
+    except Exception:
+        pass
+    if not target:
+        job = _stack_jobs.get(job_id)
+        if job:
+            target = job.get('target')
+    if not target:
+        return jsonify({'error': 'Job not found'}), 404
+
+    freqs, drifts, snrs = [], [], []
+    try:
+        conn = get_db()
+        cur = conn.execute(
+            "select h.freq, h.drift_rate, h.snr from hits h "
+            "join scans s on s.scan_id = h.scan_id "
+            "where s.target = ? and h.on_off = 'ON'", (target,))
+        while True:
+            rows = cur.fetchmany(250000)
+            if not rows:
+                break
+            for r in rows:
+                freqs.append(r[0]); drifts.append(r[1]); snrs.append(r[2])
+        conn.close()
+    except Exception as e:
+        return jsonify({'error': f'Hit query failed: {e}'}), 500
+    if not freqs:
+        return jsonify({'error': 'No ON hits found for target'}), 404
+
+    f = np.asarray(freqs, dtype=float)
+    d = np.asarray(drifts, dtype=float)
+    s = np.log10(np.abs(np.asarray(snrs, dtype=float)) + 1.0)
+
+    plt.rcParams.update({
+        'figure.facecolor': '#0d1117', 'axes.facecolor': '#161b22',
+        'axes.edgecolor': '#8b949e', 'axes.labelcolor': '#c9d1d9',
+        'xtick.color': '#c9d1d9', 'ytick.color': '#c9d1d9',
+        'text.color': '#c9d1d9', 'grid.color': '#21262d', 'font.size': 10,
+        'axes.titlesize': 12, 'axes.titleweight': 'bold'})
+    fig, ax = plt.subplots(figsize=(11, 4.5))
+    sc = ax.scatter(f, d, c=s, s=0.4, cmap='plasma', alpha=0.6,
+                    linewidths=0, rasterized=True)
+    ax.set_xlabel('Frequency (MHz)')
+    ax.set_ylabel('Drift rate (Hz/s)')
+    ax.set_title(f'{target}: every ON hit ({len(f):,} total, all epochs), '
+                 'color = log10(SNR)')
+    ax.grid(alpha=0.4)
+    cb = plt.colorbar(sc, ax=ax)
+    cb.set_label('log10(SNR)')
+    fig.savefig(out_path, dpi=110, bbox_inches='tight',
+                facecolor='#0d1117')
+    plt.close(fig)
+    return send_from_directory(os.path.dirname(out_path),
+                               os.path.basename(out_path))
+
+
 @app.route('/api/stack/spectrum/<job_id>')
 def api_stack_spectrum(job_id):
     """Serve spectrum data (freqs + power) as JSON for Plotly rendering.

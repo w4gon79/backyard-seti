@@ -302,6 +302,7 @@ async function loadResults(jobId) {
         renderEpochTable(data);
         renderPeaksTable();
         loadPlot(jobId);
+        loadDriftScatter(jobId);
 
         // Async load classification + cross-ref (post-processing features)
         loadClassifications(jobId);
@@ -540,6 +541,17 @@ function fallbackToPNG(jobId) {
     img.style.display = 'none';
     img.onload = function() { img.style.display = 'block'; };
     img.onerror = function() { img.style.display = 'none'; };
+}
+
+function loadDriftScatter(jobId) {
+    var img = document.getElementById('drift-plot-img');
+    if (!img) return;
+    img.style.display = 'none';
+    img.onload = function() { img.style.display = 'block'; };
+    img.onerror = function() { img.style.display = 'none'; };
+    // First render is server-side and can take ~1 min for millions of hits;
+    // the img simply appears once the cached PNG is ready.
+    img.src = '/api/stack/drift_scatter/' + jobId + '?t=' + Date.now();
 }
 
 function renderInteractiveSpectrum(data) {
