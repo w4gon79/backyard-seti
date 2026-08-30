@@ -410,6 +410,29 @@ The Flask dashboard at `http://localhost:8070` provides:
   tracking, peak detection table, and waterfall follow-up. Registry-driven target
   selection; epochs show cadence validation + scan status. Includes the RFI Zones
   manager panel and click-drag zoning on the stack plot (see **RFI Zones** above).
+- **Drift vs Frequency Scatter** (Stack page, per stack job) - Server-side
+  rasterized matplotlib scatter of every ON hit for the job's target: bary
+  frequency on x, drift rate on y, SNR on color. First request for a target
+  kicks off a background render (millions of hits take minutes) and the page
+  polls with a status message until the cached PNG lands; after that it is
+  served instantly. Cache invalidates automatically when a new scan for that
+  target imports into the DB (`?refresh=1` forces a manual regen). Why it
+  matters: RFI populations become instantly visible in a way tables cannot
+  show, the zero-drift line, satellite downlink blocks around 2550-2700 MHz,
+  and ghost bands at turboSETI's discrete trial drift rates all announce
+  themselves on sight.
+- **Single-Epoch Triage Scorecard** (main page, rejection panel) - One-click
+  scorecard for any completed scan via `ml/single_epoch_triage.py`, an adapted
+  Layer 2.5 RFI scorecard that needs no extra epochs. Each hit scores on five
+  discriminators (RFI-zone match on bary/topo frequency, zero-drift flag,
+  high/extreme SNR, 150 kHz cluster density, 10 kHz-bin drift spread) plus a
+  comb pass that detects evenly spaced RFI combs (arithmetic frequency grids
+  and regular peak spacing in the fine spectrum, checked against the H5 when
+  the fine files still exist). Results cache to `results/<id>/triage/` and
+  auto-reload on scan switch. The table is sortable and paginated like the
+  ON/OFF candidates table; click any row to open the spectrum/waterfall
+  viewer. Purpose: a one-scan verdict on how RFI polluted an epoch is before
+  investing in bary correction and stacking.
 - **Target Registry + BL Catalog** (main page) - Add targets (SIMBAD-resolved,
   BL availability checked via variant/cross-ID cascade), browse every BL target's
   fine-res availability (one-time background sweep, cached in `bl_catalog`),
