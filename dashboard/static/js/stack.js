@@ -545,13 +545,37 @@ function fallbackToPNG(jobId) {
 
 function loadDriftScatter(jobId) {
     var img = document.getElementById('drift-plot-img');
+    var status = document.getElementById('drift-status');
     if (!img) return;
     img.style.display = 'none';
-    img.onload = function() { img.style.display = 'block'; };
-    img.onerror = function() { img.style.display = 'none'; };
-    // First render is server-side and can take ~1 min for millions of hits;
-    // the img simply appears once the cached PNG is ready.
-    img.src = '/api/stack/drift_scatter/' + jobId + '?t=' + Date.now();
+    if (status) status.textContent = 'Loading drift scatter...';
+    var attempt = function() {
+        if (jobId !== currentJobId) return;
+        fetch('/api/stack/drift_scatter/' + jobId + '?t=' + Date.now())
+            .then(function(resp) {
+                var ct = resp.headers.get('Content-Type') || '';
+                if (ct.indexOf('image/') === 0) return resp.blob();
+                if (resp.status === 202) {
+                    if (status) status.textContent = 'Rendering every ON hit for this target in the background (first render takes a few minutes)...';
+                    return null;
+                }
+                if (status) status.textContent = 'Drift scatter unavailable for this job.';
+                return null;
+            })
+            .then(function(blob) {
+                if (blob) {
+                    img.src = URL.createObjectURL(blob);
+                    img.style.display = 'block';
+                    if (status) status.textContent = '';
+                } else if (jobId === currentJobId) {
+                    setTimeout(attempt, 8000);
+                }
+            })
+            .catch(function() {
+                if (jobId === currentJobId) setTimeout(attempt, 10000);
+            });
+    };
+    attempt();
 }
 
 function renderInteractiveSpectrum(data) {
