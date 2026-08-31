@@ -1095,6 +1095,41 @@ def api_scan_spectrum():
 
 # ─── API: Scan Control ────────────────────────────────────────────────
 
+def _pipeline_lock_guard():
+    """Return (error_dict, 409) if a live fine_res_pipeline holds the results
+    lock, else (None, None). Shared by /api/scan/start and /api/scan/resume
+    (2026-08-31: resume previously lacked this check, so a resume during a
+    live scan spawned a doomed second pipeline whose cleanup falsely marked
+    the scan complete and imported partial hits, e.g. UGCA127_58348)."""
+    _lock_path = os.path.join(RESULTS_DIR, '.pipeline.lock')
+    if not os.path.exists(_lock_path):
+        return None, None
+    try:
+        with open(_lock_path) as f:
+            old_pid = int(f.read().strip() or '0')
+    except Exception:
+        old_pid = 0
+    alive = False
+    if old_pid:
+        try:
+            import ctypes
+            h = ctypes.windll.kernel32.OpenProcess(0x1000, False, old_pid)
+            if h:
+                ctypes.windll.kernel32.CloseHandle(h)
+                alive = True
+        except Exception:
+            alive = True
+    if alive:
+        return ({'error': f'A fine_res_pipeline process (PID {old_pid}) is already running '
+                          f'outside Mission Control. Stop it first '
+                          f'(taskkill /PID {old_pid} /F) or it will corrupt scan output.'}, 409)
+    try:
+        os.remove(_lock_path)  # stale lock from dead process
+    except OSError:
+        pass
+    return None, None
+
+
 @app.route('/api/scan/start', methods=['POST'])
 def api_scan_start():
     """Start a pipeline scan. Runs in background thread."""
@@ -1105,32 +1140,9 @@ def api_scan_start():
     # outside dashboard control (zombie from a previous session, manual
     # CLI start). Two pipelines collide on turbo_seti HDF5 files (Win32
     # error 33, seen 2026-08-24). Same lock file the pipeline itself uses.
-    _lock_path = os.path.join(RESULTS_DIR, '.pipeline.lock')
-    if os.path.exists(_lock_path):
-        try:
-            with open(_lock_path) as f:
-                old_pid = int(f.read().strip() or '0')
-        except Exception:
-            old_pid = 0
-        alive = False
-        if old_pid:
-            try:
-                import ctypes
-                h = ctypes.windll.kernel32.OpenProcess(0x1000, False, old_pid)
-                if h:
-                    ctypes.windll.kernel32.CloseHandle(h)
-                    alive = True
-            except Exception:
-                alive = True
-        if alive:
-            return jsonify({'error': f'A fine_res_pipeline process (PID {old_pid}) is already running '
-                                     f'outside Mission Control. Stop it first '
-                                     f'(taskkill /PID {old_pid} /F) or it will corrupt scan output.'}), 409
-        try:
-            os.remove(_lock_path)  # stale lock from dead process
-        except OSError:
-            pass
-
+    _err, _code = _pipeline_lock_guard()
+    if _err:
+        return jsonify(_err), _code
     
     params = request.json or {}
     target = params.get('target', 'PROXCEN')
@@ -1324,12 +1336,21 @@ def api_scan_start():
                     if len(scan_state['recent_hits']) > 50:
                         scan_state['recent_hits'] = scan_state['recent_hits'][-50:]
             proc.wait()
+            _proc_rc = proc.returncode
         except Exception as e:
             scan_state['log_lines'].append(f'ERROR: {e}')
         finally:
             scan_state['active'] = False
             scan_state['pid'] = None
-            if scan_state.pop('stop_requested', False):
+            # 2026-08-31: only declare complete + DB-import when the
+            # pipeline exited cleanly. A run that died instantly (e.g. the
+            # .pipeline.lock blocked a second instance, seen with
+            # UGCA127_58348) must NOT be imported as 'complete'.
+            _failed_run = (_proc_rc != 0)
+            if _failed_run:
+                scan_state['log_lines'].append(
+                    f'WARN: pipeline exited rc={_proc_rc}; NOT marking complete/importing')
+            if scan_state.pop('stop_requested', False) or _failed_run:
                 # User-stopped scan: mark interrupted, do NOT import to DB.
                 # (2026-08-27: stopped scans previously auto-imported as
                 # 'complete' with partial hits, polluting cross-epoch.)
@@ -1459,6 +1480,14 @@ def api_scan_resume():
             scan_state['pid'] = None
         else:
             return jsonify({'error': 'Scan already running, stop it first'}), 409
+
+    # 2026-08-31: same live-pipeline lock guard as /api/scan/start. Without
+    # this, a resume issued while a pipeline is alive spawns a second
+    # instance that dies on the lock within ~0.5s and its cleanup falsely
+    # marks the scan 'complete' and imports partial hits.
+    _err, _code = _pipeline_lock_guard()
+    if _err:
+        return jsonify(_err), _code
 
     params = request.json or {}
     scan_id = params.get('scan_id')
@@ -1651,12 +1680,19 @@ def api_scan_resume():
                         scan_state['log_lines'].append(
                             f'[{_log_ts()}] RESUME: Process PID={proc.pid} alive but no output for {_stall_counter * 0.2:.0f}s')
             proc.wait()
+            _proc_rc = proc.returncode
         except Exception as e:
             scan_state['log_lines'].append(f'ERROR: {e}')
         finally:
             scan_state['active'] = False
             scan_state['pid'] = None
-            if scan_state.pop('stop_requested', False):
+            # 2026-08-31: same guard as start path — failed/instant-death
+            # runs must never be marked complete or imported (UGCA127_58348).
+            _failed_run = (_proc_rc != 0)
+            if _failed_run:
+                scan_state['log_lines'].append(
+                    f'WARN: pipeline exited rc={_proc_rc}; NOT marking complete/importing')
+            if scan_state.pop('stop_requested', False) or _failed_run:
                 # User-stopped scan: mark interrupted, do NOT import to DB.
                 try:
                     _dir = os.path.join(RESULTS_DIR, scan_id)
