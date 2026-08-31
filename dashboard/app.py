@@ -1525,6 +1525,16 @@ def api_scan_resume():
     scan_meta = _load_scan_meta(scan_dir) or {}
     orig_params = scan_meta.get('parameters', {})
 
+    # 2026-08-31: flip meta status back to 'running' so the Results panel
+    # doesn't show INTERRUPTED for the entire duration of a resumed scan.
+    if scan_meta.get('status') != 'running':
+        scan_meta['status'] = 'running'
+        try:
+            with open(os.path.join(scan_dir, 'scan_meta.json'), 'w') as f:
+                json.dump(scan_meta, f, indent=2)
+        except OSError:
+            pass
+
     files_list = orig_params.get('files', [])
     sub_band_chans = orig_params.get('sub_band_chans', 262144)
     overlap = orig_params.get('overlap', 512)
