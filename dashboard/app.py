@@ -15,6 +15,23 @@ import os
 import sys
 import json
 import glob as glob_module
+
+# ---- SINGLE-INSTANCE GUARD ----
+def _single_instance_guard(key):
+    # (Joel ask 2026-10-30): Windows double-binds Werkzeug dev servers, so a
+    # relaunch racing the old holder becomes a zombie. Named mutex, process-
+    # lifetime, crash-safe. Second launch exits BEFORE touching the port.
+    # use_last_error=True is MANDATORY: windll GetLastError is wiped by the
+    # FFI trampoline (three false negatives before this was found).
+    import ctypes
+    _k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    _h = _k32.CreateMutexW(None, False, "Local\\%s" % key)
+    if ctypes.get_last_error() == 183:   # ERROR_ALREADY_EXISTS
+        print("single-instance guard: %s already running - exiting" % key, flush=True)
+        import sys as _sys
+        _sys.exit(0)
+    return _h
+_single_instance_guard("SetiDash8070")
 import threading
 import time
 import subprocess
