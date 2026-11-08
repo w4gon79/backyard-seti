@@ -47,7 +47,15 @@ SEED_TARGETS = [
      11.03250000, 33.28600000),
 ]
 
-SIMBAD_TAP = 'https://simbad.u-strasbg.fr/simbad/sim-tap/sync'
+SIMBAD_TAP_MIRRORS = [
+    'https://simbad.u-strasbg.fr/simbad/sim-tap/sync',
+    'https://simbad.cfa.harvard.edu/simbad/sim-tap/sync',
+]
+# Circuit breaker: mirror -> monotonic deadline after which we retry it.
+# A down mirror otherwise costs ~81s per query (3x25s timeouts + backoff)
+# times every name candidate. 10 min cooldown after a full failure run.
+_MIRROR_DEAD_UNTIL = {}
+_MIRROR_COOLDOWN_S = 600
 BL_API = 'https://seti.berkeley.edu/opendata/api/query-files'
 NAME_RE = re.compile(r'^[A-Za-z0-9_+\-]+$')
 
@@ -285,23 +293,39 @@ def _tap_rows(query, retries=3):
     callers can tell 'query failed' apart from 'no such object'
     (2026-08-26: previously returned [] on error, which surfaced to users
     as the misleading 'No SIMBAD match')."""
-    url = SIMBAD_TAP + '?' + urllib.parse.urlencode(
+    qs = urllib.parse.urlencode(
         {'request': 'doQuery', 'lang': 'adql', 'format': 'json',
          'query': query})
     last_err = None
-    for attempt in range(retries):
-        if attempt:
-            _time.sleep(2 * attempt)
-        req = urllib.request.Request(url,
-                                     headers={'User-Agent': 'BackyardSETI/1.0'})
-        try:
-            with urllib.request.urlopen(req, timeout=25) as r:
-                data = json.loads(r.read().decode())
-            return data.get('data', [])
-        except Exception as e:
-            last_err = e
-            print(f'[registry] SIMBAD TAP attempt {attempt + 1}/{retries} failed: {e}')
-    raise RuntimeError(f'SIMBAD query failed after {retries} attempts: {last_err}')
+    # Try each mirror (strasbg primary, Harvard backup) with retries per
+    # mirror; move to the next mirror only after this one keeps failing
+    # (2026-11-08: strasbg was down, Harvard mirror rescued lookups).
+    for mirror in SIMBAD_TAP_MIRRORS:
+        deadline = _MIRROR_DEAD_UNTIL.get(mirror)
+        if deadline is not None and _time.monotonic() < deadline:
+            print(f'[registry] SIMBAD TAP {mirror} in cooldown, skipping')
+            continue
+        url = mirror + '?' + qs
+        mirror_failed = True
+        for attempt in range(retries):
+            if attempt:
+                _time.sleep(2 * attempt)
+            req = urllib.request.Request(
+                url, headers={'User-Agent': 'BackyardSETI/1.0'})
+            try:
+                with urllib.request.urlopen(req, timeout=25) as r:
+                    data = json.loads(r.read().decode())
+                _MIRROR_DEAD_UNTIL.pop(mirror, None)
+                return data.get('data', [])
+            except Exception as e:
+                last_err = e
+                print(f'[registry] SIMBAD TAP {mirror} attempt '
+                      f'{attempt + 1}/{retries} failed: {e}')
+        if mirror_failed:
+            _MIRROR_DEAD_UNTIL[mirror] = _time.monotonic() + _MIRROR_COOLDOWN_S
+    raise RuntimeError(
+        f'SIMBAD query failed on all {len(SIMBAD_TAP_MIRRORS)} mirrors '
+        f'({SIMBAD_TAP_MIRRORS[0].split("/")[2]} + backups): {last_err}')
 
 
 def simbad_search(name, limit=5):
