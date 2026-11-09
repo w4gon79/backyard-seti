@@ -1002,6 +1002,13 @@ def _recover_zombie_scan_state():
     if not scan_state['active']:
         return False
     pid = scan_state.get('pid')
+    if not pid:
+        # Startup race (seen with LP944-020_57782 2026-11-09): run_scan()
+        # sets active=True before Popen() returns, so a status poll in that
+        # window sees pid=None and falsely 'recovers', leaving the UI showing
+        # Resume while the pipeline keeps running. Grace-period instead.
+        if time.time() - scan_state.get('scan_start_time', 0) < 15:
+            return False
     if not pid or not _check_process_alive(pid):
         ts = datetime.now().strftime('%H:%M:%S')
         scan_state['log_lines'].append(
