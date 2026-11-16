@@ -102,14 +102,18 @@ def extract_sub_band(filepath, f_start_mhz, f_stop_mhz, out_path):
     sub_fch1 = float(freqs[0])
     sub_nchans = data.shape[-1]
 
-    # turbo_seti's data handler splits the band into 64 coarse channels
-    # when the file carries no coarse-channel metadata (its 'SWAG' path,
-    # taken by every extracted sub-band). If sub_nchans is not divisible
-    # by 64, its slice math and header disagree by a channel and
-    # load_data() raises 'spectra.shape != (tsteps_valid, fftlen)'
-    # (first seen on GBT gpuspec data: 258156 chans -> 4033.69/cc).
-    # Trim from the top edge to an exact multiple of 64; the lost band is
-    # <64 channels (~0.18 Hz), far below the sub-band overlap.
+    # All extracted sub-bands are searched with exactly 64 coarse
+    # channels (TSETI_CC), passed explicitly to FindDoppler in
+    # run_turbo_seti(). This matches what turbo_seti's data handler
+    # always chose via its 'SWAG' path (every historical run, 8192 or
+    # 262144 wide), so results are bit-compatible with previous scans,
+    # but without the per-file 'n_coarse_chan < 1, replacing with 64'
+    # guesswork. If sub_nchans is not divisible by 64, turbo_seti's
+    # slice math and header disagree by a channel and load_data()
+    # raises 'spectra.shape != (tsteps_valid, fftlen)' (first seen on
+    # GBT gpuspec data: 258156 chans -> 4033.69/cc). Trim from the top
+    # edge to an exact multiple of 64; the lost band is <64 channels
+    # (~0.18 Hz), far below the sub-band overlap.
     TSETI_CC = 64
     trim = sub_nchans % TSETI_CC
     if trim:
@@ -169,6 +173,7 @@ def run_turbo_seti(filepath, out_dir, min_drift=1e-5, max_drift=5.0, snr=5.0):
             max_drift=max_drift,
             snr=snr,
             out_dir=out_dir,
+            coarse_chans=TSETI_CC,
         )
         doppler.search()
     finally:
