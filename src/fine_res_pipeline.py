@@ -103,7 +103,7 @@ def extract_sub_band(filepath, f_start_mhz, f_stop_mhz, out_path):
     sub_nchans = data.shape[-1]
 
     # All extracted sub-bands are searched with exactly 64 coarse
-    # channels (TSETI_CC, module constant), passed explicitly to
+    # channels (TSETI_CC, module constant), passed as n_coarse_chan to
     # FindDoppler in run_turbo_seti(). This matches what turbo_seti's data handler
     # always chose via its 'SWAG' path (every historical run, 8192 or
     # 262144 wide), so results are bit-compatible with previous scans,
@@ -175,7 +175,7 @@ def run_turbo_seti(filepath, out_dir, min_drift=1e-5, max_drift=5.0, snr=5.0):
             max_drift=max_drift,
             snr=snr,
             out_dir=out_dir,
-            coarse_chans=TSETI_CC,
+            n_coarse_chan=TSETI_CC,
         )
         doppler.search()
     finally:
