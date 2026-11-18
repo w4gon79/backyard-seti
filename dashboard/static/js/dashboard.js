@@ -397,9 +397,10 @@ async function searchBL() {
         if (data.data && data.data.length > 0) {
             blResults = data.data;
             blPage = 0;
-            blFilterRes = 'all';
+            blFilterRes = 'fine';
             blFilterType = 'all';
             blFilterFileType = 'all';
+            blFineBanner(data.fine);
 
             // Plot first result on sky map
             var first = data.data[0];
@@ -424,6 +425,38 @@ async function searchBL() {
 }
 
 // --- GBT session browser (ABACAD epochs, no ON/OFF files) ----------------
+
+// Fine-res availability banner: BL lists sessions it no longer serves.
+// If zero probed fine sessions are hosted, say so plainly; fine-res only
+// means nothing is downloadable for the target right now.
+function blFineBanner(fine) {
+    var d = document.getElementById('bl-search-results');
+    var old = document.getElementById('fine-avail-banner');
+    if (old) old.remove();
+    if (!fine || !fine.catalog_sessions) return;
+    if (fine.hosted_sessions > 0) {
+        var ok = document.createElement('div');
+        ok.id = 'fine-avail-banner';
+        ok.style.cssText = 'margin:6px 0;padding:6px 8px;border:1px solid #2a4d2a;border-radius:4px;';
+        ok.innerHTML = '<span style="color:#66bb6a;">Fine-res available:</span> ' +
+            '<span style="color:#90a4ae;font-size:0.85em;">' + fine.hosted_sessions +
+            ' of ' + Math.min(fine.probed_sessions, fine.catalog_sessions) +
+            ' sampled sessions hosted' +
+            (fine.catalog_sessions > fine.probed_sessions ?
+             ' (' + fine.catalog_sessions + ' sessions in catalog)' : '') + '</span>';
+        d.insertBefore(ok, d.firstChild);
+    } else {
+        var b = document.createElement('div');
+        b.id = 'fine-avail-banner';
+        b.style.cssText = 'margin:6px 0;padding:8px;border:1px solid #ef5350;border-radius:4px;background:rgba(239,83,80,0.08);';
+        b.innerHTML = '<span style="color:#ef5350;font-weight:600;">No fine-res data currently hosted on BL servers.</span> ' +
+            '<span style="color:#90a4ae;font-size:0.85em;">The catalog lists ' + fine.catalog_sessions +
+            ' fine-res session(s) but ' + fine.probed_sessions + ' sampled session(s) all return 404 from every BL host. ' +
+            'Downloads are fine-res only, so this target is not downloadable right now. '
+            + 'Retries re-probe automatically (30 min cache).</span>';
+        d.insertBefore(b, d.firstChild);
+    }
+}
 
 function gbtDetect(list) {
     return (list || []).some(function (f) { return /guppi_/.test(f.url || ''); });
@@ -729,10 +762,11 @@ function renderBLResults() {
         html += '<td>' + (obs.file_type || '') + '</td>';
         html += '<td>' + resDisplay + '</td>';
         html += '<td>' + (sz ? (sz / 1e9).toFixed(1) + ' GB' : '?') + '</td>';
-        if (obsUrl) {
-            html += '<td><button class="dl-btn" onclick="event.stopPropagation();downloadFile(\'' + obsUrl + '\',\'' + fname + '\')" title="Download">\u2b07</button></td>';
+        var isFine = resDisplay === 'fine';
+        if (obsUrl && isFine) {
+            html += '<td><button class="dl-btn" onclick="event.stopPropagation();downloadFile(\'' + obsUrl + '\',\'' + fname + '\')" title="Download fine-res">\u2b07</button></td>';
         } else {
-            html += '<td>\u2014</td>';
+            html += '<td style="color:#546e7a;">' + (obsUrl ? '\u00d7' : '\u2014') + '</td>';
         }
         html += '</tr>';
     }
@@ -2172,6 +2206,10 @@ async function runRejection() {
 
 // ─── File Download ───────────────────────────────────────────────────
 async function downloadFile(url, filename) {
+    if (!/_fine\./.test(filename) && !/(guppi_.*\.0000\.)/.test(filename)) {
+        alert('Fine-res files only: mid/low-res data cannot support narrowband SETI science.');
+        return;
+    }
     try {
         var resp = await fetch('/api/download', {
             method: 'POST', headers: {'Content-Type': 'application/json'},

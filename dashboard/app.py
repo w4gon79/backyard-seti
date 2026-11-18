@@ -416,6 +416,77 @@ def api_targets():
     return jsonify(targets)
 
 
+_fine_probe_cache = {}  # url -> (probe_time, hosted_bool); TTL 30 min
+
+
+def _bl_fine_availability(files):
+    """Fine-res availability for a BL target: catalog sessions vs sessions
+    actually served. BL catalog URLs go stale (dead blpdN hosts), so one
+    fine file per MJD session gets a HEAD probe (with mirror fallback),
+    capped and cached, to tell 'listed but not served' from 'downloadable'.
+    Mid/time/coarse rows are ignored: the dashboard is fine-res only."""
+    import re as _re
+    import time as _time
+    import urllib.request as _ur
+    import urllib.error as _uerr
+
+    def _is_fine(u):
+        return '_fine.' in u or ('guppi_' in u and '.0000.' in u)
+
+    sessions = {}
+    for f in files:
+        u = f.get('url') or ''
+        if _is_fine(u):
+            sessions.setdefault(f.get('mjd') or u, []).append(u)
+    if not sessions:
+        return {'catalog_sessions': 0, 'hosted_sessions': 0,
+                'probed_sessions': 0}
+
+    now = _time.time()
+    hosted = 0
+    probed = 0
+    for mjd, urls in list(sessions.items())[:8]:
+        probed += 1
+        ok_any = False
+        for u in urls[:2]:
+            hit = _fine_probe_cache.get(u)
+            if hit and now - hit[0] < 1800:
+                if hit[1]:
+                    ok_any = True
+                    break
+                continue
+            ok = False
+            try:
+                _ur.urlopen(_ur.Request(
+                    u, headers={'User-Agent': 'BackyardSETI/1.0'},
+                    method='HEAD'), timeout=10)
+                ok = True
+            except _uerr.HTTPError as he:
+                if he.code == 404:
+                    for i in range(10):
+                        alt = _re.sub(r'blpd\d+\.ssl', 'blpd%d.ssl' % i, u)
+                        if alt == u:
+                            continue
+                        try:
+                            _ur.urlopen(_ur.Request(
+                                alt, headers={'User-Agent': 'BackyardSETI/1.0'},
+                                method='HEAD'), timeout=10)
+                            ok = True
+                            break
+                        except Exception:
+                            continue
+            except Exception:
+                pass
+            _fine_probe_cache[u] = (now, ok)
+            if ok:
+                ok_any = True
+                break
+        if ok_any:
+            hosted += 1
+    return {'catalog_sessions': len(sessions), 'hosted_sessions': hosted,
+            'probed_sessions': probed}
+
+
 @app.route('/api/blsearch')
 def api_blsearch():
     """Proxy search to Berkeley SETI open data API.
@@ -450,6 +521,7 @@ def api_blsearch():
                  .upper() == want]
         data['raw_count'] = len(files)
         data['data'] = exact
+        data['fine'] = _bl_fine_availability(exact)
     return jsonify(data)
 
 
@@ -2057,6 +2129,16 @@ def api_download():
     if not url or not filename:
         return jsonify({'error': 'Missing url or filename'}), 400
     
+    # Fine-res only: mid/time/coarse data cannot support narrowband
+    # drifting-tone SETI science (~3 kHz bins smear Doppler drift), so
+    # downloading it is blocked at the API, not just hidden in the UI.
+    _fine_ok = ('_fine.' in filename
+                or ('guppi_' in filename and '.0000.' in filename))
+    if not _fine_ok:
+        return jsonify({'error': 'Fine-res files only: mid/time/coarse data '
+            'cannot support narrowband SETI science and downloads are '
+            'restricted.'}), 400
+
     # Determine target directory based on resolution and format in filename
     if '_fine.' in filename:
         target_dir = FINE_DIR
