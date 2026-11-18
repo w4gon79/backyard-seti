@@ -733,6 +733,7 @@ function renderBLResults() {
     html += '</select>';
     html += '</div>';
 
+    html += '<style>.bl-table tr.dead-row td{color:#546e7a !important;}</style>';
     html += '<table class="bl-table"><thead><tr>';
     html += '<th>MJD</th><th>Date</th><th>Target</th><th>RA</th><th>Dec</th><th>Type</th><th>Res</th><th>Size</th><th>DL</th>';
     html += '</tr></thead><tbody>';
@@ -761,7 +762,9 @@ function renderBLResults() {
             if (mjdKey && window._fineSess[mjdKey] === false) sessDead = true;
         }
 
-        html += '<tr onclick="onBLRowClick(\'' + sn + '\',' + rH + ',' + dD + ')"' + (sessDead ? ' style="opacity:0.5;"' : '') + '>';
+        // Dim by color, NOT opacity: opacity creates a stacking context that
+        // paints the row over the sticky table header.
+        html += '<tr onclick="onBLRowClick(\'' + sn + '\',' + rH + ',' + dD + ')"' + (sessDead ? ' class="dead-row"' : '') + '>';
         var mjdVal = obs.mjd || obs.tstart || 0;
         html += '<td>' + (mjdVal ? mjdVal.toFixed(4) : '?') + '</td>';
         html += '<td>' + (mjdVal ? mjdToDate(mjdVal) : '?') + '</td>';
