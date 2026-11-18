@@ -423,8 +423,10 @@ def _bl_fine_availability(files):
     """Fine-res availability for a BL target: catalog sessions vs sessions
     actually served. BL catalog URLs go stale (dead blpdN hosts), so one
     fine file per MJD session gets a HEAD probe (with mirror fallback),
-    capped and cached, to tell 'listed but not served' from 'downloadable'.
-    Mid/time/coarse rows are ignored: the dashboard is fine-res only."""
+    cached, to tell 'listed but not served' from 'downloadable'. Every
+    session is probed (Joel's call: exhaustive and slow beats a fast
+    sample that can false-negative). Mid/time/coarse rows are ignored:
+    the dashboard is fine-res only."""
     import re as _re
     import time as _time
     import urllib.request as _ur
@@ -445,10 +447,10 @@ def _bl_fine_availability(files):
     now = _time.time()
     hosted = 0
     probed = 0
-    for mjd, urls in list(sessions.items())[:8]:
+    for mjd, urls in sessions.items():
         probed += 1
         ok_any = False
-        for u in urls[:2]:
+        for u in urls[:1]:  # one HEAD per session is enough
             hit = _fine_probe_cache.get(u)
             if hit and now - hit[0] < 1800:
                 if hit[1]:
