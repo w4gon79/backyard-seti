@@ -2152,6 +2152,39 @@ def _enqueue_download(url, filename, target_dir, expected_size=None):
         download_state['active'] = dl_item
         dl_item['status'] = 'downloading'
 
+        # BL catalog URLs go stale: blpd8's /dl2/ data dir is gone (root now
+        # redirects to seti.berkeley.edu) but files live on other blpdN hosts.
+        # On 404, probe the mirror hosts and rewrite dl_item['url'] before
+        # streaming so the whole serialized pipeline keeps working unchanged.
+        import urllib.error as _uerr
+        import re as _re
+        try:
+            urllib.request.urlopen(urllib.request.Request(
+                dl_item['url'], headers={'User-Agent': 'BackyardSETI/1.0'},
+                method='HEAD'), timeout=30)
+        except _uerr.HTTPError as _he:
+            if _he.code == 404:
+                for _i in range(10):
+                    _alt = _re.sub(r'blpd\d+\.ssl', 'blpd%d.ssl' % _i,
+                                   dl_item['url'])
+                    if _alt == dl_item['url']:
+                        continue
+                    try:
+                        urllib.request.urlopen(urllib.request.Request(
+                            _alt, headers={'User-Agent': 'BackyardSETI/1.0'},
+                            method='HEAD'), timeout=30)
+                        dl_item['url'] = _alt
+                        break
+                    except _uerr.HTTPError as _he2:
+                        if _he2.code == 404:
+                            continue
+                        dl_item['url'] = _alt  # server reachable, size may differ
+                        break
+                    except Exception:
+                        continue
+        except Exception:
+            pass  # HEAD best-effort; streaming below reports the real error
+
         try:
             req = urllib.request.Request(dl_item['url'],
                                          headers={'User-Agent': 'BackyardSETI/1.0'})
