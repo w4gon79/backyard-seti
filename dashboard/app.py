@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 app.py - SETI Dashboard backend (Flask)
 
@@ -207,7 +207,7 @@ download_state = {
 }
 
 
-# ─── Routes ────────────────────────────────────────────────────────────
+# â”€â”€â”€ Routes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @app.route('/')
 def index():
@@ -223,7 +223,7 @@ def mission():
     return resp
 
 
-# ─── API: Target Search ───────────────────────────────────────────────
+# â”€â”€â”€ API: Target Search â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def mjd_to_date(mjd_str):
     """Convert MJD string to YYYY-MM-DD date string."""
@@ -597,7 +597,7 @@ def api_blcatalog_sweep_status():
                     'catalog_fine_rows': n_fine})
 
 
-# ─── API: Scan History ────────────────────────────────────────────────
+# â”€â”€â”€ API: Scan History â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _load_scan_meta(scan_dir):
     """Load scan_meta.json from a scan directory."""
@@ -918,7 +918,7 @@ def api_scans_complete(scan_id):
     return jsonify(meta)
 
 
-# ─── API: Scan Results (scan-aware) ───────────────────────────────────
+# â”€â”€â”€ API: Scan Results (scan-aware) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @app.route('/api/results')
 def api_results():
@@ -1018,7 +1018,7 @@ def api_result_file(subpath):
     return jsonify({'error': 'Not found'}), 404
 
 
-# ─── API: File Header Info ────────────────────────────────────────────
+# â”€â”€â”€ API: File Header Info â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @app.route('/api/header')
 def api_header():
@@ -1054,7 +1054,7 @@ def api_header():
         return jsonify({'error': str(e)}), 500
 
 
-# ─── API: Scan Status ─────────────────────────────────────────────────
+# â”€â”€â”€ API: Scan Status â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _check_process_alive(pid):
     """Check if a process with given PID is alive (Windows)."""
@@ -1099,7 +1099,7 @@ def _recover_zombie_scan_state():
 @app.route('/api/scan/status')
 def api_scan_status():
     """Get current scan status with structured progress data."""
-    # ── Zombie scan_state recovery ──
+    # â”€â”€ Zombie scan_state recovery â”€â”€
     _recover_zombie_scan_state()
     # Load scan_meta for additional context
     scan_meta = {}
@@ -1193,7 +1193,7 @@ def api_scan_spectrum():
         return jsonify({'error': str(e), 'spectra': []})
 
 
-# ─── API: Scan Control ────────────────────────────────────────────────
+# â”€â”€â”€ API: Scan Control â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _pipeline_lock_guard():
     """Return (error_dict, 409) if a live fine_res_pipeline holds the results
@@ -1527,16 +1527,40 @@ def api_stars(key):
         with _ur.urlopen('https://gea.esac.esa.int/tap-server/tap/sync?' + params,
                          timeout=45) as r:
             data = json.load(r)
-    except Exception as e:
-        return jsonify({'error': f'Gaia TAP query failed: {e}'}), 502
-    cols = [c['name'] for c in data.get('metadata', [])]
-    if not cols:
-        return jsonify({'error': 'Gaia returned no columns'}), 502
-    i_sid, i_ra, i_dec, i_mag = (cols.index('source_id'), cols.index('ra'),
-                                 cols.index('dec'), cols.index('phot_g_mean_mag'))
-    stars = [{'ra': float(row[i_ra]), 'dec': float(row[i_dec]),
-              'mag': float(row[i_mag]), 'name': f'Gaia DR3 {row[i_sid]}'}
-             for row in data.get('data', [])]
+    except Exception:
+        # ESA Gaia TAP unreachable or serving its ESDC maintenance page
+        # (HTTP 200 + HTML, which json.load chokes on). Fall back to the
+        # IRSA TAP mirror of gaia_dr3_source (CSV; 20 deg cone takes the
+        # server ~60s, so keep a generous timeout). 2026-11-18.
+        import csv as _csv
+        import io as _io
+        adql_irsa = (
+            f"SELECT TOP 300 source_id, ra, dec, phot_g_mean_mag "
+            f"FROM gaia_dr3_source "
+            f"WHERE 1=CONTAINS(POINT('J2000', ra, dec), CIRCLE('J2000', "
+            f"{ra:.5f}, {dec:.5f}, 20)) "
+            f"AND phot_g_mean_mag < 6.5 ORDER BY phot_g_mean_mag ASC")
+        params = _up.urlencode({'REQUEST': 'doQuery', 'LANG': 'ADQL',
+                                'FORMAT': 'csv', 'QUERY': adql_irsa})
+        try:
+            with _ur.urlopen('https://irsa.ipac.caltech.edu/TAP/sync?' + params,
+                             timeout=150) as r:
+                rows = list(_csv.DictReader(_io.StringIO(r.read().decode())))
+        except Exception as e:
+            return jsonify({'error': f'Gaia TAP query failed: {e}'}), 502
+        stars = [{'ra': float(x['ra']), 'dec': float(x['dec']),
+                  'mag': float(x['phot_g_mean_mag']),
+                  'name': f'Gaia DR3 {x["source_id"]}'}
+                 for x in rows]
+    else:
+        cols = [c['name'] for c in data.get('metadata', [])]
+        if not cols:
+            return jsonify({'error': 'Gaia returned no columns'}), 502
+        i_sid, i_ra, i_dec, i_mag = (cols.index('source_id'), cols.index('ra'),
+                                     cols.index('dec'), cols.index('phot_g_mean_mag'))
+        stars = [{'ra': float(row[i_ra]), 'dec': float(row[i_dec]),
+                  'mag': float(row[i_mag]), 'name': f'Gaia DR3 {row[i_sid]}'}
+                 for row in data.get('data', [])]
     if not stars:
         return jsonify({'stars': [], 'target': key, 'live': True})
     cat = {'target': key, 'center_ra': ra, 'center_dec': dec, 'stars': stars}
@@ -1776,13 +1800,13 @@ def api_scan_resume():
                         if len(scan_state['recent_hits']) > 50:
                             scan_state['recent_hits'] = scan_state['recent_hits'][-50:]
                 else:
-                    # No data on readline — check if process is done
+                    # No data on readline â€” check if process is done
                     rc = proc.poll()
                     if rc is not None:
                         scan_state['log_lines'].append(
                             f'[{_log_ts()}] RESUME: Process exited with code {rc}')
                         break
-                    # Process still alive but no output — wait a bit
+                    # Process still alive but no output â€” wait a bit
                     _stall_counter += 1
                     time.sleep(0.2)
                     # If we've been stalled for >60s with no output, log it
@@ -1796,7 +1820,7 @@ def api_scan_resume():
         finally:
             scan_state['active'] = False
             scan_state['pid'] = None
-            # 2026-08-31: same guard as start path — failed/instant-death
+            # 2026-08-31: same guard as start path â€” failed/instant-death
             # runs must never be marked complete or imported (UGCA127_58348).
             _failed_run = (_proc_rc != 0)
             if _failed_run:
@@ -1843,7 +1867,7 @@ def api_scan_resume():
     })
 
 
-# ─── API: Delete File ─────────────────────────────────────────────────
+# â”€â”€â”€ API: Delete File â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @app.route('/api/delete', methods=['POST'])
 def api_delete():
@@ -1882,7 +1906,7 @@ def api_delete():
         return jsonify({'error': str(e)}), 500
 
 
-# ─── API: File Download ───────────────────────────────────────────────
+# â”€â”€â”€ API: File Download â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 # ---------------------------------------------------------------------------
 # API: Epoch Archive (3B) - move staged h5 files to the D: per-target archive
@@ -2365,7 +2389,7 @@ def api_download_status():
     })
 
 
-# ������ Epoch Audit (RFI zone scan) ����������������������������������
+# ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ Epoch Audit (RFI zone scan) ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 audit_state = {'active': False, 'epoch': None, 'stage': '', 'progress': 0,
                'total': 0, 'result': None, 'error': None}
 
@@ -2463,7 +2487,7 @@ def api_download_cancel():
     return jsonify({'error': 'Download not found'}), 404
 
 
-# ─── API: Statistics ──────────────────────────────────────────────────
+# â”€â”€â”€ API: Statistics â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _complete_scan_meta(scan_id, duration_s=0):
     """Update scan_meta.json with final stats after scan completes."""
@@ -2574,7 +2598,7 @@ def api_stats():
     })
 
 
-# ─── API: ON/OFF Rejection ────────────────────────────────────────────
+# â”€â”€â”€ API: ON/OFF Rejection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @app.route('/api/reject', methods=['POST'])
 def api_reject():
@@ -2732,7 +2756,7 @@ def api_rejection_results():
     return jsonify({'error': 'No rejection results found'}), 404
 
 
-# ─── API: Barycentric Correction ─────────────────────────────────────
+# â”€â”€â”€ API: Barycentric Correction â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 # === Barycentric busy guard: one operation per scan at a time ===
 # Without this, delete during an active correction hits WinError 32 on
@@ -2965,7 +2989,7 @@ def api_barycentric_results(scan_id):
     })
 
 
-# ─── Cross-Epoch Cache Helpers ──────────────────────────────────────
+# â”€â”€â”€ Cross-Epoch Cache Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _cross_epoch_cache_dir():
     """Return the cross-epoch cache directory, creating it if needed."""
@@ -3185,7 +3209,7 @@ def api_barycentric_delete(scan_id):
     """Delete barycentric correction data for a scan.
     
     Removes the entire barycentric/ subdirectory and all corrected data.
-    The scan itself is not affected — correction can be re-run later.
+    The scan itself is not affected â€” correction can be re-run later.
     """
     if not re.match(r'^[A-Za-z0-9_-]+$', scan_id):
         return jsonify({'error': 'Invalid scan_id'}), 400
@@ -3427,7 +3451,7 @@ def api_barycentric_targets():
                      'corrected_scans_status': corrected_scans_status})
 
 
-# ─── API: Waterfall Data ─────────────────────────────────────────────
+# â”€â”€â”€ API: Waterfall Data â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @app.route('/api/waterfall')
 def api_waterfall():
@@ -3556,7 +3580,7 @@ def api_waterfall():
         return jsonify({'error': str(e), 'traceback': tb[-500:]}), 500
 
 
-# ─── API: SQLite Database Endpoints ─────────────────────────────────
+# â”€â”€â”€ API: SQLite Database Endpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @app.route('/api/db/stats')
 def api_db_stats():
@@ -3980,7 +4004,7 @@ def api_db_cross_epoch_delete(result_id):
         return jsonify({'error': str(e)}), 500
 
 
-# ─── API: Incoherent Stack ────────────────────────────────────────────
+# â”€â”€â”€ API: Incoherent Stack â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 import uuid as _uuid
 import threading as _threading
@@ -4978,7 +5002,7 @@ def api_stack_delete(job_id):
     return jsonify({'success': True, 'job_id': job_id})
 
 
-# ─── API: RFI Zone Management ────────────────────────────────────────
+# â”€â”€â”€ API: RFI Zone Management â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @app.route('/api/rfi/zones')
 def api_rfi_zones_list():
@@ -5073,7 +5097,7 @@ def api_stack_history():
         return jsonify({'error': str(e)}), 500
 
 
-# ─── API: Stack Peak Classification & Cross-Reference ────────────────
+# â”€â”€â”€ API: Stack Peak Classification & Cross-Reference â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @app.route('/api/stack/peaks/<job_id>/classify')
 def api_stack_classify(job_id):
@@ -5192,7 +5216,7 @@ def api_stack_classify(job_id):
                     zoned_reason = f"RFI zone {z.get('f_start')}-{z.get('f_stop')} MHz"
                     break
 
-            # Check OFF contamination: count OFF hits within ±off_tol
+            # Check OFF contamination: count OFF hits within Â±off_tol
             # (in-memory bisect over the preloaded arrays)
             off_count = 0
             off_max_snr = 0
@@ -5302,7 +5326,7 @@ def api_stack_classify(job_id):
 def api_stack_crossref(job_id):
     """Cross-reference stack peaks against cross_epoch_candidates.
 
-    Matches peak frequencies within ±tolerance (default 1 kHz = 0.001 MHz)
+    Matches peak frequencies within Â±tolerance (default 1 kHz = 0.001 MHz)
     against known cross-epoch candidates from the database.
     """
     try:
@@ -5382,7 +5406,7 @@ def api_stack_crossref(job_id):
         return jsonify({'error': str(e)}), 500
 
 
-# ─── API: Stacked Peak Waterfall (single epoch vs stacked comparison) ──
+# â”€â”€â”€ API: Stacked Peak Waterfall (single epoch vs stacked comparison) â”€â”€
 
 @app.route('/api/stack/peaks/<job_id>/stacked_waterfall')
 def api_stack_stacked_waterfall(job_id):
@@ -5597,7 +5621,7 @@ def api_stack_stacked_waterfall(job_id):
     })
 
 
-# ─── API: Two-Layer Barycentric Filter Pipeline ─────────────────────
+# â”€â”€â”€ API: Two-Layer Barycentric Filter Pipeline â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 _two_layer_jobs = {}  # job_id -> {thread, status, progress, msg, result, ...}
 TWO_LAYER_OUTPUT_DIR = os.path.join(SETI_ROOT, 'results', 'two_layer')
@@ -5651,7 +5675,7 @@ def api_two_layer_run():
 
     def run_thread():
         try:
-            # ─── Imports ────────────────────────────────────────────
+            # â”€â”€â”€ Imports â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             sys.path.insert(0, SETI_ROOT)
             sys.path.insert(0, os.path.join(SETI_ROOT, 'src'))
             sys.path.insert(0, os.path.join(SETI_ROOT, 'ml'))
@@ -5662,7 +5686,7 @@ def api_two_layer_run():
             from ml.two_layer_pipeline import get_scan_dirs, targeted_stack
             epochs_avail = get_available_epochs(target)
 
-            # ─── Determine epochs ──────────────────────────────────
+            # â”€â”€â”€ Determine epochs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             # Only use epochs that have barycentrically-corrected scan data
             # Map scan dirs to epoch labels by reading the combined_corrected.json
             scan_dirs = get_scan_dirs(target)
@@ -5699,7 +5723,7 @@ def api_two_layer_run():
                 )
                 return
 
-            # ─── Layer 1: Cross-Epoch Barycentric Filter ───────────
+            # â”€â”€â”€ Layer 1: Cross-Epoch Barycentric Filter â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             job_state['phase'] = 'filter_start'
             job_state['progress'] = 5
             job_state['progress_msg'] = f'Layer 1: Filtering {len(scan_dirs)} scans ({len(epoch_labels)} epochs)...'
@@ -5737,7 +5761,7 @@ def api_two_layer_run():
             )
             job_state['candidates_found'] = len(candidates)
 
-            # ─── Layer 2: Targeted Stack (if candidates exist) ─────
+            # â”€â”€â”€ Layer 2: Targeted Stack (if candidates exist) â”€â”€â”€â”€â”€
             if len(candidates) == 0:
                 job_state['phase'] = 'complete'
                 job_state['progress'] = 100
@@ -5856,7 +5880,7 @@ def api_two_layer_run():
                 if r.get('peaks')
             )
 
-            # ─── Layer 2.5: Automated RFI Scorecard ─────────────────
+            # â”€â”€â”€ Layer 2.5: Automated RFI Scorecard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             job_state['phase'] = 'scorecard'
             job_state['progress'] = 97
             job_state['progress_msg'] = 'Running RFI scorecard analysis...'
@@ -6120,7 +6144,7 @@ def api_two_layer_results(job_id):
     return jsonify(slim_result)
 
 
-# ─── Main ─────────────────────────────────────────────────────────────
+# â”€â”€â”€ Main â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 # Ensure DB schema is up to date (creates stack_jobs table if missing)
 try:
