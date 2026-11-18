@@ -447,6 +447,7 @@ def _bl_fine_availability(files):
     now = _time.time()
     hosted = 0
     probed = 0
+    session_status = {}
     for mjd, urls in sessions.items():
         probed += 1
         ok_any = False
@@ -483,10 +484,11 @@ def _bl_fine_availability(files):
             if ok:
                 ok_any = True
                 break
+        session_status[str(mjd)] = bool(ok_any)
         if ok_any:
             hosted += 1
     return {'catalog_sessions': len(sessions), 'hosted_sessions': hosted,
-            'probed_sessions': probed}
+            'probed_sessions': probed, 'session_status': session_status}
 
 
 @app.route('/api/blsearch')

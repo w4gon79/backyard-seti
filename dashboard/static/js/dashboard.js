@@ -430,6 +430,7 @@ async function searchBL() {
 // If zero probed fine sessions are hosted, say so plainly; fine-res only
 // means nothing is downloadable for the target right now.
 function blFineBanner(fine) {
+    window._fineSess = (fine && fine.session_status) || null;
     var d = document.getElementById('bl-search-results');
     var old = document.getElementById('fine-avail-banner');
     if (old) old.remove();
@@ -752,7 +753,15 @@ function renderBLResults() {
         else if (obsUrl.indexOf('_coarse.') !== -1) resDisplay = 'coarse';
         var fname = obsUrl.split('/').pop();
 
-        html += '<tr onclick="onBLRowClick(\'' + sn + '\',' + rH + ',' + dD + ')">';
+        // Per-session availability from the exhaustive probe: a fine file
+        // whose session is dead (404 on every BL host) shows as DEAD, no DL.
+        var sessDead = false;
+        if (resDisplay === 'fine' && window._fineSess) {
+            var mjdKey = String(obs.mjd || obs.tstart || '');
+            if (mjdKey && window._fineSess[mjdKey] === false) sessDead = true;
+        }
+
+        html += '<tr onclick="onBLRowClick(\'' + sn + '\',' + rH + ',' + dD + ')"' + (sessDead ? ' style="opacity:0.5;"' : '') + '>';
         var mjdVal = obs.mjd || obs.tstart || 0;
         html += '<td>' + (mjdVal ? mjdVal.toFixed(4) : '?') + '</td>';
         html += '<td>' + (mjdVal ? mjdToDate(mjdVal) : '?') + '</td>';
@@ -763,8 +772,10 @@ function renderBLResults() {
         html += '<td>' + resDisplay + '</td>';
         html += '<td>' + (sz ? (sz / 1e9).toFixed(1) + ' GB' : '?') + '</td>';
         var isFine = resDisplay === 'fine';
-        if (obsUrl && isFine) {
+        if (obsUrl && isFine && !sessDead) {
             html += '<td><button class="dl-btn" onclick="event.stopPropagation();downloadFile(\'' + obsUrl + '\',\'' + fname + '\')" title="Download fine-res">\u2b07</button></td>';
+        } else if (sessDead) {
+            html += '<td style="color:#ef5350;" title="404 on every BL host (probed)">DEAD</td>';
         } else {
             html += '<td style="color:#546e7a;">' + (obsUrl ? '\u00d7' : '\u2014') + '</td>';
         }
